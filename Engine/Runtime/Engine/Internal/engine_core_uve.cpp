@@ -11,6 +11,7 @@
 
 #include "uve/core/engine_core_uve.h"
 
+#include "uve/core/frame_pacing_uve.h"
 #include "uve/asset/legacy_extension_migration_uve.h"
 #include "uve/asset/png_metadata_uve.h"
 
@@ -2701,25 +2702,24 @@ void EngineCoreUVE::EndFrame() {
 
 void EngineCoreUVE::TickFrameUVE() {
     UVE_ASSERT(m_state == EngineStateUVE::Running);
-    const std::uint32_t frameRateCap =
-        m_windowedRenderingActiveUVE && m_windowManager != nullptr
-            ? (m_windowManager->IsFocusedUVE() ? m_config.focusedFrameRateCapUVE
-                                               : m_config.unfocusedFrameRateCapUVE)
-            : 0U;
-    if (frameRateCap == 0U) {
+    const bool windowedRenderingActive = m_windowedRenderingActiveUVE && m_windowManager != nullptr;
+    const bool focused = windowedRenderingActive && m_windowManager->IsFocusedUVE();
+    const std::uint32_t frameRateCap = SelectFrameRateCapUVE(
+        windowedRenderingActive, focused, m_config.focusedFrameRateCapUVE,
+        m_config.unfocusedFrameRateCapUVE);
+    auto now = std::chrono::steady_clock::now();
+    const FramePacingDecisionUVE pacingDecision = ComputeFramePacingDecisionUVE(
+        frameRateCap, m_lastFrameRateCapUVE, m_nextFrameDeadlineUVE, now);
+    if (pacingDecision.frameRateCap == 0U) {
         m_nextFrameDeadlineUVE.reset();
         m_lastFrameRateCapUVE = 0U;
     } else {
-        const auto framePeriod = std::chrono::duration_cast<std::chrono::steady_clock::duration>(
-            std::chrono::duration<double>{1.0 / static_cast<double>(frameRateCap)});
-        auto now = std::chrono::steady_clock::now();
-        if (m_nextFrameDeadlineUVE.has_value() && m_lastFrameRateCapUVE == frameRateCap &&
-            now < *m_nextFrameDeadlineUVE) {
-            std::this_thread::sleep_until(*m_nextFrameDeadlineUVE);
+        if (pacingDecision.sleepUntil.has_value()) {
+            std::this_thread::sleep_until(*pacingDecision.sleepUntil);
             now = std::chrono::steady_clock::now();
         }
-        m_nextFrameDeadlineUVE = now + framePeriod;
-        m_lastFrameRateCapUVE = frameRateCap;
+        m_nextFrameDeadlineUVE = now + pacingDecision.framePeriod;
+        m_lastFrameRateCapUVE = pacingDecision.frameRateCap;
     }
     BeginFrame();
     Update();

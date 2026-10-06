@@ -85,6 +85,7 @@ add_executable(uve_core_tests
     Config/config_manager_uve_tests.cpp
     Config/settings_registry_uve_tests.cpp
     Engine/engine_settings_layering_uve_tests.cpp
+    Engine/frame_pacing_uve_tests.cpp
     Network/reliable_packet_window_uve_tests.cpp
     Plugins/plugin_registry_uve_tests.cpp
     ProjectCheck/project_checker_uve_tests.cpp

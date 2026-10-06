@@ -378,8 +378,9 @@ on this Linux build.
       that consumes/enforces them; GLFW desktop windows cannot request display rotation.
 - [/] V-sync mode: off, on, adaptive, mailbox. Vulkan present-mode selection and GLFW fallbacks are
       wired; native behavior could not be exercised in this environment.
-- [/] Frame rate cap, separate caps for focused and unfocused windows. Runtime deadline pacing is
-      wired but does not yet have timing-specific integration coverage.
+- [/] Frame rate cap, separate caps for focused and unfocused windows. Runtime uses deterministic
+      cap-selection/deadline decisions with boundary tests; actual sleep timing still needs native
+      window integration coverage.
 - [/] Allow display sleep / keep screen on. Windows uses the display-power API, macOS holds an
       IOPM assertion, and Linux requests a logind `idle` inhibitor through optional libsystemd.
       Platforms without a supported native API (or Linux builds without libsystemd/logind) warn and
