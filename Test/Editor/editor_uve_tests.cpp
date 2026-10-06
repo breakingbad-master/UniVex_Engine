@@ -1000,12 +1000,12 @@ TEST(EditorUVETest, SessionSettingsUVE_ReadsValuesSavedUnderTheOldNodeKeys) {
         editor.InitUVE();
         EXPECT_EQ(editor.GetEditorSettingUVE(Id::kNewObjectsUnderSelectionUVE), Config::SettingValueUVE{false});
         EXPECT_EQ(editor.GetEditorSettingUVE(Id::kNewObjectPlacementUVE), placement(EditorNewObjectPlacementUVE::ViewFocus));
-        // The value moved to the new name; the old one is left exactly as the file had it.
+        // The registry migrates to the new ids and removes the old aliases on load.
         EXPECT_EQ(settings.GetBoolUVE("editor.objects.addUnderSelection", true), false);
         EXPECT_EQ(settings.GetIntUVE("editor.objects.placement", -1),
                   static_cast<std::int64_t>(EditorNewObjectPlacementUVE::ViewFocus));
-        EXPECT_EQ(settings.GetIntUVE("editor.nodes.placement", -1),
-                  static_cast<std::int64_t>(EditorNewObjectPlacementUVE::ViewFocus));
+        EXPECT_FALSE(settings.HasKeyUVE("editor.nodes.addUnderSelection"));
+        EXPECT_FALSE(settings.HasKeyUVE("editor.nodes.placement"));
         editor.ShutdownUVE();
     }
 
@@ -1050,8 +1050,8 @@ TEST(EditorUVETest, EditorSettingsUVE_DescriptorDefaultsMatchTheEditorsOwnDefaul
         ASSERT_EQ(registry.GetCountUVE(),
                   37U + std::size(kRenamedSettingIdsUVE) + (2U * editor.GetEditorCommandsUVE().size()));
         for (const Config::SettingDescriptorUVE* descriptor : registry.GetAllUVE()) {
-            // A renamed setting's old name has no member behind it: it is read once at load by
-            // MigrateRenamedSettingIdsUVE, not a preference with a value of its own.
+            // A renamed setting's old name is only a migration alias; the registry moves its value
+            // to the replacement before normal settings are applied.
             if (descriptor->HasFlagUVE(Config::kSettingFlagDeprecatedUVE)) {
                 continue;
             }

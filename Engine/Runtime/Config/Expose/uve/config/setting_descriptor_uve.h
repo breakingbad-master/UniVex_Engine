@@ -12,6 +12,9 @@
 
 namespace UVE::Config {
 
+/// Root-level metadata key reserved for the settings document schema version.
+inline constexpr std::string_view kSettingsDocumentVersionKeyUVE = "version";
+
 /// What kind of value a setting holds. Each maps onto the scalar store (IConfigManagerUVE): a
 /// colour is stored as one number per channel under `<id>.r`, `.g`, `.b` (and `.a`), a vector as
 /// one per component under `<id>.x`, `.y`, `.z`.
@@ -100,6 +103,9 @@ struct SettingDescriptorUVE final {
     /// Where it appears in the settings tree, as a slash path, e.g. "Editor/Viewport/Grid".
     std::string category;
     std::uint32_t flags = kSettingFlagNoneUVE;
+    /// For a Deprecated descriptor, the live setting that replaces this old id. Its stored value
+    /// is read through the replacement and migrated to that id on the next document load/save.
+    std::string replacementId;
 
     [[nodiscard]] bool HasFlagUVE(const SettingFlagUVE flag) const noexcept { return (flags & flag) != 0U; }
 };

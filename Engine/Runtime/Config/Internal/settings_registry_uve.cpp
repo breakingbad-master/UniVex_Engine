@@ -166,6 +166,27 @@ constexpr double kNoValueUVE = std::numeric_limits<double>::quiet_NaN();
     return std::nullopt;
 }
 
+[[nodiscard]] std::optional<SettingValueUVE> GetValidStoredValueUVE(const SettingDescriptorUVE& descriptor,
+                                                                    const IConfigManagerUVE& store) {
+    std::optional<SettingValueUVE> stored = ReadStoredUVE(descriptor, store);
+    if (!stored || !IsSettingValueValidUVE(descriptor, *stored)) {
+        return std::nullopt;
+    }
+    return NormalizeUVE(descriptor, std::move(*stored));
+}
+
+[[nodiscard]] bool ClearDescriptorValueUVE(IConfigManagerUVE& store, const SettingDescriptorUVE& descriptor) {
+    const std::string_view components = ComponentKeysUVE(descriptor.type);
+    if (components.empty()) {
+        return store.RemoveKeyUVE(descriptor.id);
+    }
+    bool removed = false;
+    for (const char component : components) {
+        removed = store.RemoveKeyUVE(ChannelKeyUVE(descriptor.id, component)) || removed;
+    }
+    return removed;
+}
+
 [[nodiscard]] SettingDescriptorUVE MakeSettingUVE(std::string id, const SettingTypeUVE type,
                                                   SettingValueUVE defaultValue, std::string displayName,
                                                   std::string category, std::string tooltip) {
@@ -222,6 +243,17 @@ bool IsSettingValueValidUVE(const SettingDescriptorUVE& descriptor, const Settin
 std::string ValidateSettingDescriptorUVE(const SettingDescriptorUVE& descriptor) {
     if (!IsPathUVE(descriptor.id, '.', false)) {
         return "id '" + descriptor.id + "' is not a dot path of letters, digits and underscores";
+    }
+    if (descriptor.id == kSettingsDocumentVersionKeyUVE || descriptor.id.starts_with("version.")) {
+        return "'" + descriptor.id + "' conflicts with the reserved document version key";
+    }
+    if (!descriptor.replacementId.empty()) {
+        if (!descriptor.HasFlagUVE(kSettingFlagDeprecatedUVE)) {
+            return "'" + descriptor.id + "' has a replacement id but is not Deprecated";
+        }
+        if (!IsPathUVE(descriptor.replacementId, '.', false) || descriptor.replacementId == descriptor.id) {
+            return "'" + descriptor.id + "' has a malformed or self-referential replacement id";
+        }
     }
     const bool numeric = descriptor.type == SettingTypeUVE::Int || descriptor.type == SettingTypeUVE::Float ||
                          descriptor.type == SettingTypeUVE::Vector3;
@@ -339,6 +371,13 @@ bool SettingsRegistryUVE::RegisterUVE(SettingDescriptorUVE descriptor) {
     if (!ValidateSettingDescriptorUVE(descriptor).empty() || m_byId.contains(descriptor.id)) {
         return false;
     }
+    if (!descriptor.replacementId.empty()) {
+        const SettingDescriptorUVE* const replacement = FindUVE(descriptor.replacementId);
+        if (replacement == nullptr || replacement->HasFlagUVE(kSettingFlagDeprecatedUVE) ||
+            replacement->type != descriptor.type) {
+            return false;
+        }
+    }
     // Where the setting's values sit in the document: at its id, or for a composite at its
     // component keys (a colour's alpha reserved even when unused). A composite's id is therefore
     // an object, and other settings may live beside its components, e.g. "outline" and
@@ -438,6 +477,11 @@ bool SettingsRegistryUVE::SetValueUVE(IConfigManagerUVE& store, const std::strin
         break;
     }
     }
+    for (const auto& candidate : m_descriptors) {
+        if (candidate->HasFlagUVE(kSettingFlagDeprecatedUVE) && candidate->replacementId == descriptor->id) {
+            static_cast<void>(ClearDescriptorValueUVE(store, *candidate));
+        }
+    }
     return true;
 }
 
@@ -451,13 +495,13 @@ bool SettingsRegistryUVE::ClearValueUVE(IConfigManagerUVE& store, const std::str
     if (descriptor == nullptr) {
         return false;
     }
-    const std::string_view components = ComponentKeysUVE(descriptor->type);
-    if (components.empty()) {
-        return store.RemoveKeyUVE(descriptor->id);
-    }
-    bool removed = false;
-    for (const char component : components) {
-        removed = store.RemoveKeyUVE(ChannelKeyUVE(descriptor->id, component)) || removed;
+    bool removed = ClearDescriptorValueUVE(store, *descriptor);
+    if (!descriptor->HasFlagUVE(kSettingFlagDeprecatedUVE)) {
+        for (const auto& candidate : m_descriptors) {
+            if (candidate->HasFlagUVE(kSettingFlagDeprecatedUVE) && candidate->replacementId == descriptor->id) {
+                removed = ClearDescriptorValueUVE(store, *candidate) || removed;
+            }
+        }
     }
     return removed;
 }
@@ -468,11 +512,47 @@ std::optional<SettingValueUVE> SettingsRegistryUVE::GetStoredValueUVE(const ICon
     if (descriptor == nullptr) {
         return std::nullopt;
     }
-    std::optional<SettingValueUVE> stored = ReadStoredUVE(*descriptor, store);
-    if (!stored || !IsSettingValueValidUVE(*descriptor, *stored)) {
+    if (std::optional<SettingValueUVE> stored = GetValidStoredValueUVE(*descriptor, store)) {
+        return stored;
+    }
+    if (descriptor->HasFlagUVE(kSettingFlagDeprecatedUVE)) {
         return std::nullopt;
     }
-    return NormalizeUVE(*descriptor, std::move(*stored));
+    for (const auto& alias : m_descriptors) {
+        if (!alias->HasFlagUVE(kSettingFlagDeprecatedUVE) || alias->replacementId != descriptor->id) {
+            continue;
+        }
+        const std::optional<SettingValueUVE> legacy = GetValidStoredValueUVE(*alias, store);
+        if (legacy && IsSettingValueValidUVE(*descriptor, *legacy)) {
+            return NormalizeUVE(*descriptor, *legacy);
+        }
+    }
+    return std::nullopt;
+}
+
+bool SettingsRegistryUVE::MigrateDeprecatedValuesUVE(IConfigManagerUVE& store) const {
+    bool changed = false;
+    for (const auto& alias : m_descriptors) {
+        if (!alias->HasFlagUVE(kSettingFlagDeprecatedUVE) || alias->replacementId.empty()) {
+            continue;
+        }
+        const SettingDescriptorUVE* const replacement = FindUVE(alias->replacementId);
+        if (replacement == nullptr || replacement->HasFlagUVE(kSettingFlagDeprecatedUVE)) {
+            continue; // registration prevents this; remain defensive if the registry changes later
+        }
+        const std::optional<SettingValueUVE> current = GetValidStoredValueUVE(*replacement, store);
+        const std::optional<SettingValueUVE> legacy = GetValidStoredValueUVE(*alias, store);
+        if (current) {
+            changed = ClearDescriptorValueUVE(store, *alias) || changed;
+        } else if (legacy && IsSettingValueValidUVE(*replacement, *legacy)) {
+            if (NormalizeUVE(*replacement, *legacy) == replacement->defaultValue) {
+                changed = ClearValueUVE(store, replacement->id) || changed;
+            } else if (SetValueUVE(store, replacement->id, NormalizeUVE(*replacement, *legacy))) {
+                changed = true;
+            }
+        }
+    }
+    return changed;
 }
 
 bool SettingsRegistryUVE::IsModifiedUVE(const IConfigManagerUVE& store, const std::string_view id) const {

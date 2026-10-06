@@ -57,9 +57,8 @@ inline constexpr std::string_view kHierarchyIndentWidthUVE = "editor.hierarchy.i
 } // namespace EditorSettingIdUVE
 
 /// One setting id that was renamed, and the id it now has. A settings file written before the
-/// rename still carries the old key; the editor moves its value across once at load, so the
-/// author keeps their choice (see the flag descriptions on the alias descriptors in
-/// RegisterEditorSettingsUVE and MigrateRenamedSettingIdsUVE).
+/// rename still carries the old key; the registry's Deprecated alias migrates its value to the new
+/// id on load, so the author keeps their choice.
 struct RenamedSettingIdUVE final {
     std::string_view oldId;
     std::string_view newId;

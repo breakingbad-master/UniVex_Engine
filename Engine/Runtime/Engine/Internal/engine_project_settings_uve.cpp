@@ -2,6 +2,7 @@
 
 #include "uve/core/engine_project_settings_uve.h"
 
+#include <algorithm>
 #include <cstdint>
 #include <optional>
 #include <string>
@@ -21,6 +22,16 @@ struct EngineProjectSettingUVE final {
 
 [[nodiscard]] SettingDescriptorUVE RestartRequiredUVE(SettingDescriptorUVE descriptor) {
     descriptor.flags |= Config::kSettingFlagRestartRequiredUVE;
+    return descriptor;
+}
+
+[[nodiscard]] SettingDescriptorUVE PlatformOverrideUVE(SettingDescriptorUVE descriptor) {
+    descriptor.flags |= Config::kSettingFlagPerPlatformUVE;
+    return descriptor;
+}
+
+[[nodiscard]] SettingDescriptorUVE CommandLineOnlyUVE(SettingDescriptorUVE descriptor) {
+    descriptor.flags |= Config::kSettingFlagHiddenUVE | Config::kSettingFlagNotPersistedUVE;
     return descriptor;
 }
 
@@ -60,17 +71,17 @@ struct EngineProjectSettingUVE final {
              config.gravity = Math::Vector3UVE{static_cast<float>(gravity.x), static_cast<float>(gravity.y),
                                                static_cast<float>(gravity.z)};
          }},
-        {RestartRequiredUVE(Config::MakeEnumSettingUVE(
+        {RestartRequiredUVE(PlatformOverrideUVE(Config::MakeEnumSettingUVE(
              std::string(Id::kShadowMapResolutionUVE), static_cast<std::int64_t>(defaults.shadowMapResolution),
              {{512, "512"}, {1024, "1024"}, {2048, "2048"}, {4096, "4096"}}, "Map Resolution", "Rendering/Shadows",
-             "Width and height, in texels, of the directional light's shadow map.")),
+             "Width and height, in texels, of the directional light's shadow map."))),
          [](EngineConfigUVE& config, const SettingValueUVE& value) {
              config.shadowMapResolution = static_cast<std::uint32_t>(std::get<std::int64_t>(value));
          }},
-        {RestartRequiredUVE(Config::MakeEnumSettingUVE(
+        {RestartRequiredUVE(PlatformOverrideUVE(Config::MakeEnumSettingUVE(
              std::string(Id::kShadowFilterUVE), static_cast<std::int64_t>(defaults.shadowPcfKernelRadius),
              {{0, "Hard"}, {1, "Soft (3x3)"}, {2, "Softer (5x5)"}}, "Filter", "Rendering/Shadows",
-             "How shadow edges are softened. Softer costs more samples per pixel.")),
+             "How shadow edges are softened. Softer costs more samples per pixel."))),
          [](EngineConfigUVE& config, const SettingValueUVE& value) {
              config.shadowPcfKernelRadius = static_cast<std::uint32_t>(std::get<std::int64_t>(value));
          }},
@@ -80,6 +91,10 @@ struct EngineProjectSettingUVE final {
          [](EngineConfigUVE& config, const SettingValueUVE& value) {
              config.autoSaveIntervalSecondsUVE = std::get<double>(value);
          }},
+        {RestartRequiredUVE(CommandLineOnlyUVE(Config::MakeBoolSettingUVE(
+             std::string(Id::kHeadlessUVE), defaults.headlessUVE, "Headless", "Application/Runtime",
+             "Run without a visible window. Command-line-only; use --headless."))),
+         [](EngineConfigUVE& config, const SettingValueUVE& value) { config.headlessUVE = std::get<bool>(value); }},
     };
     return settings;
 }
@@ -130,11 +145,26 @@ bool RegisterEngineProjectSettingsUVE(Config::SettingsRegistryUVE& registry) {
     return allRegistered;
 }
 
-void ApplyEngineProjectSettingsUVE(const Config::SettingsDocumentUVE& document, EngineConfigUVE& config) {
+bool IsEngineConfigSettingIdUVE(const std::string_view id) {
+    const auto& settings = GetEngineProjectSettingsUVE();
+    return std::any_of(settings.begin(), settings.end(),
+                       [id](const EngineProjectSettingUVE& setting) { return setting.descriptor.id == id; });
+}
+
+void ApplyEngineSettingsUVE(const Config::SettingsStackUVE& settings, EngineConfigUVE& config) {
     for (const EngineProjectSettingUVE& setting : GetEngineProjectSettingsUVE()) {
-        if (const std::optional<SettingValueUVE> value = document.GetStoredValueUVE(setting.descriptor.id)) {
-            setting.apply(config, *value);
+        if (const std::optional<Config::SettingResolutionUVE> resolved =
+                settings.ResolveUVE(setting.descriptor.id);
+            resolved.has_value() && resolved->source != Config::SettingValueSourceUVE::EngineDefault) {
+            setting.apply(config, resolved->value);
         }
+    }
+}
+
+void ApplyEngineProjectSettingsUVE(const Config::SettingsDocumentUVE& document, EngineConfigUVE& config) {
+    Config::SettingsStackUVE settings(document.GetRegistryUVE());
+    if (settings.AttachLayerUVE(Config::SettingValueSourceUVE::Project, document.GetStoreUVE())) {
+        ApplyEngineSettingsUVE(settings, config);
     }
 }
 

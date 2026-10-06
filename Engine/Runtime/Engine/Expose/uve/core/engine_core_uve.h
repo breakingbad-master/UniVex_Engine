@@ -188,16 +188,12 @@ public:
     EngineCoreUVE(const EngineCoreUVE&) = delete;
     EngineCoreUVE& operator=(const EngineCoreUVE&) = delete;
 
-    /// Constructs and initializes CommandLine, Logger, MemoryManager,
-    /// ThreadPool, Timer, EventSystem, EntityManager, SceneGraph,
-    /// AssetDatabase, ProjectFileIndex, SceneSerializer, PrefabSystem, HotReload, AssetManager,
-    /// AssetImporter, AssetBundle, FileSystem, WindowManager, RenderDevice, ShaderManager, RenderSystem,
-    /// CameraSystem, MeshRenderer, LightSystem, Renderer3D, CollisionSystem, PhysicsSystem, RaycastSystem, InputSystem, AudioDevice, AudioSystem, AudioSourceSystem, SaveGameSystem, CheckpointManager, and ConfigManager in that order (CommandLine first — it
-    /// has no dependencies of its own; immediately after, reads the `--headless` CLI flag via
-    /// CommandLineUVE::HasFlagUVE("headless"), OR'd into EngineConfigUVE::headlessUVE; Logger
-    /// second — every later step and
-    /// every other system may need to log or UVE_ASSERT during its own
-    /// setup; EntityManager right after EventSystem, since it needs
+    /// Constructs CommandLine and Logger first, then loads and resolves the project, user,
+    /// active-platform and command-line settings layers before constructing systems that consume
+    /// EngineConfigUVE. `--headless` is a hidden, NotPersisted boolean setting in the command-line
+    /// layer; project, user and platform stores cannot override it. The remaining services are
+    /// initialized in dependency order; CommandLine is pure parsing, and Logger is ready before
+    /// migrations or settings loads can log. EntityManager follows EventSystem, since it needs
     /// MemoryManager for allocation and EventSystem for entity lifecycle
     /// events; SceneGraph immediately after, though it has no dependencies
     /// of its own; AssetDatabase right after SceneGraph, needing only
@@ -249,9 +245,10 @@ public:
     /// MeshRendererUVE::ExtractRenderQueueUVE()); SaveGameSystem right after, needing
     /// SceneSerializer (composed by reference) and EngineConfigUVE::saveDirectoryPath;
     /// CheckpointManager right after, needing SaveGameSystem (composed by reference) and
-    /// EngineConfigUVE::autoSaveIntervalSecondsUVE; ConfigManager last, so
-    /// its LoadUVE() call can log through the already-initialized Logger),
-    /// then builds EngineServicesUVE from all thirty-four. Transitions
+    /// EngineConfigUVE::autoSaveIntervalSecondsUVE; the ConfigManager store
+    /// is loaded after Logger and before the project/user/platform/command-line
+    /// stack is applied, so effective values are settled before dependent systems
+    /// are constructed; then builds EngineServicesUVE from all thirty-four. Transitions
     /// Uninitialized -> Initializing -> Running.
     void Init();
 

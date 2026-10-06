@@ -398,9 +398,11 @@ void EditorUVE::DrawKeyboardShortcutsWindowUVE() {
         } else {
             for (int key = ImGuiKey_NamedKey_BEGIN; key < ImGuiKey_NamedKey_END; ++key) {
                 if (IsShortcutKeyUVE(key) && ImGui::IsKeyPressed(static_cast<ImGuiKey>(key), false)) {
-                    static_cast<void>(SetEditorCommandShortcutUVE(m_commands[state.listenCommand].id,
-                                                                 state.listenSlot,
-                                                                 EditorShortcutUVE{key, io.KeyCtrl, io.KeyShift, io.KeyAlt}));
+                    const EditorCommandUVE& command = m_commands[state.listenCommand];
+                    const std::string settingId = ShortcutSettingIdUVE(command.id, state.listenSlot);
+                    const Config::SettingValueUVE shortcutValue =
+                        FormatEditorShortcutUVE(EditorShortcutUVE{key, io.KeyCtrl, io.KeyShift, io.KeyAlt});
+                    static_cast<void>(SetEditorSettingUVE(settingId, shortcutValue));
                     state.listening = false;
                     break;
                 }
@@ -477,7 +479,8 @@ void EditorUVE::DrawKeyboardShortcutsWindowUVE() {
                 ImGui::SameLine(0.0F, 4.0F);
                 ImGui::BeginDisabled(command.shortcuts[slot].IsEmptyUVE());
                 if (ImGui::Button("x", ImVec2{ImGui::GetFrameHeight(), 0.0F})) {
-                    command.shortcuts[slot] = EditorShortcutUVE{};
+                    const Config::SettingValueUVE emptyShortcut = std::string{};
+                    static_cast<void>(SetEditorSettingUVE(ShortcutSettingIdUVE(command.id, slot), emptyShortcut));
                 }
                 ImGui::EndDisabled();
                 ImGui::SetItemTooltip("Remove this shortcut");
@@ -485,7 +488,11 @@ void EditorUVE::DrawKeyboardShortcutsWindowUVE() {
             }
             ImGui::TableSetColumnIndex(3);
             if (command.shortcuts != command.defaultShortcuts && ImGui::SmallButton("Reset")) {
-                command.shortcuts = command.defaultShortcuts;
+                for (std::size_t slot = 0U; slot < command.defaultShortcuts.size(); ++slot) {
+                    const Config::SettingValueUVE defaultShortcut =
+                        FormatEditorShortcutUVE(command.defaultShortcuts[slot]);
+                    static_cast<void>(SetEditorSettingUVE(ShortcutSettingIdUVE(command.id, slot), defaultShortcut));
+                }
             }
             ImGui::PopID();
         }

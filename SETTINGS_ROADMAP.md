@@ -28,9 +28,12 @@ state of the codebase today, and the whole reason this roadmap exists.
 third-party engine or product is named here. Where an item exists because mature engines have
 converged on it, that is stated as "the established convention" and described on its own terms.
 
-## Current state, honestly stated
+## Baseline state when this roadmap was first drafted (historical)
 
-The following were confirmed by reading the source while writing this document.
+The following inventory was confirmed when this document was first written. It is retained as
+historical context, **not as a current source audit**; several statements have since been
+superseded by the implementation tracked in Part 0. The remaining roadmap still needs a
+systematic source audit before it can be treated as a complete present-day status report.
 
 **The settings store is a bare JSON dictionary.** `IConfigManagerUVE`
 (`Engine/Runtime/Config/Expose/uve/config/i_config_manager_uve.h`) offers exactly four scalar
@@ -83,14 +86,14 @@ covered by unit tests in `Test/Input/input_system_uve_tests.cpp`, but it has **n
 caller** — nothing in the editor or runtime rebinds an action. There is no input-map asset format
 and no input-map UI.
 
-### The conclusion that orders this entire document
+### The conclusion that ordered the original roadmap
 
-Every settings page described in Parts 1 through 6 sits on top of a settings system that does not
-exist. Building pages first means hand-writing validation, defaults, persistence and UI for each
-of several hundred settings, at their own call sites — which is precisely the pattern the sixteen
-existing editor keys already demonstrate at small scale.
+When this roadmap was drafted, the settings substrate did not exist. Building the several hundred
+settings pages first would have meant hand-writing validation, defaults, persistence and UI at
+each call site — precisely the pattern the original sixteen editor keys demonstrated at small
+scale.
 
-So **Part 0 comes first**, and it is the only part written in full engineering detail.
+That is why **Part 0 comes first** and is written in more engineering detail than the later parts.
 
 ---
 
@@ -114,7 +117,8 @@ and it is written once per setting. Multiply by four hundred settings and the co
 
 - [~] `SettingDescriptorUVE` — the single record describing one setting. Landed in
       `Engine/Runtime/Config` (`setting_descriptor_uve.h`) with bool, int, float, string, enum,
-      colour and vector3; the remaining types and the version fields below are still open.
+      colour and vector3; the remaining setting types and descriptor-level version metadata remain open.
+
   - [x] `id` — the dot path, e.g. `rendering.shadows.softShadowQuality`. The storage key.
   - [~] `type` — bool, int, float/double, string, enum, colour, vector2/3/4, key binding, asset
         reference, file path, layer mask, string list.
@@ -176,38 +180,53 @@ collects them.
 
 ## 0.6 Change notification
 
-- [ ] An observer registration keyed by id or by category prefix, so the viewport can react to
-      `editor.viewport.*` without polling every frame and without the settings layer knowing what
-      a viewport is.
-- [ ] Observers fire only on an actual change in value, not on every write.
-- [ ] Clear documentation of which thread observers run on — the store is already mutex-guarded
-      and callable from any thread, so this is not optional detail.
+- [x] An observer registration keyed by id or by category prefix, so consumers can react without
+      polling and without the settings layer knowing what they are. The shared
+      `SettingsObserverHubUVE` now backs both `SettingsDocumentUVE` and `EditorUVE`; document
+      settings and editor preferences use the same exact-id and slash-boundary category path.
+- [x] Observers fire only when the effective value changes, not on every write. Document Set,
+      Reset, and successful Load notifications report the complete before/after value; editor
+      setting writes and live viewport preference setters likewise suppress no-op notifications.
+      Invalid writes and storage-only cleanup do not produce false change events.
+- [x] The callback thread and re-entrancy contract is documented: callbacks run synchronously on
+      the owner's thread after the value is committed. The owner is not thread-safe, callbacks must
+      stay on that thread, nested mutations dispatch nested events, and unsubscribing an observer
+      before its turn skips it in the current dispatch.
 
 ## 0.7 Layering and override order
 
 - [~] Resolution order, lowest to highest priority: **engine default → project setting → user
-      preference → per-platform override → command-line override**. The project layer exists:
-      `project.uvsettings` is read at the start of `EngineCoreUVE::Init()` and overrides the
-      application's `EngineConfigUVE` wherever it sets a legal value. The user, platform and
-      command-line layers are not stacked on it yet.
-- [ ] `EngineConfigUVE`'s existing command-line overrides become the top layer of this stack
-      rather than a separate mechanism.
-- [~] A query for *where a value came from*. Without it, "I changed the setting and nothing
-      happened" is undebuggable, because a higher layer may be silently winning.
-      `GetStoredValueUVE` answers what one layer contributes (nothing, or a legal value); the
-      query across a full stack comes with the stack.
+      preference → per-platform override → command-line override**. `SettingsStackUVE` resolves the
+      chain, and `EngineCoreUVE::Init()` attaches all four stores before dependent systems initialize.
+      The optional platform file is `platforms/<target>/<settings filename>` beside the user settings
+      path (or an explicit `platformSettingsFilePath`); only `PerPlatform` descriptors use it. The
+      caller's `EngineConfigUVE` remains the base when no valid stored layer wins.
+- [~] Command-line values for registered EngineConfig settings use setting ids directly:
+      `--<setting.id> <value>`; a presence-only bool means true, and `--headless` is the hidden
+      `NotPersisted` CLI-only setting. Parsing and descriptor validation reject bad overrides so
+      lower layers win. EngineCore runtime integration tests are present but remain unrun in the
+      CPU-only build.
+- [x] A query for *where a value came from*. `SettingsStackUVE::ResolveUVE` returns the effective,
+      descriptor-validated value together with its `SettingValueSourceUVE`; invalid high-priority
+      values fall through. Dedicated tests cover every precedence level, provenance, and invalid
+      command-line fallback.
 - [x] Per-layer save targets: user preferences never write into the project file, and vice versa.
       Editor preferences go to `.uvsettings`, project settings to `project.uvsettings`
       (committed; the ignore rule for `*.uvsettings` makes an exception for it).
 
 ## 0.8 Versioning and migration
 
-- [ ] A document version, following the existing session-settings version idiom in
-      `editor_uve.cpp`, which already bumps a version integer alongside the format.
-- [ ] Forward migration steps registered per version, so an old settings file is upgraded on load
-      rather than discarded.
-- [ ] `Deprecated` descriptors read old ids and write the new ones, then stop.
-- [ ] A test that loads a fixture of each historical version and asserts the migrated result.
+- [x] A root-level integer `version` for `SettingsDocumentUVE`. Missing-version files are version 0;
+      successful loads record the current version, while malformed or newer-than-supported versions
+      fail closed without replacing the in-memory document.
+- [x] Forward migration callbacks registered for version N run on a candidate store before it is
+      committed. A failed callback leaves the existing document, path and dirty state unchanged;
+      unregistered steps are identity migrations that still advance the version.
+- [x] A `Deprecated` descriptor can name its live `replacementId`. Reads can fall back to a valid old
+      value; load migrates it to the new id and removes the alias, while a valid new value wins.
+      Editor setting renames now use this shared registry path.
+- [x] Version 0, 1, 2 and current-version fixtures verify forward migration, serialization, alias
+      cleanup, and rejection of future, malformed and failed migrations.
 
 ## 0.9 Enumeration, search and the generic panel
 
@@ -259,12 +278,18 @@ settings, and the inspector should eventually share the mechanism.
        rather than taking its neighbours with it. Still hand-written: the saved and recent colours,
        inspector folds and favourite projects (they need a list type), and the viewport axis
        colours (their defaults belong to the viewport module and are seeded by the host).
-4. [ ] Change notification.
+4. [x] Change notification. The shared `SettingsObserverHubUVE` backs document and editor
+       settings, with exact-id/category subscriptions, effective-value events, owner-scoped handles,
+       and dedicated document/editor regression tests.
 5. [x] The generic settings panel with type-based row renderers (the Editor Preferences window).
-6. [~] Layering, override order, and the "where did this come from" query. The project layer
-       over the application's config; the rest of the stack is open.
+6. [~] Layering, override order, and the "where did this come from" query. `SettingsStackUVE`
+       resolves defaults/project/user/platform/command-line and reports the winner; EngineCore now
+       attaches all four stores before constructing dependent systems. The typed CLI layer and
+       platform-file wiring have EngineCore regression tests, but that integration target was not
+       runnable in the current CPU-only environment.
 7. [x] The project settings file and its layer.
-8. [ ] Versioning and migration.
+8. [x] Versioning and migration. `SettingsDocumentUVE` versions its root document, runs registered
+       forward migrations transactionally, and migrates Deprecated aliases to their replacement ids.
 
 ---
 
@@ -1413,13 +1438,11 @@ If only one thing is built from this document, build this, in this order:
 
 ## 7.3 Honest summary
 
-Of the roughly 640 items in this document, **six are marked `[/]` or `[x]` today**: the
-viewport snap steps and the gizmo axis colours, plus the handful of persisted panel-visibility
-booleans. Everything else is `[ ]`.
-
-That ratio is the finding. This engine does not have a settings system with some settings
-missing; it has a JSON file with sixteen keys in it. Part 0 is not preparatory work before the
-real work — Part 0 **is** the work, and Parts 1 through 6 are what it makes cheap.
+The checklist currently contains 637 items: 63 `[x]` verified, 7 `[/]` wired but not fully
+verified, 42 `[~]` partial, and 525 `[ ]` not started. This is a mechanical count, not a measure
+of effort or completeness, and older status notes have not all been re-audited against the current
+source. This increment advances Part 0.8 and Part 0.11 step 8; Part 0.7's EngineCore integration
+still needs runtime verification in a non-CPU-only build.
 
 ## 7.4 Keeping this document honest
 

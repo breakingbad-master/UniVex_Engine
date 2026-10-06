@@ -94,10 +94,16 @@ struct EngineConfigUVE {
     /// file yet.
     std::filesystem::path settingsFilePath = ".uvsettings";
 
+    /// Optional path to an active-target override file. When empty, EngineCoreUVE loads
+    /// `<settingsFilePath parent>/platforms/<target>/<settingsFilePath filename>` if present;
+    /// target is android, linux, windows, apple, web or unknown. These values only override
+    /// descriptors marked PerPlatform and are kept separate from the user settings file.
+    std::filesystem::path platformSettingsFilePath{};
+
     /// Path of the project's own settings file (see EngineServicesUVE::GetProjectSettingsUVE()),
-    /// read during Init(). Its values override the matching fields of this struct - the tick rate,
-    /// shadow quality and so on - so a project carries its settings with it. A missing file is
-    /// every default, not an error.
+    /// read during Init(). Valid project values override this struct's base values; user,
+    /// per-platform and command-line layers may override them in turn. A missing file changes
+    /// nothing.
     std::filesystem::path projectSettingsFilePath = "project.uvsettings";
 
     /// Path of the project's input map (see Core::InputMapDocumentUVE), read during Init() and
@@ -107,7 +113,10 @@ struct EngineConfigUVE {
     /// Raw startup argument tokens (excluding the program path) that
     /// CommandLineUVE parses during Init(). Populated by main() from
     /// argv[1..argc); left empty by default so tests can construct an
-    /// EngineConfigUVE without a real process argv.
+    /// EngineConfigUVE without a real process argv. A registered EngineConfig
+    /// setting can be overridden as `--<setting.id> <value>`; booleans also
+    /// accept a presence-only flag, enums accept their label or integer value, and
+    /// vectors/colors use comma-separated numbers.
     std::vector<std::string> commandLineArgs = {};
 
     /// Path AssetDatabaseUVE::LoadUVE() is called with during Init(). A
@@ -228,9 +237,10 @@ struct EngineConfigUVE {
 
     /// When true, EngineCoreUVE::Init() constructs Window::NullWindowManagerUVE and
     /// Render::NullRenderDeviceUVE instead of the real GLFW3/OpenGL backends — no window, no GL
-    /// context, safe to run with no display attached (CI, this project's own test suite). Also
-    /// settable via the `--headless` CLI flag (CommandLineUVE::HasFlagUVE("headless")), read and
-    /// OR'd into this field during Init() right after CommandLineUVE is constructed.
+    /// context, safe to run with no display attached (CI, this project's own test suite). The
+    /// hidden, NotPersisted `headless` setting maps the `--headless` presence-only CLI flag into
+    /// the highest-priority command-line layer during Init(); project/user/platform files cannot
+    /// override it.
     bool headlessUVE = false;
 
     /// Title bar text WindowManagerUVE's real backend creates its window with. Unused when

@@ -1875,7 +1875,17 @@ bool EditorUVE::SetTransformSnappingSettingsUVE(const EditorTransformSnappingSet
     if (!IsAuthoringCommandAllowedUVE() || !AreTransformSnappingSettingsValidUVE(settings)) {
         return false;
     }
+    const EditorTransformSnappingSettingsUVE previous = m_transformSnappingSettings;
     m_transformSnappingSettings = settings;
+    m_viewportOverlayState.snapEnabled = settings.enabled;
+    namespace Id = EditorSettingIdUVE;
+    NotifyEditorSettingChangedUVE(Id::kSnapEnabledUVE, previous.enabled, settings.enabled);
+    NotifyEditorSettingChangedUVE(Id::kSnapTranslateStepUVE, static_cast<double>(previous.translateStep),
+                                  static_cast<double>(settings.translateStep));
+    NotifyEditorSettingChangedUVE(Id::kSnapRotateStepDegreesUVE, static_cast<double>(previous.rotateStepDegrees),
+                                  static_cast<double>(settings.rotateStepDegrees));
+    NotifyEditorSettingChangedUVE(Id::kSnapScaleStepUVE, static_cast<double>(previous.scaleStep),
+                                  static_cast<double>(settings.scaleStep));
     return true;
 }
 
@@ -3958,6 +3968,7 @@ std::optional<std::string> EditorUVE::ReadProjectTextFileUVE(const std::filesyst
 
 
 void EditorUVE::SetColorPickerPreferencesUVE(ColorPickerPreferencesUVE preferences) {
+    const bool previousAdvancedOpen = m_colorPickerPreferences.advancedOpen;
     const auto sanitize = [](std::vector<EditorColorUVE>& colors, const std::size_t cap) {
         std::erase_if(colors, [](const EditorColorUVE& color) {
             return !std::isfinite(color.r) || !std::isfinite(color.g) || !std::isfinite(color.b) ||
@@ -3974,6 +3985,8 @@ void EditorUVE::SetColorPickerPreferencesUVE(ColorPickerPreferencesUVE preferenc
     sanitize(preferences.saved, kMaxSavedColorsUVE);
     sanitize(preferences.recents, kMaxRecentColorsUVE);
     m_colorPickerPreferences = std::move(preferences);
+    NotifyEditorSettingChangedUVE(EditorSettingIdUVE::kColorPickerAdvancedOpenUVE, previousAdvancedOpen,
+                                  m_colorPickerPreferences.advancedOpen);
 }
 
 void EditorUVE::ShutdownUVE() {
@@ -4330,9 +4343,9 @@ void EditorUVE::LoadSessionSettingsUVE() {
     if (version > kSessionVersion) {
         return;
     }
-    // A settings file written before a setting was renamed still carries the old key. Move each
-    // such value to its new name once, so the loop below reads one name per setting.
-    MigrateRenamedSettingIdsUVE(config);
+    // Aliases marked Deprecated move their legacy values to the replacement ids before the editor
+    // reads the current descriptors; legal values already at the new ids win.
+    static_cast<void>(m_settingsRegistry.MigrateDeprecatedValuesUVE(config));
     // Every value read through the registry is legal for its setting - anything missing, mistyped
     // or out of range comes back as that one setting's default - so each binding applies it.
     for (const Config::SettingDescriptorUVE* descriptor : m_settingsRegistry.GetAllUVE()) {
@@ -4439,25 +4452,6 @@ void EditorUVE::LoadSessionSettingsUVE() {
                 static_cast<void>(m_contentShelves.AddItemUVE(name, stored));
             }
         }
-    }
-}
-
-void EditorUVE::MigrateRenamedSettingIdsUVE(Config::IConfigManagerUVE& config) {
-    for (const RenamedSettingIdUVE& renamed : kRenamedSettingIdsUVE) {
-        // A value already stored under the new name wins: the rename fallback is only for files
-        // written before it, never a way for a stale key to override a current one.
-        if (m_settingsRegistry.GetStoredValueUVE(config, renamed.newId)) {
-            continue;
-        }
-        const std::optional<Config::SettingValueUVE> legacy =
-            m_settingsRegistry.GetStoredValueUVE(config, renamed.oldId);
-        if (!legacy) {
-            continue; // nothing stored under the old name either
-        }
-        // The alias descriptor carries the current setting's own type and bounds, so the old value
-        // is read the way the new one validates; a stale or hand-edited value that no longer fits
-        // is refused here and the setting keeps its default.
-        static_cast<void>(m_settingsRegistry.SetValueUVE(config, renamed.newId, *legacy));
     }
 }
 

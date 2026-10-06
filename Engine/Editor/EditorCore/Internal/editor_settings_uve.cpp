@@ -183,6 +183,7 @@ const std::vector<EditorSettingBindingUVE>& EditorUVE::GetSettingBindingsUVE() {
          [](const EditorUVE& editor) -> SettingValueUVE { return editor.m_transformSnappingSettings.enabled; },
          [](EditorUVE& editor, const SettingValueUVE& value) {
              editor.m_transformSnappingSettings.enabled = std::get<bool>(value);
+             editor.m_viewportOverlayState.snapEnabled = editor.m_transformSnappingSettings.enabled;
              return true;
          }},
         {Config::MakeFloatSettingUVE(IdUVE(Id::kSnapTranslateStepUVE), snapping.translateStep,
@@ -221,7 +222,8 @@ const std::vector<EditorSettingBindingUVE>& EditorUVE::GetSettingBindingsUVE() {
         {Config::MakeBoolSettingUVE(IdUVE(Id::kGridVisibleUVE), overlay.gridVisible, "Show Grid", kGridCategoryUVE),
          [](const EditorUVE& editor) -> SettingValueUVE { return editor.m_viewportOverlayState.gridVisible; },
          [](EditorUVE& editor, const SettingValueUVE& value) {
-             return editor.SetViewportGridUVE(std::get<bool>(value), editor.m_viewportOverlayState.gridOpacity);
+             editor.m_viewportOverlayState.gridVisible = std::get<bool>(value);
+             return true;
          }},
         {WithStepUVE(Config::MakeFloatSettingUVE(IdUVE(Id::kGridOpacityUVE), overlay.gridOpacity,
                                                  kMinimumViewportGridOpacityUVE, 1.0, "Opacity", kGridCategoryUVE,
@@ -231,7 +233,8 @@ const std::vector<EditorSettingBindingUVE>& EditorUVE::GetSettingBindingsUVE() {
              return static_cast<double>(editor.m_viewportOverlayState.gridOpacity);
          },
          [](EditorUVE& editor, const SettingValueUVE& value) {
-             return editor.SetViewportGridUVE(editor.m_viewportOverlayState.gridVisible, FloatUVE(value));
+             editor.m_viewportOverlayState.gridOpacity = FloatUVE(value);
+             return true;
          }},
         {Config::MakeFloatSettingUVE(IdUVE(Id::kGridCellSizeUVE), overlay.gridCellSize,
                                      kMinimumViewportGridCellSizeUVE, kMaximumViewportGridCellSizeUVE, "Cell Size",
@@ -241,7 +244,8 @@ const std::vector<EditorSettingBindingUVE>& EditorUVE::GetSettingBindingsUVE() {
              return static_cast<double>(editor.m_viewportOverlayState.gridCellSize);
          },
          [](EditorUVE& editor, const SettingValueUVE& value) {
-             return editor.SetViewportGridCellSizeUVE(FloatUVE(value));
+             editor.m_viewportOverlayState.gridCellSize = FloatUVE(value);
+             return true;
          }},
 
         // Selection outline.
@@ -251,9 +255,8 @@ const std::vector<EditorSettingBindingUVE>& EditorUVE::GetSettingBindingsUVE() {
              return editor.m_viewportOverlayState.selectionOutlineVisible;
          },
          [](EditorUVE& editor, const SettingValueUVE& value) {
-             const ViewportOverlayStateUVE& state = editor.m_viewportOverlayState;
-             return editor.SetViewportSelectionOutlineUVE(std::get<bool>(value), state.selectionOutlineColor,
-                                                         state.selectionOutlineThickness);
+             editor.m_viewportOverlayState.selectionOutlineVisible = std::get<bool>(value);
+             return true;
          }},
         {Config::MakeColorSettingUVE(IdUVE(Id::kSelectionOutlineColorUVE),
                                      SettingColorUVE{overlay.selectionOutlineColor.r, overlay.selectionOutlineColor.g,
@@ -264,11 +267,9 @@ const std::vector<EditorSettingBindingUVE>& EditorUVE::GetSettingBindingsUVE() {
              return SettingColorUVE{color.r, color.g, color.b};
          },
          [](EditorUVE& editor, const SettingValueUVE& value) {
-             const ViewportOverlayStateUVE& state = editor.m_viewportOverlayState;
              const auto& color = std::get<SettingColorUVE>(value);
-             return editor.SetViewportSelectionOutlineUVE(state.selectionOutlineVisible,
-                                                         ViewportAxisColorUVE{color.r, color.g, color.b},
-                                                         state.selectionOutlineThickness);
+             editor.m_viewportOverlayState.selectionOutlineColor = ViewportAxisColorUVE{color.r, color.g, color.b};
+             return true;
          }},
         {WithStepUVE(Config::MakeFloatSettingUVE(IdUVE(Id::kSelectionOutlineThicknessUVE),
                                                  overlay.selectionOutlineThickness,
@@ -280,9 +281,8 @@ const std::vector<EditorSettingBindingUVE>& EditorUVE::GetSettingBindingsUVE() {
              return static_cast<double>(editor.m_viewportOverlayState.selectionOutlineThickness);
          },
          [](EditorUVE& editor, const SettingValueUVE& value) {
-             const ViewportOverlayStateUVE& state = editor.m_viewportOverlayState;
-             return editor.SetViewportSelectionOutlineUVE(state.selectionOutlineVisible, state.selectionOutlineColor,
-                                                         FloatUVE(value));
+             editor.m_viewportOverlayState.selectionOutlineThickness = FloatUVE(value);
+             return true;
          }},
 
         // New objects.
@@ -470,12 +470,48 @@ std::optional<Config::SettingValueUVE> EditorUVE::GetEditorSettingUVE(const std:
 }
 
 bool EditorUVE::SetEditorSettingUVE(const std::string_view id, const Config::SettingValueUVE& value) {
-    if (const EditorSettingBindingUVE* binding = FindSettingBindingUVE(id)) {
-        return Config::IsSettingValueValidUVE(binding->descriptor, value) && binding->set(*this, value);
-    }
     const Config::SettingDescriptorUVE* descriptor = m_settingsRegistry.FindUVE(id);
-    return descriptor != nullptr && Config::IsSettingValueValidUVE(*descriptor, value) &&
-           SetShortcutSettingUVE(id, value);
+    if (descriptor == nullptr || descriptor->HasFlagUVE(Config::kSettingFlagDeprecatedUVE) ||
+        !Config::IsSettingValueValidUVE(*descriptor, value)) {
+        return false;
+    }
+
+    const std::optional<SettingValueUVE> previousValue = GetEditorSettingUVE(id);
+    if (!previousValue) {
+        return false;
+    }
+
+    const EditorSettingBindingUVE* binding = FindSettingBindingUVE(id);
+    const bool applied = binding != nullptr ? binding->set(*this, value) : SetShortcutSettingUVE(id, value);
+    if (!applied) {
+        return false;
+    }
+
+    if (const std::optional<SettingValueUVE> newValue = GetEditorSettingUVE(id);
+        newValue && *previousValue != *newValue) {
+        NotifyEditorSettingChangedUVE(id, *previousValue, *newValue);
+    }
+    return true;
+}
+
+Config::SettingsObserverSubscriptionUVE EditorUVE::SubscribeToSettingUVE(
+    const std::string_view id, Config::SettingsObserverCallbackUVE callback) {
+    return m_settingsObservers.SubscribeToSettingUVE(id, std::move(callback));
+}
+
+Config::SettingsObserverSubscriptionUVE EditorUVE::SubscribeToCategoryUVE(
+    const std::string_view categoryPrefix, Config::SettingsObserverCallbackUVE callback) {
+    return m_settingsObservers.SubscribeToCategoryUVE(categoryPrefix, std::move(callback));
+}
+
+bool EditorUVE::UnsubscribeUVE(const Config::SettingsObserverSubscriptionUVE subscription) {
+    return m_settingsObservers.UnsubscribeUVE(subscription);
+}
+
+void EditorUVE::NotifyEditorSettingChangedUVE(const std::string_view id,
+                                               const Config::SettingValueUVE& previousValue,
+                                               const Config::SettingValueUVE& newValue) {
+    m_settingsObservers.NotifyChangedUVE(id, previousValue, newValue);
 }
 
 namespace {
@@ -585,14 +621,14 @@ namespace {
 
 /// The old name of a renamed setting, declared as an alias of the setting that replaced it: same
 /// type, bounds and enum entries, so a value stored under the old name is read exactly as the new
-/// one validates. Hidden, so the preferences window never offers a name the editor no longer
-/// uses, and Deprecated, so a save never writes it back - the rename is one-way, and the alias
-/// exists only for files written before it.
+/// one validates. Hidden, so the preferences window never offers a name the editor no longer uses;
+/// Deprecated, so the registry migrates a legacy value to the replacement and removes the old key.
 [[nodiscard]] Config::SettingDescriptorUVE MakeRenamedSettingAliasUVE(const Config::SettingDescriptorUVE& current,
                                                                      const RenamedSettingIdUVE& renamed) {
     Config::SettingDescriptorUVE alias = current;
     alias.id = std::string(renamed.oldId);
     alias.flags |= Config::kSettingFlagHiddenUVE | Config::kSettingFlagDeprecatedUVE;
+    alias.replacementId = std::string(renamed.newId);
     return alias;
 }
 

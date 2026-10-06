@@ -29,6 +29,7 @@
 #include "uve/asset/i_project_change_watcher_uve.h"
 #include "uve/core/engine_services_uve.h"
 #include "uve/core/i_simulation_control_uve.h"
+#include "uve/config/settings_observer_uve.h"
 #include "uve/config/settings_registry_uve.h"
 #include "uve/editor/animation_clip_editing_uve.h"
 #include "uve/editor/editor_color_uve.h"
@@ -815,7 +816,22 @@ public:
     [[nodiscard]] std::optional<Config::SettingValueUVE> GetEditorSettingUVE(std::string_view id) const;
     /// Applies `value` to editor setting `id` at once. Refused, changing nothing, for an unknown id
     /// or a value its descriptor does not allow. Stored in the settings file with the session.
+    /// Notifies observers synchronously after a successful effective change.
     [[nodiscard]] bool SetEditorSettingUVE(std::string_view id, const Config::SettingValueUVE& value);
+    /// Calls `callback` after future effective changes to exactly one registered editor setting.
+    /// Callbacks run synchronously on the editor's calling thread after the value is applied; a
+    /// setting mutation from a callback dispatches its own notification immediately (nested).
+    /// Keep subscriptions and callbacks on the editor's owner thread, avoid feedback loops, and do
+    /// not throw from callbacks; see SettingsObserverHubUVE for dispatch-time subscription rules.
+    [[nodiscard]] Config::SettingsObserverSubscriptionUVE SubscribeToSettingUVE(
+        std::string_view id, Config::SettingsObserverCallbackUVE callback);
+    /// Calls `callback` after changes to settings in `categoryPrefix` or any descendant category,
+    /// matched at slash boundaries. An invalid handle is returned for an empty callback or a prefix
+    /// that currently matches no registered editor setting.
+    [[nodiscard]] Config::SettingsObserverSubscriptionUVE SubscribeToCategoryUVE(
+        std::string_view categoryPrefix, Config::SettingsObserverCallbackUVE callback);
+    /// Removes a subscription issued by this editor; false for an invalid, foreign, or removed handle.
+    [[nodiscard]] bool UnsubscribeUVE(Config::SettingsObserverSubscriptionUVE subscription);
     /// The point the viewport camera orbits, reported by the host each frame; new objects are placed
     /// there when their placement preference says so. A non-finite point is ignored.
     void SetViewportCameraFocusUVE(const Math::Vector3UVE& focus) noexcept;
@@ -1610,9 +1626,6 @@ private:
     void DestroyDocumentSubtreeUVE(Scene::EntityUVE root);
     void ClearDocumentSceneUVE();
     void LoadSessionSettingsUVE();
-    /// Moves the value of every renamed setting id from its old key to its new one, once, when the
-    /// file still carries the old name and the new one holds nothing (see kRenamedSettingIdsUVE).
-    void MigrateRenamedSettingIdsUVE(Config::IConfigManagerUVE& config);
     [[nodiscard]] bool SaveSessionSettingsUVE();
     void ApplyLayoutPresetUVE(EditorLayoutPresetUVE preset) noexcept;
     void DrawMenuBarUVE();
@@ -1941,6 +1954,7 @@ private:
     /// The editor's own settings, declared by RegisterEditorSettingsUVE; read and written in the
     /// services' settings store.
     Config::SettingsRegistryUVE m_settingsRegistry;
+    Config::SettingsObserverHubUVE m_settingsObservers{m_settingsRegistry};
     // Object creation preferences (editor_settings_uve.cpp), and the host's latest camera focus.
     bool m_newObjectsUnderSelection = true;
     EditorNewObjectPlacementUVE m_newObjectPlacement = EditorNewObjectPlacementUVE::ParentOrigin;
@@ -1960,6 +1974,8 @@ private:
     // (editor_settings_uve.cpp) that loading, saving and the preferences window all use.
     [[nodiscard]] static const std::vector<EditorSettingBindingUVE>& GetSettingBindingsUVE();
     [[nodiscard]] static const EditorSettingBindingUVE* FindSettingBindingUVE(std::string_view id);
+    void NotifyEditorSettingChangedUVE(std::string_view id, const Config::SettingValueUVE& previousValue,
+                                       const Config::SettingValueUVE& newValue);
     // Where a new object goes: under the single selection when the preference allows and there is
     // one, otherwise under the scene root. Then, for a spatial object, where in space.
     [[nodiscard]] Scene::EntityUVE ResolveNewObjectParentUVE();

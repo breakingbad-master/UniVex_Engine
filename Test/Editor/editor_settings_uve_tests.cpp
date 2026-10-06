@@ -11,10 +11,28 @@
 
 #include <gtest/gtest.h>
 
+#include "Support/test_scratch_uve.h"
 #include "uve/config/config_manager_uve.h"
+#include "uve/core/engine_core_uve.h"
+#include "uve/editor/editor_uve.h"
 
 namespace UVE::Editor::Tests {
 namespace {
+
+[[nodiscard]] Core::EngineConfigUVE MakeEditorSettingsObserverTestConfigUVE() {
+    Core::EngineConfigUVE config{};
+    config.headlessUVE = true;
+    config.logFilePath = "uve_editor_settings_observer.log";
+    config.settingsFilePath = "uve_editor_settings_observer_settings.json";
+    config.projectSettingsFilePath = "uve_editor_settings_observer_project_settings.json";
+    config.inputMapFilePath = "uve_editor_settings_observer_input_map.json";
+    config.assetDatabaseFilePath = "uve_editor_settings_observer_assets.json";
+    config.saveDirectoryPath = "uve_editor_settings_observer_saves";
+    config.shaderCachePath = "uve_editor_settings_observer_shader_cache";
+    config.shaderSourceRealDirectoryUVE = ::UVE::Tests::RepositoryRootUVE() / "Engine/Runtime/RHI/Shader/built_in";
+    config.shaderSourceMountPrefixUVE = "shaders";
+    return config;
+}
 
 using Config::SettingTypeUVE;
 
@@ -108,29 +126,39 @@ TEST(EditorSettingsUVETest, StoredKeysStayWhereExistingSettingsFilesHaveThem) {
     EXPECT_FALSE(store.HasKeyUVE("editor.viewport.selectionOutline.a"));
 }
 
-TEST(EditorSettingsUVETest, ARenamedIdKeepsAnAliasThatReadsButIsNeverWritten) {
+TEST(EditorSettingsUVETest, ARenamedIdMigratesThroughItsDeprecatedAlias) {
     Config::SettingsRegistryUVE registry;
     ASSERT_TRUE(RegisterEditorSettingsUVE(registry));
-    namespace Id = EditorSettingIdUVE;
     Config::ConfigManagerUVE store;
     for (const RenamedSettingIdUVE& renamed : kRenamedSettingIdsUVE) {
         const Config::SettingDescriptorUVE* current = registry.FindUVE(renamed.newId);
         const Config::SettingDescriptorUVE* alias = registry.FindUVE(renamed.oldId);
         ASSERT_NE(current, nullptr) << renamed.newId;
         ASSERT_NE(alias, nullptr) << renamed.oldId;
-        // The alias declares the setting that replaced it: same type, bounds, legal values and
-        // default, so a value stored under the old name is read as the new one validates it.
         EXPECT_EQ(alias->type, current->type) << renamed.oldId;
         EXPECT_EQ(alias->defaultValue, current->defaultValue) << renamed.oldId;
         EXPECT_EQ(alias->enumEntries.size(), current->enumEntries.size()) << renamed.oldId;
         EXPECT_TRUE(alias->HasFlagUVE(Config::kSettingFlagDeprecatedUVE)) << renamed.oldId;
+        EXPECT_EQ(alias->replacementId, renamed.newId);
     }
-    // A file written before the rename carries the old key; the registry reads it, and a write
-    // through the old name is refused, so a save can never put the retired name back.
+
+    // Before migration the new id reads through the alias. The old id itself remains read-only.
     store.SetBoolUVE("editor.nodes.addUnderSelection", false);
     EXPECT_EQ(registry.GetStoredValueUVE(store, "editor.nodes.addUnderSelection"), Config::SettingValueUVE{false});
+    EXPECT_EQ(registry.GetStoredValueUVE(store, "editor.objects.addUnderSelection"), Config::SettingValueUVE{false});
     EXPECT_FALSE(registry.SetValueUVE(store, "editor.nodes.addUnderSelection", true));
-    EXPECT_FALSE(registry.GetStoredValueUVE(store, "editor.objects.addUnderSelection").has_value());
+
+    EXPECT_TRUE(registry.MigrateDeprecatedValuesUVE(store));
+    EXPECT_EQ(store.GetBoolUVE("editor.objects.addUnderSelection", true), false);
+    EXPECT_FALSE(store.HasKeyUVE("editor.nodes.addUnderSelection"));
+    EXPECT_FALSE(registry.MigrateDeprecatedValuesUVE(store));
+
+    // A valid current id wins over a conflicting legacy value; migration removes the stale alias.
+    store.SetBoolUVE("editor.nodes.addUnderSelection", true);
+    store.SetBoolUVE("editor.objects.addUnderSelection", false);
+    EXPECT_TRUE(registry.MigrateDeprecatedValuesUVE(store));
+    EXPECT_EQ(store.GetBoolUVE("editor.objects.addUnderSelection", true), false);
+    EXPECT_FALSE(store.HasKeyUVE("editor.nodes.addUnderSelection"));
 }
 
 TEST(EditorSettingsUVETest, SnapStepsOutsideTheirRangeFallBackInsteadOfReachingAFloat) {
@@ -203,6 +231,124 @@ TEST(EditorSettingsUVETest, ValuesAreFormattedTheWayAPersonReadsThem) {
     const Config::SettingDescriptorUVE gravity =
         Config::MakeVector3SettingUVE("physics.gravity", {0.0, -9.81, 0.0}, std::nullopt, std::nullopt, "Gravity", "");
     EXPECT_EQ(FormatSettingValueUVE(gravity, gravity.defaultValue), "(0, -9.81, 0)");
+}
+
+TEST(EditorSettingsUVETest, EditorSettingObserversReportOnlyEffectiveChangesAndRespectOwnership) {
+    Core::EngineCoreUVE engine(MakeEditorSettingsObserverTestConfigUVE());
+    engine.Init();
+    ASSERT_TRUE(engine.Load());
+    {
+        EditorUVE editor(engine.GetServicesUVE());
+        EditorUVE otherEditor(engine.GetServicesUVE());
+        const std::string_view id = EditorSettingIdUVE::kPlayPauseOnStartUVE;
+        std::vector<Config::SettingChangedEventUVE> exactEvents;
+        std::vector<std::string> categoryEventIds;
+
+        const Config::SettingsObserverSubscriptionUVE exact = editor.SubscribeToSettingUVE(
+            id, [&exactEvents](const Config::SettingChangedEventUVE& event) { exactEvents.push_back(event); });
+        const Config::SettingsObserverSubscriptionUVE category = editor.SubscribeToCategoryUVE(
+            "Editor/Play Mode", [&categoryEventIds](const Config::SettingChangedEventUVE& event) {
+                categoryEventIds.push_back(event.id);
+            });
+        ASSERT_TRUE(exact.IsValidUVE());
+        ASSERT_TRUE(category.IsValidUVE());
+        EXPECT_FALSE(editor.SubscribeToSettingUVE("editor.unknown", [](const auto&) {}).IsValidUVE());
+        EXPECT_FALSE(editor.SubscribeToCategoryUVE("Editor/Play Mode Extra", [](const auto&) {}).IsValidUVE());
+        EXPECT_FALSE(otherEditor.UnsubscribeUVE(exact));
+
+        EXPECT_TRUE(editor.SetEditorSettingUVE(id, true));
+        EXPECT_TRUE(editor.SetEditorSettingUVE(id, true)); // A repeat is not an effective change.
+        EXPECT_FALSE(editor.SetEditorSettingUVE(id, std::string{"wrong type"}));
+        ASSERT_EQ(exactEvents.size(), 1U);
+        EXPECT_EQ(exactEvents.front().id, id);
+        EXPECT_EQ(exactEvents.front().previousValue, Config::SettingValueUVE{false});
+        EXPECT_EQ(exactEvents.front().newValue, Config::SettingValueUVE{true});
+        EXPECT_EQ(categoryEventIds, (std::vector<std::string>{std::string{id}}));
+
+        std::vector<Config::SettingChangedEventUVE> gridEvents;
+        const auto gridSubscription = editor.SubscribeToCategoryUVE(
+            "Editor/Viewport/Grid", [&gridEvents](const Config::SettingChangedEventUVE& event) {
+                gridEvents.push_back(event);
+            });
+        ASSERT_TRUE(gridSubscription.IsValidUVE());
+        const Config::SettingValueUVE previousGridVisible = *editor.GetEditorSettingUVE(
+            EditorSettingIdUVE::kGridVisibleUVE);
+        const Config::SettingValueUVE previousGridOpacity = *editor.GetEditorSettingUVE(
+            EditorSettingIdUVE::kGridOpacityUVE);
+        ASSERT_TRUE(editor.SetViewportGridUVE(false, 0.42F));
+        ASSERT_EQ(gridEvents.size(), 2U);
+        EXPECT_EQ(gridEvents[0U].id, EditorSettingIdUVE::kGridVisibleUVE);
+        EXPECT_EQ(gridEvents[0U].previousValue, previousGridVisible);
+        EXPECT_EQ(gridEvents[0U].newValue, Config::SettingValueUVE{false});
+        EXPECT_EQ(gridEvents[1U].id, EditorSettingIdUVE::kGridOpacityUVE);
+        EXPECT_EQ(gridEvents[1U].previousValue, previousGridOpacity);
+        EXPECT_EQ(gridEvents[1U].newValue, *editor.GetEditorSettingUVE(EditorSettingIdUVE::kGridOpacityUVE));
+        EXPECT_TRUE(editor.UnsubscribeUVE(gridSubscription));
+
+        ASSERT_TRUE(editor.UnsubscribeUVE(exact));
+        EXPECT_FALSE(editor.UnsubscribeUVE(exact));
+        EXPECT_TRUE(editor.SetEditorSettingUVE(id, false));
+        EXPECT_EQ(exactEvents.size(), 1U);
+        EXPECT_EQ(categoryEventIds, (std::vector<std::string>{std::string{id}, std::string{id}}));
+    }
+    engine.Shutdown();
+}
+
+TEST(EditorSettingsUVETest, ShortcutSettingChangesAreValidatedAndObservable) {
+    Core::EngineCoreUVE engine(MakeEditorSettingsObserverTestConfigUVE());
+    engine.Init();
+    ASSERT_TRUE(engine.Load());
+    {
+        EditorUVE editor(engine.GetServicesUVE());
+        constexpr std::string_view kShortcutId = "editor.shortcuts.file.saveScene.primary";
+        std::vector<Config::SettingChangedEventUVE> events;
+        const auto subscription = editor.SubscribeToSettingUVE(
+            kShortcutId, [&events](const Config::SettingChangedEventUVE& event) { events.push_back(event); });
+        ASSERT_TRUE(subscription.IsValidUVE());
+        ASSERT_EQ(editor.GetEditorSettingUVE(kShortcutId), Config::SettingValueUVE{std::string{"Ctrl+S"}});
+
+        EXPECT_TRUE(editor.SetEditorSettingUVE(kShortcutId, std::string{"Ctrl+Shift+S"}));
+        EXPECT_TRUE(editor.SetEditorSettingUVE(kShortcutId, std::string{"Ctrl+Shift+S"}));
+        EXPECT_FALSE(editor.SetEditorSettingUVE(kShortcutId, std::string{"Hyper+S"}));
+        ASSERT_EQ(events.size(), 1U);
+        EXPECT_EQ(events[0U].previousValue, Config::SettingValueUVE{std::string{"Ctrl+S"}});
+        EXPECT_EQ(events[0U].newValue, Config::SettingValueUVE{std::string{"Ctrl+Shift+S"}});
+
+        EXPECT_TRUE(editor.SetEditorSettingUVE(kShortcutId, std::string{}));
+        EXPECT_TRUE(editor.SetEditorSettingUVE(kShortcutId, std::string{"Ctrl+S"}));
+        ASSERT_EQ(events.size(), 3U);
+        EXPECT_EQ(events[1U].previousValue, Config::SettingValueUVE{std::string{"Ctrl+Shift+S"}});
+        EXPECT_EQ(events[1U].newValue, Config::SettingValueUVE{std::string{}});
+        EXPECT_EQ(events[2U].previousValue, Config::SettingValueUVE{std::string{}});
+        EXPECT_EQ(events[2U].newValue, Config::SettingValueUVE{std::string{"Ctrl+S"}});
+        EXPECT_TRUE(editor.UnsubscribeUVE(subscription));
+    }
+    engine.Shutdown();
+}
+
+TEST(EditorSettingsUVETest, EditorSettingObserverReentrantChangesDispatchImmediately) {
+    Core::EngineCoreUVE engine(MakeEditorSettingsObserverTestConfigUVE());
+    engine.Init();
+    ASSERT_TRUE(engine.Load());
+    {
+        EditorUVE editor(engine.GetServicesUVE());
+        namespace Id = EditorSettingIdUVE;
+        std::vector<std::string> dispatchOrder;
+        const auto subscription = editor.SubscribeToCategoryUVE(
+            "Editor/Play Mode", [&editor, &dispatchOrder](const Config::SettingChangedEventUVE& event) {
+                dispatchOrder.push_back(event.id);
+                if (event.id == Id::kPlayPauseOnStartUVE && std::get<bool>(event.newValue)) {
+                    EXPECT_TRUE(editor.SetEditorSettingUVE(Id::kPlaySaveSceneFirstUVE, true));
+                }
+            });
+        ASSERT_TRUE(subscription.IsValidUVE());
+
+        ASSERT_TRUE(editor.SetEditorSettingUVE(Id::kPlayPauseOnStartUVE, true));
+        EXPECT_EQ(dispatchOrder, (std::vector<std::string>{std::string{Id::kPlayPauseOnStartUVE},
+                                                           std::string{Id::kPlaySaveSceneFirstUVE}}));
+        EXPECT_TRUE(editor.UnsubscribeUVE(subscription));
+    }
+    engine.Shutdown();
 }
 
 } // namespace

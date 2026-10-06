@@ -59,6 +59,10 @@ public:
     /// contributes; GetValueUVE is this with the default filled in.
     [[nodiscard]] std::optional<SettingValueUVE> GetStoredValueUVE(const IConfigManagerUVE& store,
                                                                    std::string_view id) const;
+    /// Migrates stored Deprecated descriptors with a `replacementId` to their live setting. A legal
+    /// value already stored at the new id wins; legacy ids are removed only after a successful copy
+    /// or when superseded by a legal new value. Returns true if the store changed.
+    bool MigrateDeprecatedValuesUVE(IConfigManagerUVE& store) const;
     /// Whether the value in use differs from the default.
     [[nodiscard]] bool IsModifiedUVE(const IConfigManagerUVE& store, std::string_view id) const;
 

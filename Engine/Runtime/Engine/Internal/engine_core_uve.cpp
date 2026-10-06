@@ -14,7 +14,10 @@
 #include "uve/asset/legacy_extension_migration_uve.h"
 
 #include <algorithm>
+#include <array>
+#include <charconv>
 #include <chrono>
+#include <cctype>
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
@@ -24,7 +27,10 @@
 #include <fstream>
 #include <optional>
 #include <span>
+#include <stdexcept>
 #include <string>
+#include <string_view>
+#include <system_error>
 #include <unordered_set>
 #include <vector>
 #include <utility>
@@ -164,6 +170,168 @@ constexpr Window::AdaptiveRenderResolutionLimitsUVE kAdaptiveRenderResolutionLim
 constexpr Window::AdaptiveRenderResolutionLimitsUVE kAdaptiveRenderResolutionLimitsUVE{8192U, 3840ULL * 2160ULL};
 #endif
 
+[[nodiscard]] std::string_view GetPlatformSettingsTargetUVE() noexcept {
+#if defined(__ANDROID__)
+    return "android";
+#elif defined(__EMSCRIPTEN__)
+    return "web";
+#elif defined(_WIN32)
+    return "windows";
+#elif defined(__APPLE__)
+    return "apple";
+#elif defined(__linux__)
+    return "linux";
+#else
+    return "unknown";
+#endif
+}
+
+[[nodiscard]] std::filesystem::path GetPlatformSettingsPathUVE(const EngineConfigUVE& config) {
+    if (!config.platformSettingsFilePath.empty()) {
+        return config.platformSettingsFilePath;
+    }
+    return config.settingsFilePath.parent_path() / "platforms" / std::string{GetPlatformSettingsTargetUVE()} /
+           config.settingsFilePath.filename();
+}
+
+[[nodiscard]] bool ParseCommandLineNumberUVE(const std::string_view text, std::int64_t& value) noexcept {
+    if (text.empty()) {
+        return false;
+    }
+    const auto [end, error] = std::from_chars(text.data(), text.data() + text.size(), value);
+    return error == std::errc{} && end == text.data() + text.size();
+}
+
+[[nodiscard]] bool ParseCommandLineNumberUVE(const std::string_view text, double& value) noexcept {
+    if (text.empty()) {
+        return false;
+    }
+    const auto [end, error] = std::from_chars(text.data(), text.data() + text.size(), value,
+                                               std::chars_format::general);
+    return error == std::errc{} && end == text.data() + text.size();
+}
+
+[[nodiscard]] bool EqualsAsciiCaseInsensitiveUVE(const std::string_view left, const std::string_view right) noexcept {
+    if (left.size() != right.size()) {
+        return false;
+    }
+    for (std::size_t index = 0U; index < left.size(); ++index) {
+        const auto leftCharacter = static_cast<unsigned char>(left[index]);
+        const auto rightCharacter = static_cast<unsigned char>(right[index]);
+        if (std::tolower(leftCharacter) != std::tolower(rightCharacter)) {
+            return false;
+        }
+    }
+    return true;
+}
+
+[[nodiscard]] std::optional<std::size_t> ParseCommaSeparatedNumbersUVE(const std::string_view text,
+                                                                        const std::span<double> values) noexcept {
+    std::size_t count = 0U;
+    std::size_t start = 0U;
+    while (true) {
+        if (count >= values.size()) {
+            return std::nullopt;
+        }
+        const std::size_t comma = text.find(',', start);
+        const std::string_view component = comma == std::string_view::npos
+                                               ? text.substr(start)
+                                               : text.substr(start, comma - start);
+        if (!ParseCommandLineNumberUVE(component, values[count])) {
+            return std::nullopt;
+        }
+        ++count;
+        if (comma == std::string_view::npos) {
+            return count;
+        }
+        start = comma + 1U;
+        if (start == text.size()) {
+            return std::nullopt;
+        }
+    }
+}
+
+[[nodiscard]] std::optional<Config::SettingValueUVE> ParseCommandLineSettingValueUVE(
+    const Config::SettingDescriptorUVE& descriptor, const std::optional<std::string>& argument) {
+    if (!argument.has_value()) {
+        return descriptor.type == Config::SettingTypeUVE::Bool
+                   ? std::optional<Config::SettingValueUVE>{Config::SettingValueUVE{true}}
+                   : std::nullopt;
+    }
+    const std::string_view text = *argument;
+    switch (descriptor.type) {
+    case Config::SettingTypeUVE::Bool:
+        if (EqualsAsciiCaseInsensitiveUVE(text, "true") || text == "1" ||
+            EqualsAsciiCaseInsensitiveUVE(text, "on")) {
+            return Config::SettingValueUVE{true};
+        }
+        if (EqualsAsciiCaseInsensitiveUVE(text, "false") || text == "0" ||
+            EqualsAsciiCaseInsensitiveUVE(text, "off")) {
+            return Config::SettingValueUVE{false};
+        }
+        return std::nullopt;
+    case Config::SettingTypeUVE::Int: {
+        std::int64_t value = 0;
+        return ParseCommandLineNumberUVE(text, value) ? std::optional<Config::SettingValueUVE>{value} : std::nullopt;
+    }
+    case Config::SettingTypeUVE::Float: {
+        double value = 0.0;
+        return ParseCommandLineNumberUVE(text, value) ? std::optional<Config::SettingValueUVE>{value} : std::nullopt;
+    }
+    case Config::SettingTypeUVE::String:
+        return Config::SettingValueUVE{std::string{text}};
+    case Config::SettingTypeUVE::Enum: {
+        std::int64_t value = 0;
+        if (ParseCommandLineNumberUVE(text, value)) {
+            return Config::SettingValueUVE{value};
+        }
+        for (const Config::SettingEnumEntryUVE& entry : descriptor.enumEntries) {
+            if (EqualsAsciiCaseInsensitiveUVE(text, entry.label)) {
+                return Config::SettingValueUVE{entry.value};
+            }
+        }
+        return std::nullopt;
+    }
+    case Config::SettingTypeUVE::Color: {
+        std::array<double, 4U> channels{};
+        const std::optional<std::size_t> count = ParseCommaSeparatedNumbersUVE(text, channels);
+        if (!count.has_value() || *count < 3U) {
+            return std::nullopt;
+        }
+        Config::SettingColorUVE color{static_cast<float>(channels[0U]), static_cast<float>(channels[1U]),
+                                      static_cast<float>(channels[2U])};
+        if (*count == 4U) {
+            color.a = static_cast<float>(channels[3U]);
+        }
+        return Config::SettingValueUVE{color};
+    }
+    case Config::SettingTypeUVE::Vector3: {
+        std::array<double, 3U> components{};
+        const std::optional<std::size_t> count = ParseCommaSeparatedNumbersUVE(text, components);
+        if (!count.has_value() || *count != components.size()) {
+            return std::nullopt;
+        }
+        return Config::SettingValueUVE{Config::SettingVector3UVE{components[0U], components[1U], components[2U]}};
+    }
+    }
+    return std::nullopt;
+}
+
+void PopulateCommandLineSettingsUVE(const Config::SettingsRegistryUVE& registry,
+                                    const CommandLine::ICommandLineUVE& commandLine,
+                                    Config::IConfigManagerUVE& store) {
+    for (const Config::SettingDescriptorUVE* descriptor : registry.GetAllUVE()) {
+        if (!IsEngineConfigSettingIdUVE(descriptor->id) || !commandLine.HasFlagUVE(descriptor->id)) {
+            continue;
+        }
+        const std::optional<Config::SettingValueUVE> value =
+            ParseCommandLineSettingValueUVE(*descriptor, commandLine.GetOptionalValueUVE(descriptor->id));
+        if (!value.has_value() || !registry.SetValueUVE(store, descriptor->id, *value)) {
+            UVE_WARNING("EngineCoreUVE: ignoring invalid command-line setting override '--{}'", descriptor->id);
+        }
+    }
+}
+
 /// The process mode the scene graph resolved for `entity` on its last update, or the hierarchy
 /// default for an entity it has not seen yet (created since, or not a scene-graph object). Asking the
 /// scene graph rather than the entity's own ProcessComponentUVE is what makes an entity with no
@@ -245,17 +413,10 @@ void EngineCoreUVE::RegisterBuiltInAssetLoadersUVE() {
 void EngineCoreUVE::Init() {
     TransitionStateUVE(EngineStateUVE::Initializing);
 
-    // CommandLine first: it has zero dependencies (pure parsing of the
-    // args already captured in EngineConfigUVE), and its parsed flags are
-    // the kind of thing a later step could plausibly want during its own
-    // setup in a future increment.
+    // CommandLine first: it has no dependencies and parses the raw startup tokens. Registered
+    // setting flags (including --headless) are converted to typed values after the settings schema
+    // is ready, then resolved at the top of SettingsStackUVE.
     m_commandLine = std::make_unique<CommandLine::CommandLineUVE>(m_config.commandLineArgs);
-
-    // --headless overrides EngineConfigUVE::headlessUVE the moment CommandLine exists, before
-    // anything below reads it.
-    if (m_commandLine->HasFlagUVE("headless")) {
-        m_config.headlessUVE = true;
-    }
 
     // Logger second: every later step below, and every other engine
     // system, may need to log or UVE_ASSERT during its own setup. See
@@ -273,21 +434,48 @@ void EngineCoreUVE::Init() {
 
     // Projects saved before the .uve* -> .uv* rename are moved over before anything reads them:
     // the config files by name, the content folder file by file, then the asset registry's paths.
-    for (const std::filesystem::path* const file : {&m_config.projectSettingsFilePath, &m_config.settingsFilePath,
-                                                    &m_config.inputMapFilePath, &m_config.assetDatabaseFilePath}) {
+    const std::filesystem::path platformSettingsPath = GetPlatformSettingsPathUVE(m_config);
+    const std::array<const std::filesystem::path*, 5U> settingsFiles{
+        &m_config.projectSettingsFilePath, &m_config.settingsFilePath, &platformSettingsPath, &m_config.inputMapFilePath,
+        &m_config.assetDatabaseFilePath};
+    for (const std::filesystem::path* const file : settingsFiles) {
         static_cast<void>(Asset::MigrateLegacyFileUVE(*file));
     }
     static_cast<void>(Asset::MigrateLegacyContentUVE(m_config.projectContentRootUVE));
     static_cast<void>(Asset::RewriteLegacyExtensionsInTextFileUVE(m_config.assetDatabaseFilePath));
 
-    // The project's settings next, before anything below reads the fields they override: the
-    // project file sits above the application's EngineConfigUVE, so a project carries its tick
-    // rate, shadow quality and so on wherever it is opened.
+    // Load the project and user stores before constructing any system that consumes the effective
+    // EngineConfigUVE fields. The application-supplied config remains the base; valid settings then
+    // resolve project -> user -> active platform -> command line. The platform file is optional and
+    // separate from user preferences; it is loaded only when present to avoid a warning on first run.
     if (!m_projectSettings.LoadUVE(m_config.projectSettingsFilePath)) {
-        UVE_WARNING("EngineCoreUVE: project settings \"{}\" could not be read; using the defaults",
+        UVE_WARNING("EngineCoreUVE: project settings \"{}\" could not be read; continuing without project overrides",
                     m_config.projectSettingsFilePath.string());
     }
-    ApplyEngineProjectSettingsUVE(m_projectSettings, m_config);
+    auto configManager = std::make_unique<Config::ConfigManagerUVE>();
+    configManager->LoadUVE(m_config.settingsFilePath);
+    m_configManager = std::move(configManager);
+
+    Config::ConfigManagerUVE platformSettings;
+    std::error_code platformSettingsError;
+    if (std::filesystem::exists(platformSettingsPath, platformSettingsError)) {
+        static_cast<void>(platformSettings.LoadUVE(platformSettingsPath));
+    } else if (platformSettingsError) {
+        UVE_WARNING("EngineCoreUVE: platform settings \"{}\" could not be checked: {}",
+                    platformSettingsPath.string(), platformSettingsError.message());
+    }
+
+    Config::ConfigManagerUVE commandLineSettings;
+    PopulateCommandLineSettingsUVE(m_projectSettings.GetRegistryUVE(), *m_commandLine, commandLineSettings);
+
+    Config::SettingsStackUVE settings(m_projectSettings.GetRegistryUVE());
+    if (!settings.AttachLayerUVE(Config::SettingValueSourceUVE::Project, m_projectSettings.GetStoreUVE()) ||
+        !settings.AttachLayerUVE(Config::SettingValueSourceUVE::User, *m_configManager) ||
+        !settings.AttachLayerUVE(Config::SettingValueSourceUVE::Platform, platformSettings) ||
+        !settings.AttachLayerUVE(Config::SettingValueSourceUVE::CommandLine, commandLineSettings)) {
+        throw std::logic_error("Failed to attach engine settings layers.");
+    }
+    ApplyEngineSettingsUVE(settings, m_config);
 
     // MemoryManager third: the next most foundational service after
     // logging — nothing constructed here has a hard dependency on it yet,
@@ -314,8 +502,8 @@ void EngineCoreUVE::Init() {
     // EventSystem sixth: it is the piece most likely to gain future
     // dependents (systems subscribing during their own Init()), so it is
     // constructed after every other foundational service except
-    // EntityManager/SceneGraph/ConfigManager, once it is guaranteed nothing
-    // else in this list still needs to be built.
+    // EntityManager/SceneGraph, once it is guaranteed nothing else in this
+    // list still needs to be built.
     m_eventSystem = std::make_unique<Events::EventSystemUVE>();
 
     // EntityManager seventh: needs MemoryManager (for chunk allocation) and
@@ -631,13 +819,6 @@ void EngineCoreUVE::Init() {
     checkpointMetadata.engineVersionBuild = engineVersion.build;
     m_checkpointManager = std::make_unique<Save::CheckpointManagerUVE>(
         *m_saveGameSystem, m_config.autoSaveIntervalSecondsUVE, checkpointMetadata);
-
-    // ConfigManager last: it immediately calls LoadUVE(), which logs its
-    // outcome (missing/malformed/success) through the Logger constructed
-    // above — so Logger must already exist by this point.
-    auto configManager = std::make_unique<Config::ConfigManagerUVE>();
-    configManager->LoadUVE(m_config.settingsFilePath);
-    m_configManager = std::move(configManager);
 
     m_services.emplace(*m_logger, *m_timer, *m_eventSystem, *m_memoryManager, *m_threadPool,
                                                  *m_commandLine, *m_configManager, m_projectSettings, m_inputMap, *m_entityManager, *m_sceneGraph,
@@ -2428,8 +2609,8 @@ void EngineCoreUVE::Shutdown() {
     m_transientSimulationSessionActive = false;
     UVE_INFO("EngineCoreUVE: shutting down");
 
-    // Exact reverse of Init()'s construction order: ConfigManager, then
-    // CheckpointManager, then SaveGameSystem, then AudioSourceSystem, then AudioSystem, then AudioDevice, then
+    // Exact reverse of Init()'s construction order: CheckpointManager,
+    // then SaveGameSystem, then AudioSourceSystem, then AudioSystem, then AudioDevice, then
     // InputSystem, then MobileGestureSystem, then MobileInputSystem, then GamepadInputSystem, then
     // RaycastSystem, then PhysicsSystem, then CollisionSystem, then Renderer3D, then LightSystem, then MeshRenderer, then CameraSystem, then RenderSystem, then ShaderManager, then RenderDevice
     // (destroying the demo triangle's shader program and vertex buffer first, if windowed rendering
@@ -2439,12 +2620,12 @@ void EngineCoreUVE::Shutdown() {
     // finishes), then HotReload, then PrefabSystem, then SceneSerializer,
     // then AssetDatabase, then SceneGraph, then EntityManager, then
     // EventSystem, then Timer, then ThreadPool, then MemoryManager, then
-    // Logger, then CommandLine. The final log message is emitted before the
+    // ConfigManager (loaded early so its settings can override project values),
+    // then Logger, then CommandLine. The final log message is emitted before the
     // logger itself is torn down, so it is guaranteed to be recorded.
     m_uvScriptFailedSources.clear();
     m_uvScripts.clear(); // hosts point into the entity manager, so they go first
     m_services.reset();
-    m_configManager.reset();
     m_checkpointManager.reset();
     m_saveGameSystem.reset();
     m_audioSourceSystem.reset();
@@ -2513,6 +2694,7 @@ void EngineCoreUVE::Shutdown() {
     UVE_ASSERT(m_memoryManager->GetActiveAllocationCountUVE() == 0);
 #endif
     m_memoryManager.reset();
+    m_configManager.reset();
 
     UVE_INFO("EngineCoreUVE: shutdown complete");
     m_logger->Shutdown();
