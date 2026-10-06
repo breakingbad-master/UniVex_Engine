@@ -13,6 +13,8 @@
 
 set(_uve_window_sources
     Internal/null_window_manager_uve.cpp
+    Internal/presentation_layout_uve.cpp
+    Internal/window_title_format_uve.cpp
     Internal/window_desc_validation_uve.cpp
     Internal/monitor_info_validation_uve.cpp
     Internal/display_mode_validation_uve.cpp

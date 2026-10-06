@@ -11,6 +11,7 @@
 
 #pragma once
 
+#include <array>
 #include <cstddef>
 #include <cstdint>
 #include <filesystem>
@@ -20,6 +21,7 @@
 #include "uve/logging/log_level_uve.h"
 #include "uve/math/vector3_uve.h"
 #include "uve/platform/platform_uve.h"
+#include "uve/platform/application_window_settings_uve.h"
 
 namespace UVE::Core {
 
@@ -36,6 +38,16 @@ enum class RenderBackendPreferenceUVE : std::uint32_t {
     OpenGLUVE,
     VulkanUVE,
     NullUVE, ///< Force the null swapchain device (rendering disabled) even with a window.
+};
+
+/// Decoded icon pixels staged by the application bootstrap and copied into the native window
+/// descriptor when a desktop window is created.
+struct EngineApplicationIconImageUVE final {
+    std::uint32_t width = 0U;
+    std::uint32_t height = 0U;
+    std::vector<std::uint8_t> rgba8;
+
+    [[nodiscard]] bool operator==(const EngineApplicationIconImageUVE&) const = default;
 };
 
 /// Configuration passed into EngineCoreUVE's constructor. Every field has a
@@ -94,10 +106,16 @@ struct EngineConfigUVE {
     /// file yet.
     std::filesystem::path settingsFilePath = ".uvsettings";
 
+    /// Optional path to an active-target override file. When empty, EngineCoreUVE loads
+    /// `<settingsFilePath parent>/platforms/<target>/<settingsFilePath filename>` if present;
+    /// target is android, linux, windows, apple, web or unknown. These values only override
+    /// descriptors marked PerPlatform and are kept separate from the user settings file.
+    std::filesystem::path platformSettingsFilePath{};
+
     /// Path of the project's own settings file (see EngineServicesUVE::GetProjectSettingsUVE()),
-    /// read during Init(). Its values override the matching fields of this struct - the tick rate,
-    /// shadow quality and so on - so a project carries its settings with it. A missing file is
-    /// every default, not an error.
+    /// read during Init(). Valid project values override this struct's base values; user,
+    /// per-platform and command-line layers may override them in turn. A missing file changes
+    /// nothing.
     std::filesystem::path projectSettingsFilePath = "project.uvsettings";
 
     /// Path of the project's input map (see Core::InputMapDocumentUVE), read during Init() and
@@ -107,7 +125,10 @@ struct EngineConfigUVE {
     /// Raw startup argument tokens (excluding the program path) that
     /// CommandLineUVE parses during Init(). Populated by main() from
     /// argv[1..argc); left empty by default so tests can construct an
-    /// EngineConfigUVE without a real process argv.
+    /// EngineConfigUVE without a real process argv. A registered EngineConfig
+    /// setting can be overridden as `--<setting.id> <value>`; booleans also
+    /// accept a presence-only flag, enums accept their label or integer value, and
+    /// vectors/colors use comma-separated numbers.
     std::vector<std::string> commandLineArgs = {};
 
     /// Path AssetDatabaseUVE::LoadUVE() is called with during Init(). A
@@ -228,25 +249,90 @@ struct EngineConfigUVE {
 
     /// When true, EngineCoreUVE::Init() constructs Window::NullWindowManagerUVE and
     /// Render::NullRenderDeviceUVE instead of the real GLFW3/OpenGL backends — no window, no GL
-    /// context, safe to run with no display attached (CI, this project's own test suite). Also
-    /// settable via the `--headless` CLI flag (CommandLineUVE::HasFlagUVE("headless")), read and
-    /// OR'd into this field during Init() right after CommandLineUVE is constructed.
+    /// context, safe to run with no display attached (CI, this project's own test suite). The
+    /// hidden, NotPersisted `headless` setting maps the `--headless` presence-only CLI flag into
+    /// the highest-priority command-line layer during Init(); project/user/platform files cannot
+    /// override it.
     bool headlessUVE = false;
 
-    /// Title bar text WindowManagerUVE's real backend creates its window with. Unused when
-    /// headlessUVE is true.
+    /// Application-level policies resolved from the project manifest before engine startup.
+    /// `applicationIdentifierUVE` keys the process single-instance lock; the user-data directory
+    /// is the resolved per-user or project-portable root. CrashReporterUVE writes platform-native
+    /// Windows minidumps and bounded POSIX fatal-signal reports below the configured directory.
+    std::string applicationIdentifierUVE;
+    std::filesystem::path userDataDirectoryPathUVE;
+    bool quitOnLastWindowClosedUVE = true;
+    bool enforceSingleInstanceUVE = false;
+    bool crashHandlerEnabledUVE = true;
+    std::filesystem::path crashDumpDirectoryUVE = "crash-dumps";
+    std::string symbolUploadEndpointUVE;
+
+    /// Boot-splash presentation policy. The standalone runtime draws the background and optional
+    /// imported image through the UI overlay, then restores the project's active camera.
+    std::filesystem::path bootSplashImagePathUVE;
+    std::array<float, 4U> backgroundColorUVE{0.05F, 0.05F, 0.05F, 1.0F};
+    double splashFadeSecondsUVE = 0.25;
+    double splashMinimumDisplaySecondsUVE = 1.0;
+    bool splashSkippableUVE = true;
+    bool skipSplashInEditorPlayModeUVE = true;
+
+    /// Product/project identity used by the window title formatter. `windowTitle` remains the
+    /// product-name fallback and legacy caller-provided title.
     std::string windowTitle = "UniVex Engine";
+    std::string projectDisplayNameUVE;
+    /// Supports {productName}, {projectName}, and {sceneName}; literal text is preserved.
+    std::string windowTitleFormatUVE = "{productName}";
+    std::vector<EngineApplicationIconImageUVE> windowIconsUVE;
 
     /// Requested window size, in pixels, at creation time (the OS/window manager may still clamp
     /// or override it). Unused when headlessUVE is true.
     std::uint32_t windowWidth = 1280;
     std::uint32_t windowHeight = 720;
 
-    /// Whether the real window is user-resizable.
+    /// Whether the real window is user-resizable. Remaining window policy is consumed by the
+    /// platform backend at construction; unsupported platform-specific choices are retained in
+    /// config but reported/fallback by that backend.
     bool windowResizableUVE = true;
+    Platform::WindowModeUVE windowModeUVE = Platform::WindowModeUVE::Windowed;
+    bool windowBorderlessUVE = false;
+    bool windowAlwaysOnTopUVE = false;
+    bool windowTransparentUVE = false;
+    std::uint32_t windowMinimumWidthUVE = 0U;
+    std::uint32_t windowMinimumHeightUVE = 0U;
+    std::uint32_t windowMaximumWidthUVE = 0U;
+    std::uint32_t windowMaximumHeightUVE = 0U;
+    bool windowPositionSpecifiedUVE = false;
+    std::int32_t windowPositionXUVE = 0;
+    std::int32_t windowPositionYUVE = 0;
+    std::string windowMonitorNameUVE;
+    bool highDpiAwareUVE = true;
+    bool perMonitorScalingUVE = true;
+    double contentScaleOverrideUVE = 0.0;
+    Platform::StretchModeUVE stretchModeUVE = Platform::StretchModeUVE::Disabled;
+    Platform::AspectPolicyUVE aspectPolicyUVE = Platform::AspectPolicyUVE::Keep;
+    bool integerOnlyScalingUVE = false;
+    Platform::DisplayOrientationUVE orientationUVE = Platform::DisplayOrientationUVE::Auto;
+    std::vector<Platform::DisplayOrientationUVE> allowedOrientationsUVE{
+        Platform::DisplayOrientationUVE::Landscape, Platform::DisplayOrientationUVE::Portrait};
 
-    /// Whether the real window's GL context starts with vertical sync enabled.
+    /// `vsyncEnabledUVE` remains the source-compatible legacy toggle. Explicit enum selections
+    /// set `vsyncModeExplicitUVE`; otherwise EngineCore maps the legacy bool to Off/On.
     bool vsyncEnabledUVE = true;
+    Platform::VSyncModeUVE vsyncModeUVE = Platform::VSyncModeUVE::On;
+    bool vsyncModeExplicitUVE = false;
+    std::uint32_t focusedFrameRateCapUVE = 0U;
+    std::uint32_t unfocusedFrameRateCapUVE = 0U;
+    bool allowDisplaySleepUVE = true;
+    std::filesystem::path cursorImagePathUVE;
+    std::uint32_t cursorHotspotXUVE = 0U;
+    std::uint32_t cursorHotspotYUVE = 0U;
+    std::vector<std::uint8_t> cursorRgba8UVE;
+    std::uint32_t cursorImageWidthUVE = 0U;
+    std::uint32_t cursorImageHeightUVE = 0U;
+    bool cursorVisibleUVE = true;
+    bool cursorConfinedToWindowUVE = false;
+    bool appendSceneNameInEditorPlayModeUVE = false;
+    bool editorPlayModeUVE = false;
 
     /// Requested OpenGL context version, forwarded to Window::WindowDescUVE::glVersionMajor/Minor.
     /// The production default is OpenGL 4.6 Core, per the approved architecture decision.

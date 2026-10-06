@@ -25,6 +25,25 @@ TEST(NullWindowManagerUVETest, Construction_BookkeepsWidthHeightVSyncFromDesc) {
     EXPECT_FALSE(windowManager.IsVSyncEnabledUVE());
 }
 
+TEST(NullWindowManagerUVETest, Construction_UsesTypedDisplayPolicyAndContentScaleOverride) {
+    WindowDescUVE desc;
+    desc.mode = Platform::WindowModeUVE::Maximized;
+    desc.vsyncModeExplicit = true;
+    desc.vsyncMode = Platform::VSyncModeUVE::Mailbox;
+    desc.contentScaleOverride = 1.75;
+    NullWindowManagerUVE windowManager(desc);
+
+    EXPECT_EQ(windowManager.GetWindowModeUVE(), Platform::WindowModeUVE::Maximized);
+    EXPECT_FALSE(windowManager.IsFullscreenUVE());
+    EXPECT_EQ(windowManager.GetVSyncModeUVE(), Platform::VSyncModeUVE::Mailbox);
+    EXPECT_TRUE(windowManager.IsVSyncEnabledUVE());
+    float scaleX = 0.0F;
+    float scaleY = 0.0F;
+    windowManager.GetContentScaleUVE(scaleX, scaleY);
+    EXPECT_FLOAT_EQ(scaleX, 1.75F);
+    EXPECT_FLOAT_EQ(scaleY, 1.75F);
+}
+
 TEST(NullWindowManagerUVETest, DefaultDesc_MatchesWindowDescUVEDefaults) {
     NullWindowManagerUVE windowManager;
     EXPECT_EQ(windowManager.GetWidthUVE(), WindowDescUVE{}.width);
@@ -60,8 +79,10 @@ TEST(NullWindowManagerUVETest, SetFullscreenUVE_RoundTrips) {
     EXPECT_FALSE(windowManager.IsFullscreenUVE());
     windowManager.SetFullscreenUVE(true);
     EXPECT_TRUE(windowManager.IsFullscreenUVE());
+    EXPECT_EQ(windowManager.GetWindowModeUVE(), Platform::WindowModeUVE::Fullscreen);
     windowManager.SetFullscreenUVE(false);
     EXPECT_FALSE(windowManager.IsFullscreenUVE());
+    EXPECT_EQ(windowManager.GetWindowModeUVE(), Platform::WindowModeUVE::Windowed);
 }
 
 TEST(NullWindowManagerUVETest, EnumerateMonitorsUVE_ReturnsEmpty) {

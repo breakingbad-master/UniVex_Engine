@@ -57,6 +57,7 @@ public:
 
     void RenderFrameUVE(Scene::IEntityManagerUVE& entityManager, Scene::EntityUVE cameraEntity) override;
     [[nodiscard]] bool ResizeTargetsUVE(std::uint32_t width, std::uint32_t height) override;
+    void SetSceneClearColorUVE(const std::array<float, 4U>& color) noexcept override;
     void RenderFrameWithParticleRuntimeUVE(Scene::IEntityManagerUVE& entityManager, Scene::EntityUVE cameraEntity,
                                            const Scene::ParticleRuntimeUVE& particleRuntime) override;
     void RenderFrameToRegionUVE(Scene::IEntityManagerUVE& entityManager, Scene::EntityUVE cameraEntity,

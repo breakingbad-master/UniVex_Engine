@@ -1,6 +1,7 @@
 // Copyright (c) 2026 UniVex Studios. All Rights Reserved.
 #include "uve/window/window_desc_validation_uve.h"
 #include "uve/window/display_mode_validation_uve.h"
+#include <limits>
 #include <gtest/gtest.h>
 namespace UVE::Window::Tests {
 namespace {
@@ -54,6 +55,38 @@ TEST(WindowDescValidationUVETest, OversizedOrEmbeddedNulTitle_IsRejected) {
 TEST(WindowDescValidationUVETest, OpenGlMajorVersionBelowOne_IsRejected) {
     WindowDescUVE desc;
     desc.glVersionMajor = 0U;
+    EXPECT_FALSE(ValidateWindowDescUVE(desc));
+}
+
+TEST(WindowDescValidationUVETest, SizeLimitsAndScalingPoliciesAreValidated) {
+    WindowDescUVE desc;
+    desc.minimumWidth = 1600U;
+    desc.maximumWidth = 800U;
+    EXPECT_FALSE(ValidateWindowDescUVE(desc));
+
+    desc = WindowDescUVE{};
+    desc.contentScaleOverride = std::numeric_limits<double>::quiet_NaN();
+    EXPECT_FALSE(ValidateWindowDescUVE(desc));
+
+    desc = WindowDescUVE{};
+    desc.mode = static_cast<Platform::WindowModeUVE>(255U);
+    EXPECT_FALSE(ValidateWindowDescUVE(desc));
+}
+
+TEST(WindowDescValidationUVETest, CursorPixelsAndHotspotMustMatch) {
+    WindowDescUVE desc;
+    desc.cursorImageWidth = 2U;
+    desc.cursorImageHeight = 2U;
+    desc.cursorRgba8.assign(16U, 255U);
+    desc.cursorHotspotX = 1U;
+    desc.cursorHotspotY = 1U;
+    EXPECT_TRUE(ValidateWindowDescUVE(desc));
+
+    desc.cursorHotspotX = 2U;
+    EXPECT_FALSE(ValidateWindowDescUVE(desc));
+
+    desc.cursorHotspotX = 1U;
+    desc.cursorRgba8.pop_back();
     EXPECT_FALSE(ValidateWindowDescUVE(desc));
 }
 } // namespace

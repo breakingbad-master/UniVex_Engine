@@ -805,6 +805,9 @@ struct Renderer3DUVE::ImplUVE {
     std::shared_ptr<Shader::ShaderProgramUVE> toneMappingProgram;
     std::shared_ptr<Shader::ShaderProgramUVE> proceduralSkyProgram;
 
+    /// Project-selected presentation clear color used when no world environment supplies a sky.
+    std::array<float, 4U> sceneClearColor = kDefaultSceneClearColorUVE;
+
     /// Phase 2b post-process toggles, consulted while building each frame's render graph (see
     /// RenderFrameUVE()) - disabling either skips that group of passes entirely, not just their
     /// visual contribution.
@@ -1108,7 +1111,8 @@ struct Renderer3DUVE::ImplUVE {
     const UI::UIRuntimeUVE* uiRuntimeForFrame = nullptr;
     /// Built-in UI overlay program (engine/render/shader/built_in/ui_overlay.glsl) - position +
     /// texcoord + vertex color, alpha-blended, samples whichever texture is bound (the font atlas
-    /// for glyph quads, fallbackWhiteTexture for solid/image quads - see RecordUIOverlayItemsUVE).
+    /// for glyph quads, fallbackWhiteTexture for solid quads, and resolved asset textures for images -
+    /// see RecordUIOverlayItemsUVE).
     std::shared_ptr<Shader::ShaderProgramUVE> uiOverlayProgram;
     /// The font atlas's baked RGBA8 bitmap, uploaded to the GPU lazily on first use (the bitmap
     /// never changes after baking, so one upload for the renderer's whole lifetime suffices).
@@ -2442,15 +2446,11 @@ struct Renderer3DUVE::ImplUVE {
         return drawCalls;
     }
 
-    /// Records the UI overlay batch as up to 2 draw calls: non-glyph quads (solid-fill buttons/
-    /// canvases, and images - which, until a real asset-texture resolution path exists, also
-    /// render as a flat tint - see UIRuntimeUVE's own kind classification) bound to
-    /// fallbackWhiteTexture, then glyph quads bound to the font atlas. This 2-pass split preserves
-    /// the exact same visual order as one interleaved draw would, since UIRuntimeUVE always
-    /// appends images/buttons before text (UIDrawBatchUVE's own doc comment) - no non-glyph quad
-    /// ever needs to render on top of a glyph that precedes it in the array, because none ever
-    /// does. Each pass is independently skippable: a missing font atlas texture (bake/upload
-    /// failure) only drops the glyph pass, not the solid-quad one.
+    /// Records consecutive UI quads as texture-bound batches. Solid quads sample the white
+    /// fallback, images use their resolved asset textures, and glyphs sample the font atlas. Only
+    /// adjacent quads sharing a texture are combined, preserving the UIDrawBatchUVE paint order
+    /// even when differently-sorted canvases interleave text and images. A not-yet-ready image or
+    /// unavailable font atlas is omitted for this frame and retried on the next one.
     [[nodiscard]] std::size_t RecordUIOverlayItemsUVE(const UI::UIDrawBatchUVE& batch,
                                                        const Math::Matrix4x4UVE& projection,
                                                        ICommandBufferUVE& commandBuffer) {
@@ -2473,13 +2473,13 @@ struct Renderer3DUVE::ImplUVE {
             uiVertexStaging.push_back(makeVertex(x1, y1, quad.u1, quad.v1));
             uiVertexStaging.push_back(makeVertex(x0, y1, quad.u0, quad.v1));
         };
-        const auto drawPass = [this, &batch, &appendQuad, &projection, &commandBuffer,
-                               maxVertices](const TextureHandleUVE texture,
-                                            const auto& matchesPass) -> bool {
+        const auto drawQuads = [this, &appendQuad, &projection, &commandBuffer, maxVertices](
+                                   const TextureHandleUVE texture,
+                                   const std::vector<UI::UIQuadUVE>& quads) -> bool {
             uiVertexStaging.clear();
-            for (const UI::UIQuadUVE& quad : batch.quads) {
-                if (!matchesPass(quad) || uiVertexStaging.size() + kUIVerticesPerQuadUVE > maxVertices) {
-                    continue;
+            for (const UI::UIQuadUVE& quad : quads) {
+                if (uiVertexStaging.size() + kUIVerticesPerQuadUVE > maxVertices) {
+                    break;
                 }
                 appendQuad(quad);
             }
@@ -2496,15 +2496,45 @@ struct Renderer3DUVE::ImplUVE {
             return true;
         };
 
-        std::size_t drawCalls = 0U;
-        if (drawPass(fallbackWhiteTexture,
-                     [](const UI::UIQuadUVE& quad) { return quad.kind != UI::UIDrawItemKindUVE::Glyph; })) {
-            ++drawCalls;
+        struct UITextureBatchUVE final {
+            TextureHandleUVE texture = kInvalidTextureHandleUVE;
+            std::vector<UI::UIQuadUVE> quads;
+        };
+        std::vector<UITextureBatchUVE> orderedTextureBatches;
+        for (const UI::UIQuadUVE& quad : batch.quads) {
+            TextureHandleUVE texture = kInvalidTextureHandleUVE;
+            switch (quad.kind) {
+            case UI::UIDrawItemKindUVE::SolidColor:
+                texture = fallbackWhiteTexture;
+                break;
+            case UI::UIDrawItemKindUVE::Image: {
+                const std::optional<TextureHandleUVE> resolved =
+                    ResolveTextureGpuHandleUVE(quad.imageAssetGuid, fallbackWhiteTexture);
+                if (!resolved.has_value()) {
+                    continue; // The async load remains live; the image appears once its texture is ready.
+                }
+                texture = *resolved;
+                break;
+            }
+            case UI::UIDrawItemKindUVE::Glyph:
+                if (uiFontAtlasTexture == kInvalidTextureHandleUVE) {
+                    continue;
+                }
+                texture = uiFontAtlasTexture;
+                break;
+            }
+            if (orderedTextureBatches.empty() || orderedTextureBatches.back().texture != texture ||
+                orderedTextureBatches.back().quads.size() >= kMaximumUIQuadsUVE) {
+                orderedTextureBatches.push_back(UITextureBatchUVE{texture, {}});
+            }
+            orderedTextureBatches.back().quads.push_back(quad);
         }
-        if (uiFontAtlasTexture != kInvalidTextureHandleUVE &&
-            drawPass(uiFontAtlasTexture,
-                     [](const UI::UIQuadUVE& quad) { return quad.kind == UI::UIDrawItemKindUVE::Glyph; })) {
-            ++drawCalls;
+
+        std::size_t drawCalls = 0U;
+        for (const UITextureBatchUVE& batchForTexture : orderedTextureBatches) {
+            if (drawQuads(batchForTexture.texture, batchForTexture.quads)) {
+                ++drawCalls;
+            }
         }
         return drawCalls;
     }
@@ -3220,7 +3250,7 @@ void Renderer3DUVE::RenderFrameUVE(Scene::IEntityManagerUVE& entityManager, Scen
             passDesc.colorAttachment = m_impl->colorTarget;
             passDesc.depthAttachment = m_impl->depthTarget;
             passDesc.colorLoadOp = LoadOpUVE::Clear;
-            passDesc.clearColor = kDefaultSceneClearColorUVE;
+            passDesc.clearColor = m_impl->sceneClearColor;
             if (m_impl->environmentFrame.hasEnvironment) {
                 const Math::Vector3UVE& horizon = m_impl->environmentFrame.horizonColor;
                 passDesc.clearColor = {horizon.x, horizon.y, horizon.z, 1.0F};
@@ -3702,6 +3732,15 @@ void Renderer3DUVE::RenderFrameToTargetUVE(Scene::IEntityManagerUVE& entityManag
 
 void Renderer3DUVE::SetPostProcessSettingsUVE(const PostProcessSettingsUVE& settings) {
     m_impl->postProcessSettings = settings;
+}
+
+void Renderer3DUVE::SetSceneClearColorUVE(const std::array<float, 4U>& color) noexcept {
+    for (const float channel : color) {
+        if (!std::isfinite(channel) || channel < 0.0F || channel > 1.0F) {
+            return;
+        }
+    }
+    m_impl->sceneClearColor = color;
 }
 
 void Renderer3DUVE::SetUIRuntimeUVE(const UI::UIRuntimeUVE* const uiRuntime) noexcept {

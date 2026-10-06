@@ -41,12 +41,15 @@
 #include "uve/rhi_shader/built_in_shaders_uve.h"
 #include "uve/rhi_shader/shader_manager_uve.h"
 #include "uve/component/camera_component_uve.h"
+#include "uve/component/canvas_component_uve.h"
 #include "uve/component/light_component_uve.h"
 #include "uve/component/mesh_component_uve.h"
 #include "uve/component/primitive_mesh_component_uve.h"
 #include "uve/component/surface_instance_component_uve.h"
 #include "uve/component/transform_component_uve.h"
 #include "uve/component/ui_button_component_uve.h"
+#include "uve/component/ui_image_component_uve.h"
+#include "uve/component/ui_text_component_uve.h"
 #include "uve/component/world_transform_component_uve.h"
 #include "uve/entity/entity_manager_uve.h"
 #include "uve/objects/3d/decal_3d_uve.h"
@@ -1240,6 +1243,123 @@ TEST_F(Renderer3DUVETest, RenderFrameUVE_OverflowedCascadeSplitsDisableShadowPas
     }));
 }
 #endif
+
+TEST_F(Renderer3DUVETest, RenderFrameUVE_UIImages_BindTheirResolvedTextureInsteadOfSolidFallback) {
+    const Scene::EntityUVE cameraEntity = MakeCameraEntityUVE();
+    Input::InputSystemUVE inputSystem{eventSystem};
+    UI::UIRuntimeUVE uiRuntime;
+    renderer3D->SetUIRuntimeUVE(&uiRuntime);
+    PrimeMaterialProgramUVE(*renderer3D, cameraEntity);
+    struct ResetUIRuntimeBindingUVE final {
+        Render::Renderer3DUVE& renderer;
+        ~ResetUIRuntimeBindingUVE() { renderer.SetUIRuntimeUVE(nullptr); }
+    } resetUIRuntimeBinding{*renderer3D};
+
+    const Scene::EntityUVE solidImageEntity = entityManager.CreateEntityUVE();
+    Scene::UIImageComponentUVE solidImage;
+    solidImage.sizePixels = Math::Vector2UVE{32.0F, 32.0F};
+    entityManager.AddComponentUVE<Scene::UIImageComponentUVE>(solidImageEntity, solidImage);
+    inputSystem.UpdateUVE();
+    uiRuntime.TickUVE(entityManager, inputSystem);
+    ASSERT_EQ(uiRuntime.GetDrawBatchUVE().quads.size(), 1U);
+    renderer3D->RenderFrameUVE(entityManager, cameraEntity);
+
+    const auto slotZeroTextures = [](const std::vector<RecordedCommandUVE>& commands) {
+        std::vector<TextureHandleUVE> result;
+        for (const RecordedCommandUVE& command : commands) {
+            if (const auto* const bind = std::get_if<BindTextureCommandUVE>(&command);
+                bind != nullptr && bind->slot == 0U) {
+                result.push_back(bind->texture);
+            }
+        }
+        return result;
+    };
+    const std::vector<TextureHandleUVE> solidTextures =
+        slotZeroTextures(renderDevice.GetLastSubmittedCommandsUVE());
+
+    static_cast<void>(entityManager.DestroyEntityUVE(solidImageEntity));
+    const Asset::AssetGuidUVE splashTextureGuid = assetDatabase.RegisterUVE("renderer3d_tests_ui_splash.uvtex");
+    const Scene::EntityUVE imageEntity = entityManager.CreateEntityUVE();
+    Scene::UIImageComponentUVE texturedImage;
+    texturedImage.textureAssetGuid = splashTextureGuid;
+    texturedImage.sizePixels = Math::Vector2UVE{64.0F, 32.0F};
+    entityManager.AddComponentUVE<Scene::UIImageComponentUVE>(imageEntity, texturedImage);
+    WaitUntilTextureReadyUVE(splashTextureGuid);
+    inputSystem.UpdateUVE();
+    uiRuntime.TickUVE(entityManager, inputSystem);
+    ASSERT_EQ(uiRuntime.GetDrawBatchUVE().quads.size(), 1U);
+    renderer3D->RenderFrameUVE(entityManager, cameraEntity);
+
+    const std::vector<TextureHandleUVE> imageTextures =
+        slotZeroTextures(renderDevice.GetLastSubmittedCommandsUVE());
+    ASSERT_FALSE(solidTextures.empty());
+    ASSERT_EQ(imageTextures.size(), solidTextures.size());
+    EXPECT_NE(imageTextures.back(), kInvalidTextureHandleUVE);
+    EXPECT_NE(imageTextures.back(), solidTextures.back());
+}
+
+TEST_F(Renderer3DUVETest, RenderFrameUVE_UIOverlay_PreservesCanvasOrderAcrossGlyphAndImageTextures) {
+    const Scene::EntityUVE cameraEntity = MakeCameraEntityUVE();
+    Input::InputSystemUVE inputSystem{eventSystem};
+    UI::UIRuntimeUVE uiRuntime;
+    renderer3D->SetUIRuntimeUVE(&uiRuntime);
+    PrimeMaterialProgramUVE(*renderer3D, cameraEntity);
+    struct ResetUIRuntimeBindingUVE final {
+        Render::Renderer3DUVE& renderer;
+        ~ResetUIRuntimeBindingUVE() { renderer.SetUIRuntimeUVE(nullptr); }
+    } resetUIRuntimeBinding{*renderer3D};
+
+    const Asset::AssetGuidUVE splashTextureGuid = assetDatabase.RegisterUVE("renderer3d_tests_ui_canvas_order.uvtex");
+    const Scene::EntityUVE imageCanvasEntity = entityManager.CreateEntityUVE();
+    Scene::CanvasComponentUVE imageCanvas;
+    imageCanvas.sortOrder = 1;
+    entityManager.AddComponentUVE<Scene::CanvasComponentUVE>(imageCanvasEntity, imageCanvas);
+    Scene::UIImageComponentUVE image;
+    image.textureAssetGuid = splashTextureGuid;
+    image.positionPixels = Math::Vector2UVE{20.0F, 20.0F};
+    image.sizePixels = Math::Vector2UVE{48.0F, 48.0F};
+    entityManager.AddComponentUVE<Scene::UIImageComponentUVE>(imageCanvasEntity, image);
+    WaitUntilTextureReadyUVE(splashTextureGuid);
+    inputSystem.UpdateUVE();
+    uiRuntime.TickUVE(entityManager, inputSystem);
+    ASSERT_EQ(uiRuntime.GetDrawBatchUVE().quads.size(), 1U);
+    renderer3D->RenderFrameUVE(entityManager, cameraEntity);
+
+    const auto slotZeroTextures = [](const std::vector<RecordedCommandUVE>& commands) {
+        std::vector<TextureHandleUVE> result;
+        for (const RecordedCommandUVE& command : commands) {
+            if (const auto* const bind = std::get_if<BindTextureCommandUVE>(&command);
+                bind != nullptr && bind->slot == 0U) {
+                result.push_back(bind->texture);
+            }
+        }
+        return result;
+    };
+    const std::vector<TextureHandleUVE> imageOnlyTextures =
+        slotZeroTextures(renderDevice.GetLastSubmittedCommandsUVE());
+    ASSERT_FALSE(imageOnlyTextures.empty());
+
+    const Scene::EntityUVE textCanvasEntity = entityManager.CreateEntityUVE();
+    Scene::CanvasComponentUVE textCanvas;
+    textCanvas.sortOrder = 0;
+    entityManager.AddComponentUVE<Scene::CanvasComponentUVE>(textCanvasEntity, textCanvas);
+    Scene::UITextComponentUVE text;
+    text.text = "A";
+    text.positionPixels = Math::Vector2UVE{8.0F, 8.0F};
+    entityManager.AddComponentUVE<Scene::UITextComponentUVE>(textCanvasEntity, text);
+    inputSystem.UpdateUVE();
+    uiRuntime.TickUVE(entityManager, inputSystem);
+    ASSERT_EQ(uiRuntime.GetDrawBatchUVE().quads.size(), 2U);
+    EXPECT_EQ(uiRuntime.GetDrawBatchUVE().quads[0].kind, UI::UIDrawItemKindUVE::Glyph);
+    EXPECT_EQ(uiRuntime.GetDrawBatchUVE().quads[1].kind, UI::UIDrawItemKindUVE::Image);
+    renderer3D->RenderFrameUVE(entityManager, cameraEntity);
+
+    const std::vector<TextureHandleUVE> mixedTextures =
+        slotZeroTextures(renderDevice.GetLastSubmittedCommandsUVE());
+    ASSERT_GE(mixedTextures.size(), 2U);
+    EXPECT_EQ(mixedTextures.back(), imageOnlyTextures.back());
+    EXPECT_NE(mixedTextures[mixedTextures.size() - 2U], mixedTextures.back());
+}
 
 TEST_F(Renderer3DUVETest, RenderFrameUVE_MaterialWithAlbedoTexture_UploadsAndBindsRealTexture) {
     const std::size_t baselineLiveResources = renderDevice.GetLiveResourceCountUVE();

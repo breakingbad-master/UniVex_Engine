@@ -27,8 +27,13 @@ public:
     [[nodiscard]] bool IsCloseRequestedUVE() const noexcept override;
     void SetVSyncEnabledUVE(bool enabled) override;
     [[nodiscard]] bool IsVSyncEnabledUVE() const noexcept override;
+    void SetVSyncModeUVE(Platform::VSyncModeUVE mode) override;
+    [[nodiscard]] Platform::VSyncModeUVE GetVSyncModeUVE() const noexcept override;
     void SetFullscreenUVE(bool fullscreen) override;
     [[nodiscard]] bool IsFullscreenUVE() const noexcept override;
+    void SetWindowModeUVE(Platform::WindowModeUVE mode) override;
+    [[nodiscard]] Platform::WindowModeUVE GetWindowModeUVE() const noexcept override;
+    void GetContentScaleUVE(float& outX, float& outY) const noexcept override;
     [[nodiscard]] std::uint32_t GetWidthUVE() const noexcept override;
     [[nodiscard]] std::uint32_t GetHeightUVE() const noexcept override;
     [[nodiscard]] std::vector<MonitorInfoUVE> EnumerateMonitorsUVE() const override;
@@ -39,6 +44,9 @@ private:
     std::uint32_t m_width;
     std::uint32_t m_height;
     bool m_vsyncEnabled;
+    Platform::VSyncModeUVE m_vsyncMode = Platform::VSyncModeUVE::On;
+    Platform::WindowModeUVE m_windowMode = Platform::WindowModeUVE::Windowed;
+    double m_contentScaleOverride = 0.0;
     bool m_fullscreen = false;
 };
 

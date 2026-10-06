@@ -6,7 +6,14 @@
 namespace UVE::Window {
 
 NullWindowManagerUVE::NullWindowManagerUVE(const WindowDescUVE& desc)
-    : m_width(desc.width), m_height(desc.height), m_vsyncEnabled(desc.vsyncEnabled) {}
+    : m_width(desc.width), m_height(desc.height),
+      m_vsyncEnabled(desc.vsyncModeExplicit ? desc.vsyncMode != Platform::VSyncModeUVE::Off : desc.vsyncEnabled),
+      m_vsyncMode(desc.vsyncModeExplicit ? desc.vsyncMode
+                                        : (desc.vsyncEnabled ? Platform::VSyncModeUVE::On
+                                                             : Platform::VSyncModeUVE::Off)),
+      m_windowMode(desc.mode), m_contentScaleOverride(desc.contentScaleOverride),
+      m_fullscreen(desc.mode == Platform::WindowModeUVE::Fullscreen ||
+                   desc.mode == Platform::WindowModeUVE::ExclusiveFullscreen) {}
 
 bool NullWindowManagerUVE::IsValidUVE() const noexcept {
     return true;
@@ -26,20 +33,47 @@ bool NullWindowManagerUVE::IsCloseRequestedUVE() const noexcept {
     return false;
 }
 
-void NullWindowManagerUVE::SetVSyncEnabledUVE(bool enabled) {
+void NullWindowManagerUVE::SetVSyncEnabledUVE(const bool enabled) {
     m_vsyncEnabled = enabled;
+    m_vsyncMode = enabled ? Platform::VSyncModeUVE::On : Platform::VSyncModeUVE::Off;
 }
 
 bool NullWindowManagerUVE::IsVSyncEnabledUVE() const noexcept {
     return m_vsyncEnabled;
 }
 
-void NullWindowManagerUVE::SetFullscreenUVE(bool fullscreen) {
+void NullWindowManagerUVE::SetVSyncModeUVE(const Platform::VSyncModeUVE mode) {
+    m_vsyncMode = mode;
+    m_vsyncEnabled = mode != Platform::VSyncModeUVE::Off;
+}
+
+Platform::VSyncModeUVE NullWindowManagerUVE::GetVSyncModeUVE() const noexcept {
+    return m_vsyncMode;
+}
+
+void NullWindowManagerUVE::SetFullscreenUVE(const bool fullscreen) {
     m_fullscreen = fullscreen;
+    m_windowMode = fullscreen ? Platform::WindowModeUVE::Fullscreen : Platform::WindowModeUVE::Windowed;
 }
 
 bool NullWindowManagerUVE::IsFullscreenUVE() const noexcept {
     return m_fullscreen;
+}
+
+void NullWindowManagerUVE::SetWindowModeUVE(const Platform::WindowModeUVE mode) {
+    m_windowMode = mode;
+    m_fullscreen = mode == Platform::WindowModeUVE::Fullscreen ||
+                   mode == Platform::WindowModeUVE::ExclusiveFullscreen;
+}
+
+Platform::WindowModeUVE NullWindowManagerUVE::GetWindowModeUVE() const noexcept {
+    return m_windowMode;
+}
+
+void NullWindowManagerUVE::GetContentScaleUVE(float& outX, float& outY) const noexcept {
+    const float scale = m_contentScaleOverride > 0.0 ? static_cast<float>(m_contentScaleOverride) : 1.0F;
+    outX = scale;
+    outY = scale;
 }
 
 std::uint32_t NullWindowManagerUVE::GetWidthUVE() const noexcept {

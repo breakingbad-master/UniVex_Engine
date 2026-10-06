@@ -964,6 +964,94 @@ bool VulkanRenderDeviceUVE::ImplUVE::CreateSwapchainResourcesUVE() {
         imageCount = capabilities.maxImageCount;
     }
 
+    std::vector<VkPresentModeKHR> availablePresentModes;
+    std::uint32_t presentModeCount = 0U;
+    if (vk.vkGetPhysicalDeviceSurfacePresentModesKHR(physicalDevice, surface, &presentModeCount, nullptr) ==
+            VK_SUCCESS &&
+        presentModeCount > 0U && presentModeCount <= 256U) {
+        availablePresentModes.resize(presentModeCount);
+        if (vk.vkGetPhysicalDeviceSurfacePresentModesKHR(physicalDevice, surface, &presentModeCount,
+                                                         availablePresentModes.data()) != VK_SUCCESS) {
+            availablePresentModes.clear();
+        } else {
+            availablePresentModes.resize(presentModeCount);
+        }
+    }
+    const auto supportsPresentMode = [&availablePresentModes](const VkPresentModeKHR mode) {
+        return std::find(availablePresentModes.begin(), availablePresentModes.end(), mode) !=
+               availablePresentModes.end();
+    };
+    VkPresentModeKHR presentMode = VK_PRESENT_MODE_FIFO_KHR;
+    const Platform::VSyncModeUVE requestedVSync = bridge != nullptr
+                                                       ? bridge->GetRequestedVSyncModeUVE()
+                                                       : Platform::VSyncModeUVE::On;
+    switch (requestedVSync) {
+    case Platform::VSyncModeUVE::Off:
+        if (supportsPresentMode(VK_PRESENT_MODE_IMMEDIATE_KHR)) {
+            presentMode = VK_PRESENT_MODE_IMMEDIATE_KHR;
+        } else if (supportsPresentMode(VK_PRESENT_MODE_MAILBOX_KHR)) {
+            // Mailbox is the closest tearing-free low-latency fallback when immediate mode is absent.
+            presentMode = VK_PRESENT_MODE_MAILBOX_KHR;
+        } else {
+            UVE_WARNING("VulkanRenderDeviceUVE: immediate/mailbox present mode is unavailable; falling back to FIFO");
+        }
+        break;
+    case Platform::VSyncModeUVE::On:
+        presentMode = VK_PRESENT_MODE_FIFO_KHR;
+        break;
+    case Platform::VSyncModeUVE::Adaptive:
+        if (supportsPresentMode(VK_PRESENT_MODE_FIFO_RELAXED_KHR)) {
+            presentMode = VK_PRESENT_MODE_FIFO_RELAXED_KHR;
+        } else {
+            UVE_WARNING("VulkanRenderDeviceUVE: adaptive present mode is unavailable; falling back to FIFO");
+        }
+        break;
+    case Platform::VSyncModeUVE::Mailbox:
+        if (supportsPresentMode(VK_PRESENT_MODE_MAILBOX_KHR)) {
+            presentMode = VK_PRESENT_MODE_MAILBOX_KHR;
+        } else {
+            UVE_WARNING("VulkanRenderDeviceUVE: mailbox present mode is unavailable; falling back to FIFO");
+        }
+        break;
+    default:
+        UVE_WARNING("VulkanRenderDeviceUVE: invalid V-sync mode; falling back to FIFO");
+        break;
+    }
+    if (!supportsPresentMode(presentMode)) {
+        UVE_WARNING("VulkanRenderDeviceUVE: FIFO present mode is unavailable; swapchain creation may fail");
+        presentMode = VK_PRESENT_MODE_FIFO_KHR;
+    }
+
+    VkCompositeAlphaFlagBitsKHR compositeAlpha = VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR;
+    if (bridge != nullptr && bridge->IsTransparentFramebufferRequestedUVE()) {
+        constexpr std::array<VkCompositeAlphaFlagBitsKHR, 3U> kTransparentAlphaModes{
+            VK_COMPOSITE_ALPHA_PRE_MULTIPLIED_BIT_KHR,
+            VK_COMPOSITE_ALPHA_POST_MULTIPLIED_BIT_KHR,
+            VK_COMPOSITE_ALPHA_INHERIT_BIT_KHR};
+        const auto transparentMode = std::find_if(kTransparentAlphaModes.begin(), kTransparentAlphaModes.end(),
+            [&capabilities](const VkCompositeAlphaFlagBitsKHR candidate) {
+                return (capabilities.supportedCompositeAlpha & candidate) != 0U;
+            });
+        if (transparentMode != kTransparentAlphaModes.end()) {
+            compositeAlpha = *transparentMode;
+        } else {
+            UVE_WARNING("VulkanRenderDeviceUVE: surface has no transparent composite-alpha mode; using opaque if supported");
+        }
+    }
+    if ((capabilities.supportedCompositeAlpha & compositeAlpha) == 0U) {
+        constexpr std::array<VkCompositeAlphaFlagBitsKHR, 4U> kAlphaFallbackOrder{
+            VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR, VK_COMPOSITE_ALPHA_PRE_MULTIPLIED_BIT_KHR,
+            VK_COMPOSITE_ALPHA_POST_MULTIPLIED_BIT_KHR, VK_COMPOSITE_ALPHA_INHERIT_BIT_KHR};
+        const auto supportedAlpha = std::find_if(kAlphaFallbackOrder.begin(), kAlphaFallbackOrder.end(),
+            [&capabilities](const VkCompositeAlphaFlagBitsKHR candidate) {
+                return (capabilities.supportedCompositeAlpha & candidate) != 0U;
+            });
+        if (supportedAlpha == kAlphaFallbackOrder.end()) {
+            return LogBailUVE("surface advertises no supported composite-alpha mode");
+        }
+        compositeAlpha = *supportedAlpha;
+    }
+
     VkSwapchainCreateInfoKHR swapchainInfo{};
     swapchainInfo.sType = VK_STRUCTURE_TYPE_SWAPCHAIN_CREATE_INFO_KHR;
     swapchainInfo.surface = surface;
@@ -975,8 +1063,8 @@ bool VulkanRenderDeviceUVE::ImplUVE::CreateSwapchainResourcesUVE() {
     swapchainInfo.imageUsage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT;
     swapchainInfo.imageSharingMode = VK_SHARING_MODE_EXCLUSIVE; // one queue family total (M1)
     swapchainInfo.preTransform = capabilities.currentTransform;
-    swapchainInfo.compositeAlpha = VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR;
-    swapchainInfo.presentMode = VK_PRESENT_MODE_FIFO_KHR; // guaranteed present; FIFO == vsync
+    swapchainInfo.compositeAlpha = compositeAlpha;
+    swapchainInfo.presentMode = presentMode;
     swapchainInfo.clipped = VK_TRUE;
     swapchainInfo.oldSwapchain = VK_NULL_HANDLE;
 

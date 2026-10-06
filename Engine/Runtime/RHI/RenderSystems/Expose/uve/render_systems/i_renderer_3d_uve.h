@@ -2,6 +2,7 @@
 
 #pragma once
 
+#include <array>
 #include <cstddef>
 #include <cstdint>
 #include <span>
@@ -162,6 +163,12 @@ public:
         static_cast<void>(width);
         static_cast<void>(height);
         return false;
+    }
+
+    /// Sets the scene/presentation clear color used when no sky is active. The default is a no-op
+    /// so lightweight renderers and test doubles need not retain the value.
+    virtual void SetSceneClearColorUVE(const std::array<float, 4U>& color) noexcept {
+        static_cast<void>(color);
     }
 
     /// Renders the scene while extracting a copied particle snapshot from the caller-owned runtime

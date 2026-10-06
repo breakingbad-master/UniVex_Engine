@@ -19,6 +19,8 @@ FetchContent_MakeAvailable(googletest)
 add_executable(uve_core_tests
     Support/test_scratch_uve.cpp
     Core/Platform/editor_project_package_uve_tests.cpp
+    Core/Platform/application_runtime_uve_tests.cpp
+    Core/Platform/crash_reporter_uve_tests.cpp
     Core/Logging/logger_uve_tests.cpp
     Core/Logging/log_format_uve_tests.cpp
     Core/Memory/heap_allocator_uve_tests.cpp
@@ -82,6 +84,7 @@ add_executable(uve_core_tests
     Commandline/command_line_uve_tests.cpp
     Config/config_manager_uve_tests.cpp
     Config/settings_registry_uve_tests.cpp
+    Engine/engine_settings_layering_uve_tests.cpp
     Network/reliable_packet_window_uve_tests.cpp
     Plugins/plugin_registry_uve_tests.cpp
     ProjectCheck/project_checker_uve_tests.cpp
@@ -102,6 +105,7 @@ add_executable(uve_core_tests
     Window/framebuffer_size_validation_uve_tests.cpp
     Window/monitor_info_validation_uve_tests.cpp
     Window/null_window_manager_uve_tests.cpp
+    Window/presentation_layout_uve_tests.cpp
     Window/window_desc_validation_uve_tests.cpp
     Math/vector2_uve_tests.cpp
     Math/vector3_uve_tests.cpp
@@ -147,6 +151,7 @@ target_link_libraries(uve_core_tests PRIVATE
     uve_rhi_shader
     uve_commandline
     uve_config
+    uve_engine_settings
     uve_network
     uve_plugins
     uve_project_check_lib
@@ -398,6 +403,7 @@ add_executable(uve_engine_tests
     Engine/version_uve_tests.cpp
     Engine/engine_services_uve_tests.cpp
     Engine/engine_core_uve_tests.cpp
+    Engine/engine_core_settings_layering_uve_tests.cpp
     Engine/input_map_document_uve_tests.cpp
     Pack/project_launcher_uve_tests.cpp
     Pack/project_packager_uve_tests.cpp
@@ -496,4 +502,27 @@ uve_set_warnings(uve_editor_tests)
 target_include_directories(uve_editor_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 
 gtest_discover_tests(uve_editor_tests)
+endif()
+
+if(NOT UVE_HAS_DESKTOP_GL)
+    # Exercise the actual EngineCoreUVE settings bootstrap in headless CPU-only builds. The full
+    # engine test source includes raw GL calls; this focused suite covers the same settings path
+    # without requiring those desktop-only tests or their runtime dependencies.
+    add_executable(uve_engine_settings_integration_tests
+        Support/test_scratch_uve.cpp
+        Engine/engine_core_settings_layering_uve_tests.cpp
+        Pack/project_packager_uve_tests.cpp
+        Pack/project_launcher_uve_tests.cpp
+    )
+    target_link_libraries(uve_engine_settings_integration_tests PRIVATE
+        uve_core
+        uve_pack_lib
+        GTest::gtest
+        GTest::gtest_main
+    )
+    target_include_directories(uve_engine_settings_integration_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+    target_compile_features(uve_engine_settings_integration_tests PRIVATE cxx_std_23)
+    target_compile_definitions(uve_engine_settings_integration_tests PRIVATE UVE_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
+    uve_set_warnings(uve_engine_settings_integration_tests)
+    gtest_discover_tests(uve_engine_settings_integration_tests)
 endif()
