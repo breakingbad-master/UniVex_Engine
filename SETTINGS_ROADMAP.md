@@ -380,9 +380,10 @@ on this Linux build.
       wired; native behavior could not be exercised in this environment.
 - [/] Frame rate cap, separate caps for focused and unfocused windows. Runtime deadline pacing is
       wired but does not yet have timing-specific integration coverage.
-- [~] Allow display sleep / keep screen on. The GLFW backend uses the Windows display-power API;
-      GLFW has no portable equivalent, so other desktop platforms currently retain but do not apply
-      this policy.
+- [/] Allow display sleep / keep screen on. Windows uses the display-power API, macOS holds an
+      IOPM assertion, and Linux requests a logind `idle` inhibitor through optional libsystemd.
+      Platforms without a supported native API (or Linux builds without libsystemd/logind) warn and
+      fail open; native power behavior could not be exercised in this environment.
 - [/] Mouse cursor: custom image, hotspot, visibility default, confine-to-window default. PNG
       resolution/loading, path containment, descriptor validation, and config mapping are covered;
       native cursor behavior remains unverified here.
@@ -394,9 +395,11 @@ Implementation/verification note: project package settings, typed settings layer
 `WindowDescUVE`, the null backend, Vulkan policy, viewport-layout helpers, and title formatting are
 wired. CPU-only build and focused core/integration tests pass. GLFW/OpenGL and Editor dependencies
 were unavailable, so native window behavior and Editor Play integration are not fully verified.
-The remaining gaps explicitly marked `[~]` are handheld orientation enforcement and portable
-non-Windows display-sleep inhibition. Do not treat this item as complete or move on to §1.3 until
-those gaps are addressed and verified; the user must approve any roadmap-item transition.
+The remaining gap explicitly marked `[~]` is handheld orientation enforcement; this checkout has no
+handheld window backend to consume the policy. Display-sleep inhibitors are wired for Windows,
+macOS, and Linux with optional systemd/logind support, but native power behavior remains unverified.
+Do not treat this item as complete or move on to §1.3 until the remaining gap and native verification
+are addressed; the user must approve any roadmap-item transition.
 
 ## 1.3 Rendering
 

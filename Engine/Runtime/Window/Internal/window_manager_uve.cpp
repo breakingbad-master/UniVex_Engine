@@ -11,6 +11,18 @@
 #include <string_view>
 #include <utility>
 
+#if defined(__APPLE__)
+#include <CoreFoundation/CoreFoundation.h>
+#include <IOKit/pwr_mgt/IOPMLib.h>
+#endif
+
+#if defined(__linux__) && defined(UVE_HAS_SYSTEMD)
+#include <cerrno>
+#include <fcntl.h>
+#include <systemd/sd-bus.h>
+#include <unistd.h>
+#endif
+
 #include "uve/logging/logging_macros_uve.h"
 #include "uve/input/key_code_uve.h"
 #include "uve/input/mouse_button_uve.h"
@@ -88,6 +100,12 @@ struct WindowManagerUVE::ImplUVE {
     bool transparent = false;
     bool highDpiAware = true;
     bool displaySleepAllowed = true;
+    bool displaySleepWarningLogged = false;
+#if defined(__APPLE__)
+    IOPMAssertionID displaySleepAssertion = kIOPMNullAssertionID;
+#elif defined(__linux__) && defined(UVE_HAS_SYSTEMD)
+    int displaySleepInhibitorFd = -1;
+#endif
     double contentScaleOverride = 0.0;
     Input::IInputSystemUVE* inputSystem = nullptr;
     float scrollDelta = 0.0F;
@@ -580,10 +598,93 @@ void WindowManagerUVE::SetDisplaySleepAllowedUVE(const bool allowed) noexcept {
     if (SetThreadExecutionState(requestedState) == 0) {
         UVE_WARNING("WindowManagerUVE: Windows rejected the display power request");
     }
+#elif defined(__APPLE__)
+    if (allowed) {
+        if (m_impl->displaySleepAssertion != kIOPMNullAssertionID) {
+            const IOReturn result = IOPMAssertionRelease(m_impl->displaySleepAssertion);
+            if (result == kIOReturnSuccess) {
+                m_impl->displaySleepAssertion = kIOPMNullAssertionID;
+            } else {
+                UVE_WARNING("WindowManagerUVE: macOS could not release display-sleep assertion ({})",
+                            static_cast<int>(result));
+            }
+        }
+        m_impl->displaySleepWarningLogged = false;
+        return;
+    }
+    if (m_impl->displaySleepAssertion == kIOPMNullAssertionID) {
+        const IOReturn result = IOPMAssertionCreateWithName(
+            kIOPMAssertionTypePreventUserIdleDisplaySleep, kIOPMAssertionLevelOn,
+            CFSTR("UniVex Engine is keeping the display active"), &m_impl->displaySleepAssertion);
+        if (result != kIOReturnSuccess || m_impl->displaySleepAssertion == kIOPMNullAssertionID) {
+            m_impl->displaySleepAssertion = kIOPMNullAssertionID;
+            if (!m_impl->displaySleepWarningLogged) {
+                UVE_WARNING("WindowManagerUVE: macOS could not prevent idle display sleep ({})",
+                            static_cast<int>(result));
+                m_impl->displaySleepWarningLogged = true;
+            }
+        } else {
+            m_impl->displaySleepWarningLogged = false;
+        }
+    }
+#elif defined(__linux__) && defined(UVE_HAS_SYSTEMD)
+    if (allowed) {
+        if (m_impl->displaySleepInhibitorFd >= 0) {
+            static_cast<void>(::close(m_impl->displaySleepInhibitorFd));
+            m_impl->displaySleepInhibitorFd = -1;
+        }
+        m_impl->displaySleepWarningLogged = false;
+        return;
+    }
+    if (m_impl->displaySleepInhibitorFd >= 0) {
+        return;
+    }
+
+    sd_bus* bus = nullptr;
+    sd_bus_message* reply = nullptr;
+    sd_bus_error error = SD_BUS_ERROR_NULL;
+    int inhibitorFd = -1;
+    int result = sd_bus_open_system(&bus);
+    if (result >= 0) {
+        result = sd_bus_call_method(bus, "org.freedesktop.login1", "/org/freedesktop/login1",
+                                    "org.freedesktop.login1.Manager", "Inhibit", &error, &reply,
+                                    "ssss", "idle", "UniVex Engine",
+                                    "Application requests an active display", "block");
+    }
+    if (result >= 0) {
+        result = sd_bus_message_read(reply, "h", &inhibitorFd);
+    }
+    if (result >= 0 && inhibitorFd >= 0) {
+        // sd-bus owns the received descriptor through the reply message. Duplicate it before
+        // releasing the message; logind drops the inhibition when our retained descriptor closes.
+        m_impl->displaySleepInhibitorFd = ::fcntl(inhibitorFd, F_DUPFD_CLOEXEC, 3);
+        if (m_impl->displaySleepInhibitorFd < 0) {
+            result = -errno;
+        }
+    }
+    if (m_impl->displaySleepInhibitorFd < 0) {
+        if (!m_impl->displaySleepWarningLogged) {
+            UVE_WARNING("WindowManagerUVE: Linux logind could not inhibit idle display sleep ({}: {})",
+                        result, error.message != nullptr ? error.message : "no inhibitor descriptor returned");
+            m_impl->displaySleepWarningLogged = true;
+        }
+    } else {
+        m_impl->displaySleepWarningLogged = false;
+    }
+    if (reply != nullptr) {
+        sd_bus_message_unref(reply);
+    }
+    if (bus != nullptr) {
+        sd_bus_unref(bus);
+    }
+    sd_bus_error_free(&error);
 #else
-    // GLFW has no portable display-sleep inhibitor. Keep the policy in the descriptor so native
-    // platform integrations can implement it without changing project configuration.
-    static_cast<void>(allowed);
+    if (allowed) {
+        m_impl->displaySleepWarningLogged = false;
+    } else if (!m_impl->displaySleepWarningLogged) {
+        UVE_WARNING("WindowManagerUVE: this platform has no native display-sleep inhibitor");
+        m_impl->displaySleepWarningLogged = true;
+    }
 #endif
 }
 
