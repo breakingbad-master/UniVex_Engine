@@ -73,6 +73,8 @@
 #include "uve/input/gamepad_input_system_uve.h"
 #include "uve/input/input_system_uve.h"
 #include "uve/gameplay/attribute_events_uve.h"
+#include "uve/gameplay/cinematic_events_uve.h"
+#include "uve/gameplay/cinematic_uve.h"
 #include "uve/gameplay/gameplay_attributes_uve.h"
 #include "uve/gameplay/gameplay_input_uve.h"
 #include "uve/gameplay/status_effects_uve.h"
@@ -1836,6 +1838,28 @@ void EngineCoreUVE::SyncNavigationUVE(const float fixedDeltaTimeSeconds) {
     }
 }
 
+void EngineCoreUVE::SyncCinematicUVE(const float deltaSeconds) {
+    for (const Scene::EntityUVE entity :
+         CollectFixedStepOrderUVE<Scene::CinematicComponentUVE>(*m_entityManager, *m_sceneGraph)) {
+        Scene::CinematicComponentUVE& cinematic =
+            m_entityManager->GetComponentUVE<Scene::CinematicComponentUVE>(entity);
+        if (cinematic.autoplay && !cinematic.isPlaying && !cinematic.finished) {
+            const std::vector<std::string> opened = Scene::PlayCinematicUVE(cinematic);
+            for (const std::string& eventId : opened) {
+                m_eventSystem->QueueEvent(Gameplay::CinematicEventFiredUVE{entity, eventId, 0.0});
+            }
+        }
+        const Scene::CinematicStepResultUVE result = Scene::StepCinematicUVE(cinematic, deltaSeconds);
+        for (const std::string& eventId : result.firedEventIds) {
+            m_eventSystem->QueueEvent(
+                Gameplay::CinematicEventFiredUVE{entity, eventId, cinematic.currentTimeSeconds});
+        }
+        if (result.activeCamera != Scene::kInvalidEntityUVE) {
+            SetActiveCameraUVE(result.activeCamera);
+        }
+    }
+}
+
 void EngineCoreUVE::SyncGameplayAttributesUVE(const float deltaSeconds) {
     for (const Scene::EntityUVE entity :
          CollectFixedStepOrderUVE<Scene::GameplayAttributesComponentUVE>(*m_entityManager, *m_sceneGraph)) {
@@ -2676,6 +2700,7 @@ void EngineCoreUVE::Update() {
     if (m_simulationExecutionMode == SimulationExecutionModeUVE::Running) {
         SyncAnimationUVE(static_cast<float>(m_timer->GetDeltaTimeUVE()), /*physicsStep=*/false);
         SyncGameplayAttributesUVE(static_cast<float>(m_timer->GetDeltaTimeUVE()));
+        SyncCinematicUVE(static_cast<float>(m_timer->GetDeltaTimeUVE()));
     }
     // Bone attachments follow the pose that was just evaluated, and do it before the graph
     // propagates world transforms: a weapon on a hand is on the hand in the same frame the hand

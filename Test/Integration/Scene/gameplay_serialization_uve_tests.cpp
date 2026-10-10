@@ -2,11 +2,13 @@
 
 #include "uve/scene/scene_serializer_uve.h"
 
+#include <algorithm>
 #include <optional>
 #include <vector>
 
 #include "uve/entity/entity_manager_uve.h"
 #include "uve/events/event_system_uve.h"
+#include "uve/gameplay/cinematic_uve.h"
 #include "uve/gameplay/gameplay_attributes_uve.h"
 #include "uve/gameplay/gameplay_tags_uve.h"
 #include "uve/gameplay/status_effects_uve.h"
@@ -78,4 +80,72 @@ TEST_F(GameplaySerializationUVETest, StatusEffects_RoundTripThroughCaptureRestor
     EXPECT_EQ(revived, effects);
 }
 
+
+TEST_F(GameplaySerializationUVETest, Cinematic_RoundTripThroughCaptureRestore) {
+    const EntityUVE source = entityManager.CreateEntityUVE();
+    const EntityUVE camA = entityManager.CreateEntityUVE();
+    const EntityUVE camB = entityManager.CreateEntityUVE();
+    CinematicComponentUVE cinematic;
+    cinematic.durationSeconds = 10.0;
+    cinematic.autoplay = true;
+    cinematic.speed = 2.0F;
+    cinematic.loopMode = CinematicLoopModeUVE::Loop;
+    ASSERT_TRUE(AddCinematicEventUVE(cinematic, 0.0, "open"));
+    ASSERT_TRUE(AddCinematicEventUVE(cinematic, 5.0, "mid"));
+    ASSERT_TRUE(AddCinematicCutUVE(cinematic, 0.0, camA));
+    ASSERT_TRUE(AddCinematicCutUVE(cinematic, 5.0, camB));
+    entityManager.AddComponentUVE<CinematicComponentUVE>(source, cinematic);
+
+    const std::optional<SceneSnapshotUVE> snapshot =
+        serializer.CaptureUVE(entityManager, {source, camA, camB}, SceneAssetTypeUVE::Scene);
+    ASSERT_TRUE(snapshot.has_value());
+    const std::vector<EntityUVE> restored = serializer.RestoreUVE(entityManager, *snapshot);
+    ASSERT_EQ(restored.size(), 3U);
+    std::optional<EntityUVE> revivedEntity;
+    for (const EntityUVE entity : restored) {
+        if (entityManager.HasComponentUVE<CinematicComponentUVE>(entity)) {
+            revivedEntity = entity;
+        }
+    }
+    ASSERT_TRUE(revivedEntity.has_value());
+    const CinematicComponentUVE& revived =
+        entityManager.GetComponentUVE<CinematicComponentUVE>(*revivedEntity);
+    EXPECT_DOUBLE_EQ(revived.durationSeconds, 10.0);
+    EXPECT_TRUE(revived.autoplay);
+    EXPECT_FLOAT_EQ(revived.speed, 2.0F);
+    EXPECT_EQ(revived.loopMode, CinematicLoopModeUVE::Loop);
+    EXPECT_EQ(revived.events, cinematic.events);
+    ASSERT_EQ(revived.cuts.size(), 2U);
+    EXPECT_DOUBLE_EQ(revived.cuts[0].timeSeconds, 0.0);
+    EXPECT_DOUBLE_EQ(revived.cuts[1].timeSeconds, 5.0);
+    EXPECT_NE(revived.cuts[0].camera, kInvalidEntityUVE);
+    EXPECT_NE(revived.cuts[1].camera, kInvalidEntityUVE);
+    EXPECT_NE(revived.cuts[0].camera, revived.cuts[1].camera);
+    EXPECT_NE(std::find(restored.begin(), restored.end(), revived.cuts[0].camera), restored.end());
+    EXPECT_NE(std::find(restored.begin(), restored.end(), revived.cuts[1].camera), restored.end());
+    EXPECT_FALSE(revived.isPlaying);
+    EXPECT_FALSE(revived.finished);
+    EXPECT_DOUBLE_EQ(revived.currentTimeSeconds, 0.0);
+}
+
+TEST_F(GameplaySerializationUVETest, Cinematic_DropsCutsOutsideTheSavedSet) {
+    const EntityUVE source = entityManager.CreateEntityUVE();
+    const EntityUVE outsider = entityManager.CreateEntityUVE();
+    CinematicComponentUVE cinematic;
+    cinematic.durationSeconds = 10.0;
+    ASSERT_TRUE(AddCinematicEventUVE(cinematic, 1.0, "kept"));
+    ASSERT_TRUE(AddCinematicCutUVE(cinematic, 1.0, outsider));
+    entityManager.AddComponentUVE<CinematicComponentUVE>(source, cinematic);
+
+    const std::optional<SceneSnapshotUVE> snapshot =
+        serializer.CaptureUVE(entityManager, {source}, SceneAssetTypeUVE::Scene);
+    ASSERT_TRUE(snapshot.has_value());
+    const std::vector<EntityUVE> restored = serializer.RestoreUVE(entityManager, *snapshot);
+    ASSERT_EQ(restored.size(), 1U);
+    const CinematicComponentUVE& revived =
+        entityManager.GetComponentUVE<CinematicComponentUVE>(restored.front());
+    EXPECT_EQ(revived.events, cinematic.events);
+    EXPECT_TRUE(revived.cuts.empty());
+    EXPECT_TRUE(IsCinematicComponentValidUVE(revived));
+}
 } // namespace UVE::Scene::Tests

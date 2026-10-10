@@ -612,6 +612,10 @@ private:
     /// health events the tick produced. Frame-rate: drift is delta-scaled, so wall-clock status
     /// durations stay fair at any frame rate.
     void SyncGameplayAttributesUVE(float deltaSeconds);
+    /// Steps playing cinematics: advances each timeline, queues the CinematicEventFiredUVE keys
+    /// the playhead passed, and cuts the active camera to the live shot. Autoplay shots start
+    /// themselves on the first running frame; cinematics without cuts never touch the camera.
+    void SyncCinematicUVE(float deltaSeconds);
 
     /// The interaction scan, new wiring for previously unconsumed authored data (the
     /// Unreal-Lyra-style interactor/focus loop Godot leaves every game to hand-roll out of
