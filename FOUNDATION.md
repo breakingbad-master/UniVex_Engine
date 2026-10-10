@@ -826,14 +826,14 @@ call sites are already allocating from the wrong place.
 
 | # | Item | Module | Unblocks | Done when |
 |---|---|---|---|---|
-| 1.1 | `Vector4UVE`, `Matrix3x3UVE` | `Core/Math` | correct normal matrices; shader-facing vec4 | renderer's normal-matrix path uses `Matrix3x3UVE` |
-| 1.2 | `TrsUVE` TRS value type with compose/inverse | `Core/Math` | scene graph, prefabs, gizmo drag, physics interpolation | at least the gizmo drag path composes transforms as values |
-| 1.3 | `ColorUVE` with explicit linear/display distinction | `Core/Math` | removes ad-hoc float triples; makes the HDR path type-safe | `LightComponentUVE` and `MaterialAssetUVE` use it |
-| 1.4 | `RectUVE`, integer vectors | `Core/Math` | UI layout, pixel coordinates | `UIImageComponentUVE` uses `RectUVE`; `ViewportRectUVE` is reconciled with it |
-| 1.5 | Reflection **factory** pointer on `TypeMetadataEntryUVE` | `Object` | generic deserialization; editor add-by-type-name | one component round-trips through the serializer without hand-written code |
-| 1.6 | Component registry (type ↔ name/id) | `Component` | serializer stops needing per-component edits | adding a component requires no `SceneSerializerUVE` change |
-| 1.7 | Hashing utilities (`HashCombineUVE`, a named non-cryptographic hash) | `Core/Utilities` | replaces the private fingerprint hash and hand-written `std::hash` specialisations | `AssetContentFingerprintUVE` is built on it |
-| 1.8 | Endian-explicit binary buffer read/write | `Core/Utilities` | makes every save and asset format portable | round-trip test asserts byte-identical output on a simulated byte-swap |
+| 1.1 | `Vector4UVE`, `Matrix3x3UVE` | `Core/Math` | correct normal matrices; shader-facing vec4 | renderer's normal-matrix path uses `Matrix3x3UVE` - landed (ComputeNormalMatrixUVE) |
+| 1.2 | `TrsUVE` TRS value type with compose/inverse | `Core/Math` | scene graph, prefabs, gizmo drag, physics interpolation | at least the gizmo drag path composes transforms as values - PARTIAL (Oct 2026): TrsUVE exists and composes parent transforms, but the viewport drag path does not use it yet; editor-side remainder |
+| 1.3 | `ColorUVE` with explicit linear/display distinction | `Core/Math` | removes ad-hoc float triples; makes the HDR path type-safe | `LightComponentUVE` and `MaterialAssetUVE` use it - landed |
+| 1.4 | `RectUVE`, integer vectors | `Core/Math` | UI layout, pixel coordinates | `UIImageComponentUVE` uses `RectUVE`; `ViewportRectUVE` is reconciled with it - landed (old RHI struct retired for RectIntUVE) |
+| 1.5 | Reflection **factory** pointer on `TypeMetadataEntryUVE` | `Object` | generic deserialization; editor add-by-type-name | one component round-trips through the serializer without hand-written code - landed in spirit (generic path runs via the registry; createDefaultInstance exists but has no callers yet) |
+| 1.6 | Component registry (type ↔ name/id) | `Component` | serializer stops needing per-component edits | adding a component requires no `SceneSerializerUVE` change - landed (31 migrated, registry live) |
+| 1.7 | Hashing utilities (`HashCombineUVE`, a named non-cryptographic hash) | `Core/Utilities` | replaces the private fingerprint hash and hand-written `std::hash` specialisations | `AssetContentFingerprintUVE` is built on it - landed (Fnv1a64UVE; HashCombineUVE used by pose graph, archetypes, mesh renderer) |
+| 1.8 | Endian-explicit binary buffer read/write | `Core/Utilities` | makes every save and asset format portable | round-trip test asserts byte-identical output on a simulated byte-swap - landed (SimulatedByteSwap_PeerReemitsByteIdenticalOutput) |
 
 ## Tier 2 — resource layer
 
