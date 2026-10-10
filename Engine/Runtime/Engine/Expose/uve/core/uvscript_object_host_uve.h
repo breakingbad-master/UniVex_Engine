@@ -19,6 +19,10 @@ namespace UVE::Core {
 /// - every object: `name` (read-only);
 /// - an object with a transform: `position`, `scale` (local, metres);
 /// - a character body: `velocity`, `grounded` (read-only);
+/// - a rigid body: `velocity` (linear, metres/second);
+/// - a rigid body: `physics.apply_force/apply_impulse/apply_torque(vec3)` - a persistent force in
+///   newtons until changed, an instant mass-scaled velocity kick, a persistent torque - each
+///   answering whether it applied;
 /// - always: `input.pressed/held/released(action)` and `input.axis(negative, positive)`, which
 ///   read the project's input map; events `ready` and `tick(dt)`.
 class UVScriptObjectHostUVE final : public UVScript::UVScriptHostUVE {

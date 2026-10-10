@@ -164,6 +164,7 @@ TEST_F(SceneSerializerUVETest, CaptureThenRestore_AllRegisteredComponentTypes_Ro
     Rigid3DComponentUVE body{};
     body.mass = 9.5F;
     body.isKinematic = true;
+    body.force = Math::Vector3UVE{1.0F, 2.0F, 3.0F};
     entityManager.AddComponentUVE<Rigid3DComponentUVE>(source, body);
     AudioSourceComponentUVE audio{};
     audio.audioAssetPath = "sounds/lifecycle.wav";
@@ -364,6 +365,8 @@ TEST_F(SceneSerializerUVETest, CaptureThenRestore_AllRegisteredComponentTypes_Ro
     EXPECT_FLOAT_EQ(entityManager.GetComponentUVE<ColliderComponentUVE>(restored).friction, 0.25F);
     EXPECT_FLOAT_EQ(entityManager.GetComponentUVE<Rigid3DComponentUVE>(restored).mass, 9.5F);
     EXPECT_TRUE(entityManager.GetComponentUVE<Rigid3DComponentUVE>(restored).isKinematic);
+    EXPECT_EQ(entityManager.GetComponentUVE<Rigid3DComponentUVE>(restored).force,
+              (Math::Vector3UVE{1.0F, 2.0F, 3.0F}));
     EXPECT_EQ(entityManager.GetComponentUVE<AudioSourceComponentUVE>(restored).audioAssetPath,
               "sounds/lifecycle.wav");
     EXPECT_TRUE(entityManager.GetComponentUVE<AudioSourceComponentUVE>(restored).looping);

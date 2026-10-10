@@ -954,6 +954,7 @@ void DeclarePhysicsUVE(std::vector<TypeMetadataEntryUVE>& entries) {
                              -100.0, 100.0, 0.05),
                 DeclareUVE<&Rigid3DComponentUVE::velocity>("velocity", "Velocity",
                                                              kPropertyTypeVector3UVE),
+                DeclareUVE<&Rigid3DComponentUVE::force>("force", "Force", kPropertyTypeVector3UVE),
                 DeclareUVE<&Rigid3DComponentUVE::angularVelocity>("angularVelocity", "Angular Velocity",
                                                                     kPropertyTypeVector3UVE),
                 DeclareUVE<&Rigid3DComponentUVE::torque>("torque", "Torque", kPropertyTypeVector3UVE),

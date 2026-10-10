@@ -119,7 +119,8 @@ primary     := NUMBER UNIT? | STRING | 'true' | 'false' | 'none' | IDENT | '(' e
    - `ready` runs once, then `tick(dt)` every frame, in process-priority order, and paused with the
      rest of the simulation;
    - the host gives `name`, `position`, `scale`, and on a character body `velocity` and
-     `grounded`, plus `input.pressed/held/released/axis`.
+     `grounded`, plus `input.pressed/held/released/axis`; a rigid body adds its own
+     `velocity` and `physics.apply_force/apply_impulse/apply_torque(vec3)`.
    - a saved edit restarts the script within half a second, and fixing a broken file is enough
      for it to be retried.
 4. **Editor.** The Inspector's script slot has **New UVScript**: it writes `scripts/<node>.uvs`

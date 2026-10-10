@@ -493,7 +493,10 @@ script per node; see `Engine/Runtime/UVScript/README.md`.
 - [x] Editor: New UVScript on the script slot, a text editor with live diagnostics, `export`
   fields in the Inspector
 - [ ] Collections and tuples, calling methods on other nodes, `wait` inside a `fn`
-- [ ] More host bindings: collision/overlap events, audio, physics forces, other node kinds
+- [ ] More host bindings: collision/overlap events, audio, physics forces, other node kinds —
+  physics forces have landed (persistent force/torque plus mass-scaled impulses on rigid
+  bodies, with rigid-body velocity readable/writable); collision/overlap events, audio,
+  and other node kinds remain
 - [ ] An in-editor debugger (breakpoints, stepping, live values)
 - [x] C++23 output for release builds: bytecode translated to C++, registered by program fingerprint,
   checked against the interpreter

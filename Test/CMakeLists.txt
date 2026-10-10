@@ -310,6 +310,7 @@ add_executable(uve_integration_tests
     Physics/character_controller_uve_tests.cpp
     Physics/character_body_motion_uve_tests.cpp
     Physics/character_3d_uve_tests.cpp
+    Physics/uvscript_physics_forces_uve_tests.cpp
     Physics/collider_3d_uve_tests.cpp
     Physics/collider_shape_uve_tests.cpp
     Physics/collision_lifecycle_tracker_uve_tests.cpp
@@ -427,6 +428,10 @@ target_link_libraries(uve_integration_tests PRIVATE
     uve_ui
     uve_gameplay
     uve_ai
+    # uvscript_physics_forces_uve_tests.cpp drives the real UVScriptObjectHostUVE (uve_core)
+    # and script values (uve_uvscript) - the first runnable coverage of Engine's script host.
+    uve_core
+    uve_uvscript
     GTest::gtest
     GTest::gtest_main
 )

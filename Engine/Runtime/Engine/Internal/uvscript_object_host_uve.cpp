@@ -6,11 +6,13 @@
 
 #include "uve/component/character_controller_component_uve.h"
 #include "uve/component/name_component_uve.h"
+#include "uve/component/rigid_3d_component_uve.h"
 #include "uve/component/transform_component_uve.h"
 #include "uve/component/world_transform_component_uve.h"
 #include "uve/entity/i_entity_manager_uve.h"
 #include "uve/input/i_input_system_uve.h"
 #include "uve/logging/logging_macros_uve.h"
+#include "uve/objects/3d/rigid_3d_uve.h"
 
 namespace UVE::Core {
 namespace {
@@ -43,10 +45,12 @@ std::optional<HostPropertyUVE> UVScriptObjectHostUVE::DescribePropertyUVE(const 
     if ((name == "position" || name == "scale") && m_entityManager.HasComponentUVE<Scene::TransformComponentUVE>(m_entity)) {
         return HostPropertyUVE{TypeUVE::Vec3UVE(), true};
     }
+    if (name == "velocity" &&
+        (m_entityManager.HasComponentUVE<Scene::CharacterControllerComponentUVE>(m_entity) ||
+         m_entityManager.HasComponentUVE<Scene::Rigid3DComponentUVE>(m_entity))) {
+        return HostPropertyUVE{TypeUVE::Vec3UVE(), true};
+    }
     if (m_entityManager.HasComponentUVE<Scene::CharacterControllerComponentUVE>(m_entity)) {
-        if (name == "velocity") {
-            return HostPropertyUVE{TypeUVE::Vec3UVE(), true};
-        }
         // "grounded", matching the other properties here: name, position, scale, velocity - a plain
         // word for the thing, no "is_" prefix and no snake_case. "is_on_floor" is the name this had
         // before, and a script written against it still reads, because a script out in the world is
@@ -59,6 +63,10 @@ std::optional<HostPropertyUVE> UVScriptObjectHostUVE::DescribePropertyUVE(const 
 }
 
 std::optional<HostFunctionUVE> UVScriptObjectHostUVE::DescribeFunctionUVE(const std::string_view name) const {
+    if (m_entityManager.HasComponentUVE<Scene::Rigid3DComponentUVE>(m_entity) &&
+        (name == "physics.apply_force" || name == "physics.apply_impulse" || name == "physics.apply_torque")) {
+        return HostFunctionUVE{{TypeUVE::Vec3UVE()}, TypeUVE::BoolUVE()};
+    }
     if (name == "input.pressed" || name == "input.held" || name == "input.released") {
         return HostFunctionUVE{{TypeUVE::StrUVE()}, TypeUVE::BoolUVE()};
     }
@@ -93,12 +101,15 @@ ValueUVE UVScriptObjectHostUVE::GetPropertyUVE(const std::string_view name) {
         const Scene::TransformComponentUVE& transform = m_entityManager.GetComponentUVE<Scene::TransformComponentUVE>(m_entity);
         return ToScriptUVE(name == "position" ? transform.localPosition : transform.localScale);
     }
-    const Scene::CharacterControllerComponentUVE& body =
-        m_entityManager.GetComponentUVE<Scene::CharacterControllerComponentUVE>(m_entity);
     if (name == "velocity") {
-        return ToScriptUVE(body.velocity);
+        // Both bodies on one entity is nonsense, but the character wins rather than crashing.
+        if (m_entityManager.HasComponentUVE<Scene::CharacterControllerComponentUVE>(m_entity)) {
+            return ToScriptUVE(
+                m_entityManager.GetComponentUVE<Scene::CharacterControllerComponentUVE>(m_entity).velocity);
+        }
+        return ToScriptUVE(m_entityManager.GetComponentUVE<Scene::Rigid3DComponentUVE>(m_entity).velocity);
     }
-    return body.grounded;
+    return m_entityManager.GetComponentUVE<Scene::CharacterControllerComponentUVE>(m_entity).grounded;
 }
 
 void UVScriptObjectHostUVE::SetPropertyUVE(const std::string_view name, const ValueUVE& value) {
@@ -111,11 +122,26 @@ void UVScriptObjectHostUVE::SetPropertyUVE(const std::string_view name, const Va
             m_entityManager.GetComponentUVE<Scene::WorldTransformComponentUVE>(m_entity).dirty = true;
         }
     } else if (name == "velocity") {
-        m_entityManager.GetComponentUVE<Scene::CharacterControllerComponentUVE>(m_entity).velocity = ToEngineUVE(value);
+        if (m_entityManager.HasComponentUVE<Scene::CharacterControllerComponentUVE>(m_entity)) {
+            m_entityManager.GetComponentUVE<Scene::CharacterControllerComponentUVE>(m_entity).velocity =
+                ToEngineUVE(value);
+        } else {
+            m_entityManager.GetComponentUVE<Scene::Rigid3DComponentUVE>(m_entity).velocity = ToEngineUVE(value);
+        }
     }
 }
 
 ValueUVE UVScriptObjectHostUVE::CallFunctionUVE(const std::string_view name, const std::span<const ValueUVE> args) {
+    // Physics needs no input system, so it routes before the null-input early-out below.
+    if (name == "physics.apply_force") {
+        return Scene::Rigid3DUVE::ApplyForceUVE(m_entityManager, m_entity, ToEngineUVE(args[0]));
+    }
+    if (name == "physics.apply_impulse") {
+        return Scene::Rigid3DUVE::ApplyImpulseUVE(m_entityManager, m_entity, ToEngineUVE(args[0]));
+    }
+    if (name == "physics.apply_torque") {
+        return Scene::Rigid3DUVE::ApplyTorqueUVE(m_entityManager, m_entity, ToEngineUVE(args[0]));
+    }
     if (m_input == nullptr) {
         return name == "input.axis" ? ValueUVE{0.0} : ValueUVE{false};
     }
