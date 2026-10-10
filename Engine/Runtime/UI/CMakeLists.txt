@@ -18,6 +18,7 @@ add_library(uve_ui STATIC
     Internal/canvas_ancestry_uve.cpp
     Internal/ui_layout_uve.cpp
     Internal/ui_anchors_uve.cpp
+    Internal/ui_tween_uve.cpp
     Internal/ui_runtime_uve.cpp
 )
 

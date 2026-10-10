@@ -1757,9 +1757,10 @@ template <typename T, typename FromJsonFunc, typename ValidateFunc>
 // JSON shapes are the leaf helpers' existing shapes (scalars as numbers/strings, Vector2/3 and
 // colours as [x, y(, z)] arrays, quaternions as [x, y, z, w], AssetGuid as its uint64 value,
 // BitMask32 as its uint32 value), so a migrated component emits bytes identical to its
-// hand-written predecessor. Rect is the one property with two keys: it keeps the established UI
-// pair (positionPixels/sizePixels), each half defaulting independently, exactly like the UI
-// readers it replaces. The skip rule is exactly TypeMetadataPropertyUVE::IsSerializedUVE() (no
+// hand-written predecessor. A Rect named exactly "rect" keeps the established UI pair
+// (positionPixels/sizePixels), each half defaulting independently, exactly like the UI readers
+// it replaces; a Rect with any other name - a component's second Rect onward - nests as
+// {"position", "size"} under its own key, since the legacy pair has room for exactly one. The skip rule is exactly TypeMetadataPropertyUVE::IsSerializedUVE() (no
 // runtime state, no editor-only authoring, no unbound properties). A missing key on read keeps
 // the factory default - the same leniency as the hand-written json.value(key, default) reads,
 // and what lets old files load after a property is added. A property whose type id has no codec
@@ -1827,12 +1828,19 @@ void MetadataPropertyWriteUVE(const Core::TypeMetadataEntryUVE& entry,
         property.getValue(instance, &value);
         json[property.name] = value.value;
     } else if (property.typeId == kPropertyTypeRectUVE) {
-        // The legacy pair: a Rect writes two keys, not one, keeping the established UI encoding
-        // byte-identical (see the Tier 1.6 decision: positionPixels/sizePixels).
         Math::RectUVE value{};
         property.getValue(instance, &value);
-        json["positionPixels"] = ToJsonUVE(value.position);
-        json["sizePixels"] = ToJsonUVE(value.size);
+        if (property.name == "rect") {
+            // The legacy pair: a Rect writes two keys, not one, keeping the established UI
+            // encoding byte-identical (see the Tier 1.6 decision: positionPixels/sizePixels).
+            json["positionPixels"] = ToJsonUVE(value.position);
+            json["sizePixels"] = ToJsonUVE(value.size);
+        } else {
+            // A named Rect - a component's second Rect onward - nests under its own key: the
+            // legacy pair above has room for exactly one, and sharing it would silently corrupt
+            // every Rect but the last.
+            json[property.name] = {{"position", ToJsonUVE(value.position)}, {"size", ToJsonUVE(value.size)}};
+        }
     } else {
         throw std::runtime_error("Cannot serialize property '" + property.name + "' of '" + entry.displayName +
                                  "': no metadata codec for its type");
@@ -1843,7 +1851,7 @@ void MetadataPropertyWriteUVE(const Core::TypeMetadataEntryUVE& entry,
 /// of its legacy pair. Absent keys keep their factory defaults (see the block comment above).
 [[nodiscard]] bool MetadataPropertyPresentUVE(const Core::TypeMetadataPropertyUVE& property,
                                               const nlohmann::json& json) {
-    if (property.typeId == kPropertyTypeRectUVE) {
+    if (property.typeId == kPropertyTypeRectUVE && property.name == "rect") {
         return json.contains("positionPixels") || json.contains("sizePixels");
     }
     return json.contains(property.name);
@@ -1896,11 +1904,21 @@ void MetadataPropertyReadUVE(const Core::TypeMetadataEntryUVE& entry,
         // UI readers this replaces.
         Math::RectUVE value{};
         property.getValue(instance, &value);
-        if (json.contains("positionPixels")) {
-            value.position = Vector2FromJsonUVE(json.at("positionPixels"));
-        }
-        if (json.contains("sizePixels")) {
-            value.size = Vector2FromJsonUVE(json.at("sizePixels"));
+        if (property.name == "rect") {
+            if (json.contains("positionPixels")) {
+                value.position = Vector2FromJsonUVE(json.at("positionPixels"));
+            }
+            if (json.contains("sizePixels")) {
+                value.size = Vector2FromJsonUVE(json.at("sizePixels"));
+            }
+        } else if (json.contains(property.name)) {
+            const nlohmann::json& nested = json.at(property.name);
+            if (nested.contains("position")) {
+                value.position = Vector2FromJsonUVE(nested.at("position"));
+            }
+            if (nested.contains("size")) {
+                value.size = Vector2FromJsonUVE(nested.at("size"));
+            }
         }
         property.setValue(instance, &value);
     } else {

@@ -578,7 +578,10 @@ script per node; see `Engine/Runtime/UVScript/README.md`.
 - [ ] Rich text (multiple fonts/sizes/styles/colors within one text block, not just one
   baked font per label)
 - [ ] 9-slice/scalable image borders for resolution-independent UI art
-- [ ] UI animation/tweening (transitions, easing) as a first-class authoring feature
+- [x] UI animation/tweening (transitions, easing) as a first-class authoring feature —
+  UITweenComponentUVE drives rect/alpha with 9 easings, delay, and once/loop/ping-pong
+  modes, ticked on the real frame clock after layout so active tweens override the
+  resting arrangement; alpha tweens multiply authored alpha, runtime state reseeds
 - [ ] Input focus and gamepad/keyboard UI navigation (tab order, D-pad navigation) for
   controller- and accessibility-friendly menus
 - [ ] World-space UI (a Canvas rendered as a 3D object in the scene, e.g. floating health

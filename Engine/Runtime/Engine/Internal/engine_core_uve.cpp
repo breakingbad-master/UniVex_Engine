@@ -1286,6 +1286,11 @@ void EngineCoreUVE::SyncUIRuntimeUVE() {
             const std::optional<Scene::ResolvedObjectModesUVE> modes = m_sceneGraph->TryGetResolvedObjectModesUVE(entity);
             return !modes.has_value() || modes->autoTranslate == Scene::LocalizeModeUVE::Localized;
         }};
+    // UI tweens run on the real frame clock, ungated by pause: a pause menu must fade in while
+    // the simulation stands still.
+    if (m_timer != nullptr) {
+        m_uiRuntime.SetDeltaTimeUVE(static_cast<float>(m_timer->GetDeltaTimeUVE()));
+    }
     m_uiRuntime.TickUVE(*m_entityManager, *m_inputSystem, localization);
 }
 

@@ -43,6 +43,7 @@
 #include "uve/component/ui_progress_bar_component_uve.h"
 #include "uve/component/ui_slider_component_uve.h"
 #include "uve/component/ui_text_component_uve.h"
+#include "uve/component/ui_tween_component_uve.h"
 #include "uve/component/visibility_component_uve.h"
 #include "uve/logging/assert_uve.h"
 #include "uve/logging/logging_macros_uve.h"
@@ -1947,6 +1948,43 @@ void DeclareMediaAndUIUVE(std::vector<TypeMetadataEntryUVE>& entries) {
                                                                                 kPropertyTypeColorUVE),
                          DeclareUVE<&UIProgressBarComponentUVE::fillColor>("fillColor", "Fill",
                                                                           kPropertyTypeColorUVE),
+                     }));
+    AddUVE<UITweenComponentUVE>(
+        entries,
+        MakeEntryUVE("component.ui_tween", "UITweenComponentUVE", "UI Tween", kSectionOrderTypeSpecificUVE,
+                     {
+                         DeclareEnumUVE<&UITweenComponentUVE::target>("target", "Target",
+                                                                     {{0, "Rect"}, {1, "Alpha"}}),
+                         DeclareUVE<&UITweenComponentUVE::fromRect>("fromRect", "From Rect",
+                                                                   kPropertyTypeRectUVE),
+                         DeclareUVE<&UITweenComponentUVE::toRect>("toRect", "To Rect", kPropertyTypeRectUVE),
+                         DeclareUVE<&UITweenComponentUVE::fromAlpha>("fromAlpha", "From Alpha",
+                                                                    kPropertyTypeFloatUVE),
+                         DeclareUVE<&UITweenComponentUVE::toAlpha>("toAlpha", "To Alpha",
+                                                                  kPropertyTypeFloatUVE),
+                         DeclareUVE<&UITweenComponentUVE::duration>("duration", "Duration",
+                                                                   kPropertyTypeFloatUVE),
+                         DeclareUVE<&UITweenComponentUVE::delay>("delay", "Delay", kPropertyTypeFloatUVE),
+                         DeclareEnumUVE<&UITweenComponentUVE::ease>("ease", "Ease",
+                                                                   {{0, "Linear"},
+                                                                    {1, "SineInOut"},
+                                                                    {2, "QuadIn"},
+                                                                    {3, "QuadOut"},
+                                                                    {4, "QuadInOut"},
+                                                                    {5, "CubicIn"},
+                                                                    {6, "CubicOut"},
+                                                                    {7, "CubicInOut"},
+                                                                    {8, "OutBack"}}),
+                         DeclareEnumUVE<&UITweenComponentUVE::loop>(
+                             "loop", "Loop", {{0, "Once"}, {1, "Loop"}, {2, "PingPong"}}),
+                         DeclareRuntimeStateUVE<&UITweenComponentUVE::elapsed>(
+                             "elapsed", "Elapsed", kPropertyTypeFloatUVE),
+                         DeclareRuntimeStateUVE<&UITweenComponentUVE::playing>(
+                             "playing", "Playing", kPropertyTypeBoolUVE),
+                         DeclareRuntimeStateUVE<&UITweenComponentUVE::completedThisFrame>(
+                             "completedThisFrame", "Completed This Frame", kPropertyTypeBoolUVE),
+                         DeclareRuntimeStateUVE<&UITweenComponentUVE::currentAlpha>(
+                             "currentAlpha", "Current Alpha", kPropertyTypeFloatUVE),
                      }));
 }
 

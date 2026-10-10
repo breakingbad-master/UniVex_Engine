@@ -63,6 +63,11 @@ public:
 
     [[nodiscard]] const Math::Vector2UVE& GetViewportSizeUVE() const noexcept { return m_viewportSize; }
 
+    /// The frame's delta time in seconds, fed by the engine from the real frame clock every frame
+    /// (UI tweens stay on wall time so pause menus animate while the simulation is paused).
+    /// Non-finite or negative values are ignored; the default is zero, which freezes tweens.
+    void SetDeltaTimeUVE(float deltaTime) noexcept;
+
     /// `localization` defaults to none, so a caller that does not localize draws authored text
     /// exactly as it always did. An authored string is its own translation key: a table maps
     /// "Play" to "Maglaro", and a string with no entry is drawn as authored.
@@ -77,6 +82,7 @@ private:
     UIDrawBatchUVE m_drawBatch;
     UICoordinateTransformUVE m_coordinateTransform{};
     Math::Vector2UVE m_viewportSize{};
+    float m_deltaTime = 0.0F;
 };
 
 } // namespace UVE::UI

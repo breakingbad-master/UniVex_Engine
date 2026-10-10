@@ -17,6 +17,7 @@
 #include "uve/ui/canvas_ancestry_uve.h"
 #include "uve/ui/ui_anchors_uve.h"
 #include "uve/ui/ui_layout_uve.h"
+#include "uve/ui/ui_tween_uve.h"
 
 namespace UVE::UI {
 
@@ -69,13 +70,22 @@ void UIRuntimeUVE::SetViewportSizeUVE(const Math::Vector2UVE& viewportSize) noex
     m_viewportSize = viewportSize;
 }
 
+void UIRuntimeUVE::SetDeltaTimeUVE(const float deltaTime) noexcept {
+    if (!std::isfinite(deltaTime) || deltaTime < 0.0F) {
+        return;
+    }
+    m_deltaTime = deltaTime;
+}
+
 void UIRuntimeUVE::TickUVE(Scene::IEntityManagerUVE& entityManager, const Input::IInputSystemUVE& inputSystem,
                            const UITextLocalizationUVE& localization) {
     // Anchors resolve first (roots against the viewport, children against fresh parent rects),
-    // then containers auto-size to content and position their children: hit-testing and every
-    // emitted quad agree on where a widget is within the same tick.
+    // then containers auto-size to content and position their children, then active tweens
+    // override the resting arrangement: hit-testing and every emitted quad agree on where a
+    // widget is within the same tick.
     ResolveUIAnchorsUVE(entityManager, m_viewportSize);
     LayoutUIContainersUVE(entityManager, m_fontAtlas);
+    TickUITweensUVE(entityManager, m_deltaTime);
     m_drawBatch.quads.clear();
     std::vector<RankedWidgetUVE> ranked;
 
@@ -87,7 +97,7 @@ void UIRuntimeUVE::TickUVE(Scene::IEntityManagerUVE& entityManager, const Input:
             UIQuadUVE quad{};
             quad.rect = image.rect;
             quad.color = image.tintColor;
-            quad.alpha = image.alpha;
+            quad.alpha = TweenedAlphaUVE(entityManager, entity, image.alpha);
             quad.kind = image.textureAssetGuid.value == 0U ? UIDrawItemKindUVE::SolidColor : UIDrawItemKindUVE::Image;
             quad.imageAssetGuid = image.textureAssetGuid;
             RankWidgetUVE(entity, ResolveCanvasAncestryUVE(entityManager, entity), 0, {quad}, ranked);
@@ -105,11 +115,13 @@ void UIRuntimeUVE::TickUVE(Scene::IEntityManagerUVE& entityManager, const Input:
             UIQuadUVE background{};
             background.rect = bar.rect;
             background.color = bar.backgroundColor;
+            background.alpha = TweenedAlphaUVE(entityManager, entity, 1.0F);
             background.kind = UIDrawItemKindUVE::SolidColor;
             UIQuadUVE fill{};
             fill.rect = Math::RectUVE{bar.rect.position,
                                       Math::Vector2UVE{bar.rect.size.x * fraction, bar.rect.size.y}};
             fill.color = bar.fillColor;
+            fill.alpha = TweenedAlphaUVE(entityManager, entity, 1.0F);
             fill.kind = UIDrawItemKindUVE::SolidColor;
             std::vector<UIQuadUVE> barQuads;
             barQuads.push_back(background);
@@ -141,7 +153,7 @@ void UIRuntimeUVE::TickUVE(Scene::IEntityManagerUVE& entityManager, const Input:
             UIQuadUVE quad{};
             quad.rect = button.rect;
             quad.color = button.isHovered ? (mouseDown ? button.pressedColor : button.hoverColor) : button.normalColor;
-            quad.alpha = 1.0F;
+            quad.alpha = TweenedAlphaUVE(entityManager, entity, 1.0F);
             quad.kind = UIDrawItemKindUVE::SolidColor;
             RankWidgetUVE(entity, ResolveCanvasAncestryUVE(entityManager, entity), 1, {quad}, ranked);
         });
@@ -190,17 +202,20 @@ void UIRuntimeUVE::TickUVE(Scene::IEntityManagerUVE& entityManager, const Input:
             UIQuadUVE track{};
             track.rect = slider.rect;
             track.color = slider.trackColor;
+            track.alpha = TweenedAlphaUVE(entityManager, entity, 1.0F);
             track.kind = UIDrawItemKindUVE::SolidColor;
             UIQuadUVE fill{};
             fill.rect = Math::RectUVE{slider.rect.position,
                                       Math::Vector2UVE{thumbX + 0.5F * slider.thumbWidth - slider.rect.position.x,
                                                        slider.rect.size.y}};
             fill.color = slider.fillColor;
+            fill.alpha = TweenedAlphaUVE(entityManager, entity, 1.0F);
             fill.kind = UIDrawItemKindUVE::SolidColor;
             UIQuadUVE thumb{};
             thumb.rect = Math::RectUVE{Math::Vector2UVE{thumbX, slider.rect.position.y},
                                        Math::Vector2UVE{slider.thumbWidth, slider.rect.size.y}};
             thumb.color = slider.thumbColor;
+            thumb.alpha = TweenedAlphaUVE(entityManager, entity, 1.0F);
             thumb.kind = UIDrawItemKindUVE::SolidColor;
             std::vector<UIQuadUVE> sliderQuads;
             sliderQuads.push_back(track);
@@ -238,7 +253,7 @@ void UIRuntimeUVE::TickUVE(Scene::IEntityManagerUVE& entityManager, const Input:
                 quad.u1 = glyphQuad.u1;
                 quad.v1 = glyphQuad.v1;
                 quad.color = text.color;
-                quad.alpha = text.alpha;
+                quad.alpha = TweenedAlphaUVE(entityManager, entity, text.alpha);
                 quad.kind = UIDrawItemKindUVE::Glyph;
                 quads.push_back(quad);
             }

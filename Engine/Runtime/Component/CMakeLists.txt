@@ -30,6 +30,7 @@ add_library(uve_component STATIC
     Internal/ui_anchor_component_uve.cpp
     Internal/ui_slider_component_uve.cpp
     Internal/ui_progress_bar_component_uve.cpp
+    Internal/ui_tween_component_uve.cpp
     Internal/canvas_component_uve.cpp
     Internal/character_controller_component_uve.cpp
     Internal/collider_component_uve.cpp
