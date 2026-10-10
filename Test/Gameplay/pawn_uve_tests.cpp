@@ -193,5 +193,119 @@ TEST_F(PawnUVETest, Validity_RejectsBadKindsAndNonFiniteInput) {
     EXPECT_FALSE(IsPawnComponentValidUVE(bad));
 }
 
+TEST_F(PawnUVETest, Tracker_ReportsPossessAndUnpossessEdgesOnce) {
+    PossessionLifecycleTrackerUVE tracker;
+    EXPECT_EQ(tracker.GetActiveCountUVE(), 0U);
+    const EntityUVE controller = MakeControllerUVE();
+    const EntityUVE pawn = MakePawnUVE();
+
+    ASSERT_TRUE(PossessControllerUVE(entityManager, controller, pawn));
+    const PossessionLifecycleReportUVE formed = tracker.UpdateUVE(entityManager);
+    EXPECT_EQ(formed.previousLinkCount, 0U);
+    EXPECT_EQ(formed.currentLinkCount, 1U);
+    ASSERT_EQ(formed.transitions.size(), 1U);
+    EXPECT_EQ(formed.transitions.front().kind, PossessionTransitionKindUVE::Possessed);
+    EXPECT_EQ(formed.transitions.front().controller, controller);
+    EXPECT_EQ(formed.transitions.front().pawn, pawn);
+    EXPECT_EQ(tracker.GetActiveCountUVE(), 1U);
+
+    EXPECT_TRUE(tracker.UpdateUVE(entityManager).transitions.empty());
+
+    ASSERT_TRUE(UnpossessControllerUVE(entityManager, controller));
+    const PossessionLifecycleReportUVE broken = tracker.UpdateUVE(entityManager);
+    EXPECT_EQ(broken.previousLinkCount, 1U);
+    EXPECT_EQ(broken.currentLinkCount, 0U);
+    ASSERT_EQ(broken.transitions.size(), 1U);
+    EXPECT_EQ(broken.transitions.front().kind, PossessionTransitionKindUVE::Unpossessed);
+    EXPECT_EQ(broken.transitions.front().controller, controller);
+    EXPECT_EQ(broken.transitions.front().pawn, pawn);
+}
+
+TEST_F(PawnUVETest, Tracker_OrdersFormedBeforeBrokenInLinkOrder) {
+    PossessionLifecycleTrackerUVE tracker;
+    const EntityUVE firstController = MakeControllerUVE();
+    const EntityUVE pawn = MakePawnUVE();
+    const EntityUVE secondController = MakeControllerUVE();
+    ASSERT_TRUE(PossessControllerUVE(entityManager, firstController, pawn));
+    ASSERT_EQ(tracker.UpdateUVE(entityManager).transitions.size(), 1U);
+
+    ASSERT_TRUE(PossessControllerUVE(entityManager, secondController, pawn));
+    const PossessionLifecycleReportUVE stolen = tracker.UpdateUVE(entityManager);
+    ASSERT_EQ(stolen.transitions.size(), 2U);
+    EXPECT_EQ(stolen.transitions[0].kind, PossessionTransitionKindUVE::Possessed);
+    EXPECT_EQ(stolen.transitions[0].controller, secondController);
+    EXPECT_EQ(stolen.transitions[1].kind, PossessionTransitionKindUVE::Unpossessed);
+    EXPECT_EQ(stolen.transitions[1].controller, firstController);
+}
+
+TEST_F(PawnUVETest, Tracker_ReportsUnpossessedWithLastKnownIdsWhenADriverDies) {
+    PossessionLifecycleTrackerUVE tracker;
+    const EntityUVE controller = MakeControllerUVE();
+    const EntityUVE pawn = MakePawnUVE();
+    ASSERT_TRUE(PossessControllerUVE(entityManager, controller, pawn));
+    ASSERT_EQ(tracker.UpdateUVE(entityManager).transitions.size(), 1U);
+
+    entityManager.DestroyEntityUVE(controller);
+    const PossessionLifecycleReportUVE report = tracker.UpdateUVE(entityManager);
+    EXPECT_EQ(report.currentLinkCount, 0U);
+    ASSERT_EQ(report.transitions.size(), 1U);
+    EXPECT_EQ(report.transitions.front().kind, PossessionTransitionKindUVE::Unpossessed);
+    EXPECT_EQ(report.transitions.front().controller, controller);
+    EXPECT_EQ(report.transitions.front().pawn, pawn);
+    EXPECT_EQ(tracker.GetActiveCountUVE(), 0U);
+}
+
+TEST_F(PawnUVETest, Tracker_ResetDiscardsTheBaselineWithoutTransitions) {
+    PossessionLifecycleTrackerUVE tracker;
+    const EntityUVE controller = MakeControllerUVE();
+    const EntityUVE pawn = MakePawnUVE();
+    ASSERT_TRUE(PossessControllerUVE(entityManager, controller, pawn));
+    ASSERT_EQ(tracker.UpdateUVE(entityManager).transitions.size(), 1U);
+
+    tracker.ResetUVE();
+    EXPECT_EQ(tracker.GetActiveCountUVE(), 0U);
+
+    // Reset itself emits nothing, so the still-live link is new to the empty baseline.
+    const PossessionLifecycleReportUVE rediscovered = tracker.UpdateUVE(entityManager);
+    ASSERT_EQ(rediscovered.transitions.size(), 1U);
+    EXPECT_EQ(rediscovered.transitions.front().kind, PossessionTransitionKindUVE::Possessed);
+    EXPECT_EQ(rediscovered.transitions.front().controller, controller);
+
+    ASSERT_TRUE(UnpossessControllerUVE(entityManager, controller));
+    const PossessionLifecycleReportUVE broken = tracker.UpdateUVE(entityManager);
+    ASSERT_EQ(broken.transitions.size(), 1U);
+    EXPECT_EQ(broken.transitions.front().kind, PossessionTransitionKindUVE::Unpossessed);
+}
+
+TEST_F(PawnUVETest, Tracker_IgnoresOneSidedLinks) {
+    PossessionLifecycleTrackerUVE tracker;
+    const EntityUVE controller = MakeControllerUVE();
+    const EntityUVE pawn = MakePawnUVE();
+    entityManager.GetComponentUVE<PawnComponentUVE>(pawn).controller = controller;
+    const PossessionLifecycleReportUVE report = tracker.UpdateUVE(entityManager);
+    EXPECT_EQ(report.currentLinkCount, 0U);
+    EXPECT_TRUE(report.transitions.empty());
+}
+
+TEST_F(PawnUVETest, Tracker_OrdersMultipleLinksByControllerThenPawn) {
+    PossessionLifecycleTrackerUVE tracker;
+    // Entities created second-first on purpose (lower ids), but possessed first-link-first:
+    // the report order must follow the (controller, pawn) sort, not possession history.
+    const EntityUVE secondController = MakeControllerUVE();
+    const EntityUVE secondPawn = MakePawnUVE();
+    const EntityUVE firstController = MakeControllerUVE();
+    const EntityUVE firstPawn = MakePawnUVE();
+    ASSERT_TRUE(PossessControllerUVE(entityManager, firstController, firstPawn));
+    ASSERT_TRUE(PossessControllerUVE(entityManager, secondController, secondPawn));
+
+    const PossessionLifecycleReportUVE report = tracker.UpdateUVE(entityManager);
+    EXPECT_EQ(report.currentLinkCount, 2U);
+    ASSERT_EQ(report.transitions.size(), 2U);
+    EXPECT_EQ(report.transitions[0].controller, secondController);
+    EXPECT_EQ(report.transitions[0].pawn, secondPawn);
+    EXPECT_EQ(report.transitions[1].controller, firstController);
+    EXPECT_EQ(report.transitions[1].pawn, firstPawn);
+}
+
 } // namespace
 } // namespace UVE::Scene::Tests

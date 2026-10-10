@@ -501,9 +501,11 @@ script per node; see `Engine/Runtime/UVScript/README.md`.
   `fib(20)`: 68.8 ms interpreted, 0.62 ms native; Release not measured)
 
 ### 7.2 Gameplay framework
-- [ ] A formal actor/pawn/controller-style gameplay object model above raw ECS entities +
-  components (something a gameplay programmer authors against directly, not just entities
-  and components)
+- [x] A formal actor/pawn/controller-style gameplay object model above raw ECS entities +
+  components (Pawn/Controller components with mutual-or-absent links, Possess/Unpossess stealing
+  both sides, input routing to Player pawns, the player-look/interact/character flow resolved
+  through possession, character motion steered from pawn input, and possessed/unpossessed
+  lifecycle events)
 - [x] An input-action-mapping layer (bind a logical action like "Jump" to any physical
   input across keyboard/gamepad, with rebinding support), rather than scripts polling raw
   key codes directly

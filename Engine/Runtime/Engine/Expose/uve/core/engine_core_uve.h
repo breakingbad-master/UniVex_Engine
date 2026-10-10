@@ -55,6 +55,7 @@
 #include "uve/core/version_uve.h"
 #include "uve/logging/i_logger_uve.h"
 #include "uve/events/i_event_system_uve.h"
+#include "uve/gameplay/pawn_uve.h"
 #include "uve/input/i_gamepad_input_system_uve.h"
 #include "uve/input/i_input_system_uve.h"
 #include "uve/input/i_mobile_gesture_system_uve.h"
@@ -822,6 +823,7 @@ private:
     Localization::LocalizationServiceUVE m_localizationService;
     Physics::AreaOverlapLifecycleTrackerUVE m_areaOverlapLifecycleTracker;
     Physics::Hitbox3DStrikeLifecycleTrackerUVE m_hitboxStrikeLifecycleTracker;
+    Scene::PossessionLifecycleTrackerUVE m_possessionLifecycleTracker;
     Physics::CollisionLifecycleTrackerUVE m_collisionLifecycleTracker;
     Physics::CollisionLifecycleReportUVE m_collisionLifecycleReport;
     std::unique_ptr<Input::IInputSystemUVE> m_inputSystem;

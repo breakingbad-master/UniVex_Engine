@@ -87,6 +87,7 @@
 #include "uve/gameplay/trigger_events_uve.h"
 #include "uve/gameplay/trigger_volume_uve.h"
 #include "uve/gameplay/pawn_uve.h"
+#include "uve/gameplay/pawn_events_uve.h"
 #include "uve/input/mobile_gesture_system_uve.h"
 #include "uve/input/mobile_input_system_uve.h"
 #include "uve/physics/area_3d_runtime_uve.h"
@@ -2830,6 +2831,17 @@ void EngineCoreUVE::Update() {
         const Gameplay::GameplayInputUVE gameplayInput = Gameplay::CollectGameplayInputUVE(*m_inputSystem);
         Scene::MaintainPlayerPossessionUVE(*m_entityManager);
         Scene::RouteGameplayInputUVE(*m_entityManager, gameplayInput);
+        const Scene::PossessionLifecycleReportUVE possessionReport =
+            m_possessionLifecycleTracker.UpdateUVE(*m_entityManager);
+        for (const Scene::PossessionTransitionUVE& transition : possessionReport.transitions) {
+            if (transition.kind == Scene::PossessionTransitionKindUVE::Possessed) {
+                m_eventSystem->QueueEvent(
+                    Gameplay::PawnPossessedEventUVE{transition.controller, transition.pawn});
+            } else {
+                m_eventSystem->QueueEvent(
+                    Gameplay::PawnUnpossessedEventUVE{transition.controller, transition.pawn});
+            }
+        }
         const Scene::EntityUVE player = Scene::ResolvePossessedPlayerUVE(*m_entityManager);
         if (player != Scene::kInvalidEntityUVE &&
             m_entityManager->HasComponentUVE<Scene::PlayerComponentUVE>(player) &&

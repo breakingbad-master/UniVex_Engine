@@ -20,6 +20,17 @@ namespace {
     return lhs.index != rhs.index ? lhs.index < rhs.index : lhs.generation < rhs.generation;
 }
 
+[[nodiscard]] bool IsEarlierLinkUVE(const PossessionLinkUVE& lhs,
+                                    const PossessionLinkUVE& rhs) noexcept {
+    if (lhs.controller.index != rhs.controller.index) {
+        return lhs.controller.index < rhs.controller.index;
+    }
+    if (lhs.controller.generation != rhs.controller.generation) {
+        return lhs.controller.generation < rhs.controller.generation;
+    }
+    return IsEarlierUVE(lhs.pawn, rhs.pawn);
+}
+
 // Links outlive their targets: a destroyed controller leaves a stale handle behind, and the
 // typed HasComponentUVE<T>() asserts liveness in debug builds. Every query below that follows a
 // link - rather than a handle proven live by iteration - goes through this guard.
@@ -162,6 +173,42 @@ void RouteGameplayInputUVE(IEntityManagerUVE& entityManager,
             pawn.input = {};
         }
     }
+}
+
+PossessionLifecycleReportUVE PossessionLifecycleTrackerUVE::UpdateUVE(
+    IEntityManagerUVE& entityManager) {
+    PossessionLifecycleReportUVE report;
+    report.previousLinkCount = m_activeLinks.size();
+    std::vector<PossessionLinkUVE> current;
+    entityManager.ForEachUVE<ControllerComponentUVE>(
+        [&entityManager, &current](const EntityUVE controller, const ControllerComponentUVE&) {
+            const EntityUVE pawn = FindPossessedPawnUVE(entityManager, controller);
+            if (pawn != kInvalidEntityUVE) {
+                current.push_back(PossessionLinkUVE{controller, pawn});
+            }
+        });
+    std::sort(current.begin(), current.end(), IsEarlierLinkUVE);
+    report.currentLinkCount = current.size();
+    std::vector<PossessionLinkUVE> formed;
+    std::vector<PossessionLinkUVE> broken;
+    std::set_difference(current.begin(), current.end(), m_activeLinks.begin(), m_activeLinks.end(),
+                         std::back_inserter(formed), IsEarlierLinkUVE);
+    std::set_difference(m_activeLinks.begin(), m_activeLinks.end(), current.begin(), current.end(),
+                         std::back_inserter(broken), IsEarlierLinkUVE);
+    for (const PossessionLinkUVE& link : formed) {
+        report.transitions.push_back(
+            PossessionTransitionUVE{PossessionTransitionKindUVE::Possessed, link.controller, link.pawn});
+    }
+    for (const PossessionLinkUVE& link : broken) {
+        report.transitions.push_back(PossessionTransitionUVE{
+            PossessionTransitionKindUVE::Unpossessed, link.controller, link.pawn});
+    }
+    m_activeLinks = std::move(current);
+    return report;
+}
+
+void PossessionLifecycleTrackerUVE::ResetUVE() noexcept {
+    m_activeLinks.clear();
 }
 
 } // namespace UVE::Scene
