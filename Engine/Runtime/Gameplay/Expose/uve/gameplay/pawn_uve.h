@@ -26,8 +26,9 @@ namespace UVE::Scene {
 //
 // Possession changes are caller-known imperative calls, so v1 queues no events. And the
 // player-look/interact/character flow resolves its player through possession (a maintained
-// self-possession fill keeps possessOnPlay bodies driven). Movement still reads the raw polled
-// snapshot rather than pawn input - closing that loop is the next slice, not this one.
+// self-possession fill keeps possessOnPlay bodies driven), and character movement steers from
+// pawn input - Player-kind faced by the body's own yaw, AI-kind raw. Unpossessed bodies stand
+// still: the no-player-drives-everyone quirk died with the flag-based resolution.
 
 enum class ControllerKindUVE : std::uint8_t {
     /// Driven by the polled input snapshot through RouteGameplayInputUVE().

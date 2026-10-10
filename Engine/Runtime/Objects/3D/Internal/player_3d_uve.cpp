@@ -68,6 +68,7 @@ void ApplyPlayer3DObjectDefinitionUVE(IEntityManagerUVE& entityManager, const En
     Character3DObjectDefinitionUVE character{};
     character.collider = value.collider;
     character.controller = value.controller;
+    character.controllerKind = value.controllerKind;
     ApplyCharacter3DObjectDefinitionUVE(entityManager, entity, character);
     if (entityManager.HasComponentUVE<NameComponentUVE>(entity) &&
         entityManager.GetComponentUVE<NameComponentUVE>(entity).name ==

@@ -2,6 +2,8 @@
 
 #include "uve/objects/3d/character_3d_uve.h"
 
+#include "uve/objects/3d/player_3d_uve.h"
+
 #include <algorithm>
 #include <cmath>
 #include <optional>
@@ -1102,8 +1104,11 @@ CharacterMotionConfigUVE MakeCharacterMotionConfigUVE(
 // =================================================================================================
 
 bool IsCharacter3DObjectDefinitionValidUVE(const Character3DObjectDefinitionUVE& value) noexcept {
+    ControllerComponentUVE authoredController;
+    authoredController.kind = value.controllerKind;
     return IsColliderComponentValidUVE(value.collider) &&
-           IsCharacterControllerComponentValidUVE(value.controller);
+           IsCharacterControllerComponentValidUVE(value.controller) &&
+           IsControllerComponentValidUVE(authoredController);
 }
 
 void ApplyCharacter3DObjectDefinitionUVE(IEntityManagerUVE& entityManager, const EntityUVE entity,
@@ -1118,6 +1123,38 @@ void ApplyCharacter3DObjectDefinitionUVE(IEntityManagerUVE& entityManager, const
     if (!entityManager.HasComponentUVE<CharacterControllerComponentUVE>(entity)) {
         entityManager.AddComponentUVE<CharacterControllerComponentUVE>(entity, value.controller);
     }
+    if (!entityManager.HasComponentUVE<PawnComponentUVE>(entity)) {
+        entityManager.AddComponentUVE<PawnComponentUVE>(entity, PawnComponentUVE{});
+    }
+    if (!entityManager.HasComponentUVE<ControllerComponentUVE>(entity)) {
+        ControllerComponentUVE possession;
+        possession.kind = value.controllerKind;
+        entityManager.AddComponentUVE<ControllerComponentUVE>(entity, possession);
+    }
+}
+
+Physics::CharacterMotionInputUVE ResolveCharacterMotionUVE(IEntityManagerUVE& entityManager,
+                                                           const EntityUVE entity) {
+    Physics::CharacterMotionInputUVE motion{};
+    const EntityUVE driver = FindPawnControllerUVE(entityManager, entity);
+    if (driver == kInvalidEntityUVE) {
+        return motion;
+    }
+    const PawnComponentUVE& pawn = entityManager.GetComponentUVE<PawnComponentUVE>(entity);
+    if (!IsPawnComponentValidUVE(pawn)) {
+        return motion;
+    }
+    motion.move = pawn.input.move;
+    motion.rise = pawn.input.rise;
+    motion.jumpPressed = pawn.input.jumpPressed;
+    if (entityManager.GetComponentUVE<ControllerComponentUVE>(driver).kind ==
+            ControllerKindUVE::Player &&
+        entityManager.HasComponentUVE<TransformComponentUVE>(entity)) {
+        motion.move = FaceMoveFromLookUVE(
+            entityManager.GetComponentUVE<TransformComponentUVE>(entity).localRotation,
+            pawn.input.move);
+    }
+    return motion;
 }
 
 } // namespace UVE::Scene

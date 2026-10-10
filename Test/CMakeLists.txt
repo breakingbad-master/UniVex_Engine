@@ -260,6 +260,7 @@ add_executable(uve_integration_tests
     Objects/3D/objects_3d_uve_tests.cpp
     Objects/3D/object_definitions_3d_uve_tests.cpp
     Objects/3D/player_3d_uve_tests.cpp
+    Objects/3D/character_motion_uve_tests.cpp
     Objects/3D/health_uve_tests.cpp
     Objects/3D/world_environment_uve_tests.cpp
     Objects/3D/directional_light_3d_uve_tests.cpp

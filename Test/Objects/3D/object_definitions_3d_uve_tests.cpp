@@ -1360,6 +1360,10 @@ TEST_F(Object3DDefinitionsUVETest, BodyKindsWithShapesAreToldApartByTheirControl
     const EntityUVE character = entityManager.CreateEntityUVE();
     ApplyCharacter3DObjectDefinitionUVE(entityManager, character, Character3DObjectDefinitionUVE{});
     EXPECT_EQ(ResolveSceneObjectKindUVE(entityManager, character), Objects::SceneObjectKindUVE::Character3D);
+    ASSERT_TRUE(entityManager.HasComponentUVE<PawnComponentUVE>(character));
+    ASSERT_TRUE(entityManager.HasComponentUVE<ControllerComponentUVE>(character));
+    EXPECT_EQ(entityManager.GetComponentUVE<ControllerComponentUVE>(character).kind,
+              ControllerKindUVE::AI);
 
     const EntityUVE player = entityManager.CreateEntityUVE();
     ApplyPlayer3DObjectDefinitionUVE(entityManager, player, Player3DObjectDefinitionUVE{});

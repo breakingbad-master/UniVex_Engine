@@ -114,6 +114,7 @@
 #include "uve/objects/3d/interaction_area_3d_uve.h"
 #include "uve/objects/3d/health_uve.h"
 #include "uve/objects/3d/player_3d_uve.h"
+#include "uve/objects/3d/character_3d_uve.h"
 #include "uve/objects/3d/kinematic_3d_uve.h"
 #include "uve/objects/3d/level_streamer_3d_uve.h"
 #include "uve/objects/3d/projectile_3d_uve.h"
@@ -1735,24 +1736,15 @@ void EngineCoreUVE::SyncCharacterControllersUVE(const float fixedDeltaTimeSecond
         return;
     }
 
-    const Gameplay::GameplayInputUVE gameplayInput = Gameplay::CollectGameplayInputUVE(*m_inputSystem);
-    const Scene::EntityUVE possessed = Scene::ResolvePossessedPlayerUVE(*m_entityManager);
+    // Motion comes from possession, not the keyboard: unpossessed bodies stand still, and the
+    // resolver below is where each character's pawn input becomes its step's intent.
     // Collected and ordered rather than iterated in place: two characters can push the same body,
     // and the order they meet it in changes the outcome, so physicsPriority is how an author
     // decides that instead of archetype storage order deciding it for them.
     for (const Scene::EntityUVE entity :
          CollectFixedStepOrderUVE<Scene::CharacterControllerComponentUVE>(*m_entityManager, *m_sceneGraph)) {
-        Physics::CharacterMotionInputUVE motion{};
-        if (possessed == Scene::kInvalidEntityUVE || entity == possessed) {
-            motion.move = gameplayInput.move;
-            motion.rise = gameplayInput.rise;
-            motion.jumpPressed = gameplayInput.jumpPressed;
-            if (entity == possessed && m_entityManager->HasComponentUVE<Scene::TransformComponentUVE>(entity)) {
-                motion.move = Scene::FaceMoveFromLookUVE(
-                    m_entityManager->GetComponentUVE<Scene::TransformComponentUVE>(entity).localRotation,
-                    gameplayInput.move);
-            }
-        }
+        const Physics::CharacterMotionInputUVE motion =
+            Scene::ResolveCharacterMotionUVE(*m_entityManager, entity);
         // One call takes the body from intent to moved-and-written-back: built-in movement (or,
         // with that off, the velocity a script set), gravity, the move through the world with its
         // step-up, floor snap and platform carry, and the state the next step reads. The bridge
