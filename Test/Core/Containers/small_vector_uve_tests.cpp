@@ -177,4 +177,22 @@ TEST(SmallVectorUVETest, ElementLifetime_SpillDestroysInlineOriginalsExactlyOnce
     EXPECT_EQ(LifetimeProbeUVE::constructed, LifetimeProbeUVE::destroyed);
 }
 
+TEST(SmallVectorUVETest, InitializerList_BuildsInlineWhenItFits) {
+    const SmallVectorUVE<int, 4U> values{1, 2, 3};
+    EXPECT_EQ(values.SizeUVE(), 3U);
+    EXPECT_EQ(values.CapacityUVE(), 4U);
+    EXPECT_EQ(values[0], 1);
+    EXPECT_EQ(values[1], 2);
+    EXPECT_EQ(values[2], 3);
+}
+
+TEST(SmallVectorUVETest, InitializerList_SpillsPastInlineCapacity) {
+    const SmallVectorUVE<int, 2U> values{1, 2, 3, 4, 5};
+    EXPECT_EQ(values.SizeUVE(), 5U);
+    EXPECT_GT(values.CapacityUVE(), 2U);
+    for (int index = 0; index < 5; ++index) {
+        EXPECT_EQ(values[static_cast<std::size_t>(index)], index + 1);
+    }
+}
+
 }  // namespace

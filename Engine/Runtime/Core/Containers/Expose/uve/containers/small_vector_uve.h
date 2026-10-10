@@ -3,6 +3,7 @@
 #pragma once
 
 #include <cstddef>
+#include <initializer_list>
 #include <new>
 #include <span>
 #include <type_traits>
@@ -67,6 +68,18 @@ public:
                 PushBackUVE(std::move(other[index]));
             }
             other.ClearUVE();
+        }
+    }
+
+    // Braced initialization, matching `std::vector` (deliberately non-explicit: aggregate
+    // members like `FrameTaskDefinitionUVE::dependencies` list-initialize from `{...}`, which
+    // cannot call an explicit constructor). Over-capacity lists spill, as a push loop would.
+    SmallVectorUVE(std::initializer_list<T> items) : m_data(InlineDataUVE()) {
+        if (items.size() > InlineCapacity) {
+            GrowUVE(items.size());
+        }
+        for (const T& item : items) {
+            PushBackUVE(item);
         }
     }
 

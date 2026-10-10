@@ -271,13 +271,14 @@ What a runtime of this shape needs, and what each unblocks:
   capture caps); each is the same pattern rewritten.
   Implemented in `Core/Containers` (Tier 0, item 0.2); `LightListUVE` and the
   frame-task graph's 256-task cap now use it. Verified: full suite green (1318 core + 1668 integration, 2026-10-09). Both migrations confirmed in-tree (`LightListUVE` alias + scheduler `m_tasks`).
-- `[/]` **`SmallVectorUVE<T, N>`** — inline storage for the first `N`, heap
+- `[x]` **`SmallVectorUVE<T, N>`** — inline storage for the first `N`, heap
   spill beyond. The single highest-impact container for a game engine, because the
   overwhelming majority of per-entity and per-frame lists are small and currently
   each one heap-allocates.
   Implemented alongside `FixedArrayUVE` in `Core/Containers` (Tier 0, item 0.2)
-  with its own test suite; first migration target lands when a hot-path
-  `std::vector` is converted. `[/]`: own tests green in the full suite (1318 core, 2026-10-09); stays `[/]` — zero non-test in-tree users today.
+  with its own test suite; first migration landed Oct 2026 (frame-task dependencies
+  inline at the 32-cap, zero allocations for accepted tasks, braced-init supported).
+  Verified: full suite green (1511 core + 1713 integration + 14 settings, 2026-10-10).
 - `[ ]` **`SparseSetUVE`** — dense array plus sparse index, O(1) insert/remove with
   contiguous iteration. This is the canonical ECS storage structure; the archetype
   storage in `Entity/Internal/` solves the same problem its own way and could not
@@ -820,10 +821,10 @@ call sites are already allocating from the wrong place.
 | # | Item | Module | Unblocks | Done when |
 |---|---|---|---|---|
 | 0.1 | Scalar utility header — `Pi`, `DegToRad`, `RadToDeg`, `LerpUVE`, `ClampUVE`, `SmoothStepUVE`, `ApproximatelyEqualUVE` | `Core/Math` | removes duplicated copies in gizmo, animation and physics code | the three existing copies are deleted and call sites use the shared header - landed (Oct 2026): player/character/world-env/collider/navmesh/renderer/perception runtime literals plus the editor panel/clip-editing literals migrated; viewport-core stays on `std::numbers` by contract |
-| 0.2 | `FixedArrayUVE<T,N>`, `SmallVectorUVE<T,N>`, `SpanUVE` conventions | `Core/Containers` (new build entry) | every bounded list in the engine | `LightListUVE` and the frame-task graph caps are expressed with it |
-| 0.3 | `StdAllocatorUVE<T>` adaptor | `Core/Memory` | makes the existing allocators reachable from any container | a `std::vector` in a test allocates through `PoolAllocatorUVE` and the tracker sees it |
-| 0.4 | `StringIdUVE` interned name | `Core/Strings` | reflection lookups, name-keyed maps | `TypeMetadataEntryUVE` type ids are ids, not strings |
-| 0.5 | `HandleTableUVE<T>` generational slot map | `Core/Containers` | replaces three hand-rolled versions | at least one of `VoiceHandleUVE` / entity slots is rebuilt on it, with tests unchanged |
+| 0.2 | `FixedArrayUVE<T,N>`, `SmallVectorUVE<T,N>`, `SpanUVE` conventions | `Core/Containers` (new build entry) | every bounded list in the engine | `LightListUVE` and the frame-task graph caps are expressed with it - landed (Oct 2026): `LightListUVE` alias + scheduler `m_tasks` on `FixedArrayUVE`, task dependencies on inline `SmallVectorUVE` (spans via `AsSpanUVE`) |
+| 0.3 | `StdAllocatorUVE<T>` adaptor | `Core/Memory` | makes the existing allocators reachable from any container | a `std::vector` in a test allocates through `PoolAllocatorUVE` and the tracker sees it - landed: `VectorAllocatesThroughPool_TrackerSeesAllocationAndRelease` |
+| 0.4 | `StringIdUVE` interned name | `Core/Strings` | reflection lookups, name-keyed maps | `TypeMetadataEntryUVE` type ids are ids, not strings - landed: `typeId` is `StringIdUVE` |
+| 0.5 | `HandleTableUVE<T>` generational slot map | `Core/Containers` | replaces three hand-rolled versions | at least one of `VoiceHandleUVE` / entity slots is rebuilt on it, with tests unchanged - landed: both audio devices back voices with `HandleTableUVE` |
 
 ## Tier 1 — completing the value layer
 

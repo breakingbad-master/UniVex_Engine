@@ -186,11 +186,11 @@ FrameTaskGraphMutationResultUVE FrameTaskGraphUVE::AddTaskUVE(FrameTaskDefinitio
         return MakeMutationErrorUVE(FrameTaskGraphMutationCodeUVE::InvalidAction, task.id,
                                     "frame task action must be callable");
     }
-    if (task.dependencies.size() > kMaximumDependenciesPerTaskUVE) {
+    if (task.dependencies.SizeUVE() > kMaximumDependenciesPerTaskUVE) {
         return MakeMutationErrorUVE(FrameTaskGraphMutationCodeUVE::TooManyDependencies, task.id,
                                     "frame task dependency list exceeds its bounded capacity");
     }
-    for (std::size_t index = 0U; index < task.dependencies.size(); ++index) {
+    for (std::size_t index = 0U; index < task.dependencies.SizeUVE(); ++index) {
         const FrameTaskIdUVE dependencyId = task.dependencies[index];
         if (dependencyId == 0U || dependencyId == task.id) {
             return MakeMutationErrorUVE(FrameTaskGraphMutationCodeUVE::InvalidDependency, task.id,
@@ -223,7 +223,7 @@ FrameTaskGraphValidationResultUVE FrameTaskGraphUVE::ValidateUVE() const {
     for (const FrameTaskDefinitionUVE& task : m_tasks) {
         if (task.id == 0U || !IsValidDomainUVE(task.domain) || task.name.empty() ||
             task.name.size() > kMaximumTaskNameBytesUVE || !task.action ||
-            task.dependencies.size() > kMaximumDependenciesPerTaskUVE) {
+            task.dependencies.SizeUVE() > kMaximumDependenciesPerTaskUVE) {
             return MakeValidationErrorUVE(FrameTaskGraphValidationCodeUVE::InvalidTask, task.id,
                                           "frame task contains invalid metadata or action");
         }
@@ -275,12 +275,12 @@ FrameScheduleResultUVE FrameSchedulerUVE::ExecuteUVE(const FrameTaskGraphUVE& gr
     std::vector<std::size_t> rootTasks;
     for (std::size_t index = 0U; index < graph.GetTasksUVE().size(); ++index) {
         const FrameTaskDefinitionUVE& task = graph.GetTasksUVE()[index];
-        state->remainingDependencies[index] = task.dependencies.size();
+        state->remainingDependencies[index] = task.dependencies.SizeUVE();
         for (const FrameTaskIdUVE dependencyId : task.dependencies) {
             const std::size_t dependencyIndex = FindTaskIndexUVE(graph.GetTasksUVE(), dependencyId);
             state->dependents[dependencyIndex].push_back(index);
         }
-        if (task.dependencies.empty()) {
+        if (task.dependencies.EmptyUVE()) {
             rootTasks.push_back(index);
         }
     }

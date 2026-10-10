@@ -3,6 +3,7 @@
 #pragma once
 
 #include "uve/containers/fixed_array_uve.h"
+#include "uve/containers/small_vector_uve.h"
 #include "uve/threading/i_thread_pool_uve.h"
 
 #include <cstddef>
@@ -10,7 +11,6 @@
 #include <functional>
 #include <span>
 #include <string>
-#include <vector>
 
 namespace UVE::Core {
 
@@ -33,7 +33,10 @@ struct FrameTaskDefinitionUVE final {
     FrameTaskIdUVE id = 0U;
     FrameTaskDomainUVE domain = FrameTaskDomainUVE::Animation;
     std::string name;
-    std::vector<FrameTaskIdUVE> dependencies;
+    // Inline capacity == kMaximumDependenciesPerTaskUVE (a literal: this struct precedes the
+    // constant). AddTaskUVE rejects longer lists before storing, so accepted tasks never spill
+    // and task dependency lists never heap-allocate.
+    Containers::SmallVectorUVE<FrameTaskIdUVE, 32U> dependencies;
     std::function<void()> action;
 };
 
@@ -82,6 +85,9 @@ class FrameTaskGraphUVE final {
 public:
     static constexpr std::size_t kMaximumTasksUVE = 256U;
     static constexpr std::size_t kMaximumDependenciesPerTaskUVE = 32U;
+    // Pinned: the dependencies member above inlines exactly this many ids, so drift here would
+    // silently change spill behavior.
+    static_assert(kMaximumDependenciesPerTaskUVE == 32U);
     static constexpr std::size_t kMaximumTaskNameBytesUVE = 128U;
 
     [[nodiscard]] FrameTaskGraphMutationResultUVE AddTaskUVE(FrameTaskDefinitionUVE task);
