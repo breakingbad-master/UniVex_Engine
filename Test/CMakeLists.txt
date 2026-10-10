@@ -72,6 +72,9 @@ add_executable(uve_core_tests
     Core/Asset/gltf_mesh_converter_uve_tests.cpp
     Core/Asset/gltf_metadata_uve_tests.cpp
     Core/Asset/gltf_skeleton_uve_tests.cpp
+    Core/Asset/skeleton_asset_uve_tests.cpp
+    Core/Asset/gltf_skin_converter_uve_tests.cpp
+    Core/Asset/gltf_animation_converter_uve_tests.cpp
     Core/Asset/mtl_importer_uve_tests.cpp
     Core/Asset/mtl_material_converter_uve_tests.cpp
     Core/Asset/mtl_metadata_uve_tests.cpp

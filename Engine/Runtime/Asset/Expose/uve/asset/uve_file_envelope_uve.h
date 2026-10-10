@@ -43,6 +43,7 @@ enum class AssetKindUVE : std::uint32_t {
     DataTable = 10,
     Audio = 11,
     Animation = 12,
+    Skeleton = 13,
 };
 
 /// The fixed-size portion of a `.uve*` file's header, returned by ReadUveFileUVE() alongside the

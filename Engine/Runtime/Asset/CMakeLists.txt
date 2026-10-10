@@ -105,6 +105,8 @@ add_library(uve_asset STATIC
     Internal/gltf_mesh_converter_uve.cpp
     Internal/gltf_metadata_uve.cpp
     Internal/gltf_skeleton_uve.cpp
+    Internal/gltf_skin_converter_uve.cpp
+    Internal/gltf_animation_converter_uve.cpp
     Internal/mtl_importer_uve.cpp
     Internal/mtl_material_converter_uve.cpp
     Internal/mtl_metadata_uve.cpp
@@ -116,6 +118,7 @@ add_library(uve_asset STATIC
     Internal/derived_artifact_cache_uve.cpp
     Internal/resource_dependency_graph_uve.cpp
     Internal/animation_clip_asset_uve.cpp
+    Internal/skeleton_asset_uve.cpp
     Internal/data_table_uve.cpp
     Internal/data_table_asset_uve.cpp
     Internal/data_table_asset_manager_uve.cpp
