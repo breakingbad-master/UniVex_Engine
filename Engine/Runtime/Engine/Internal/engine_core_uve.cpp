@@ -1857,6 +1857,14 @@ void EngineCoreUVE::SyncCinematicUVE(const float deltaSeconds) {
         if (result.activeCamera != Scene::kInvalidEntityUVE) {
             SetActiveCameraUVE(result.activeCamera);
         }
+        if (result.cameraPose.has_value() && result.activeCamera != Scene::kInvalidEntityUVE &&
+            m_entityManager->HasComponentUVE<Scene::TransformComponentUVE>(result.activeCamera)) {
+            // The move track poses the live shot's camera; the graph propagates it to the world
+            // transform Render reads, later this same frame.
+            Scene::WriteCinematicCameraPoseUVE(
+                *result.cameraPose,
+                m_entityManager->GetComponentUVE<Scene::TransformComponentUVE>(result.activeCamera));
+        }
     }
 }
 

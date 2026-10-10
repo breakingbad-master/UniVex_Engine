@@ -61,7 +61,8 @@ bool IsCinematicComponentValidUVE(const CinematicComponentUVE& value) noexcept {
     if (!std::isfinite(value.durationSeconds) || value.durationSeconds <= 0.0 ||
         !std::isfinite(value.speed) || !std::isfinite(value.currentTimeSeconds) ||
         value.currentTimeSeconds < 0.0 || value.currentTimeSeconds > value.durationSeconds ||
-        value.events.size() > kMaximumCinematicEventsUVE || value.cuts.size() > kMaximumCinematicCutsUVE) {
+        value.events.size() > kMaximumCinematicEventsUVE || value.cuts.size() > kMaximumCinematicCutsUVE ||
+        value.cameraKeys.size() > kMaximumCinematicCameraKeysUVE) {
         return false;
     }
     for (const CinematicEventKeyUVE& key : value.events) {
@@ -74,8 +75,18 @@ bool IsCinematicComponentValidUVE(const CinematicComponentUVE& value) noexcept {
             return false;
         }
     }
+    for (const CinematicCameraKeyUVE& key : value.cameraKeys) {
+        if (!std::isfinite(key.position.x) || !std::isfinite(key.position.y) ||
+            !std::isfinite(key.position.z) || !std::isfinite(key.rotation.x) ||
+            !std::isfinite(key.rotation.y) || !std::isfinite(key.rotation.z) ||
+            !std::isfinite(key.rotation.w) ||
+            std::abs(Math::LengthSquaredUVE(key.rotation) - 1.0F) > 1e-4F) {
+            return false;
+        }
+    }
     return IsTimeOrderedUVE(value.events, value.durationSeconds) &&
-           IsTimeOrderedUVE(value.cuts, value.durationSeconds);
+           IsTimeOrderedUVE(value.cuts, value.durationSeconds) &&
+           IsTimeOrderedUVE(value.cameraKeys, value.durationSeconds);
 }
 
 bool AddCinematicEventUVE(CinematicComponentUVE& cinematic, const double timeSeconds, std::string eventId) {
@@ -122,6 +133,75 @@ bool RemoveCinematicCutUVE(CinematicComponentUVE& cinematic, const std::size_t i
     }
     cinematic.cuts.erase(cinematic.cuts.begin() + static_cast<std::ptrdiff_t>(index));
     return true;
+}
+
+bool AddCinematicCameraKeyUVE(CinematicComponentUVE& cinematic, const double timeSeconds,
+                              const Math::Vector3UVE position, const Math::QuaternionUVE rotation) {
+    Math::QuaternionUVE normalized{};
+    if (!std::isfinite(position.x) || !std::isfinite(position.y) || !std::isfinite(position.z) ||
+        !Math::TryNormalizeUVE(rotation, normalized) ||
+        !IsValidKeyTimeUVE(timeSeconds, cinematic.durationSeconds) ||
+        cinematic.cameraKeys.size() >= kMaximumCinematicCameraKeysUVE) {
+        return false;
+    }
+    CinematicCameraKeyUVE key;
+    key.timeSeconds = timeSeconds;
+    key.position = position;
+    key.rotation = normalized;
+    const auto slot = std::upper_bound(
+        cinematic.cameraKeys.begin(), cinematic.cameraKeys.end(), timeSeconds,
+        [](const double time, const CinematicCameraKeyUVE& existing) { return time < existing.timeSeconds; });
+    cinematic.cameraKeys.insert(slot, std::move(key));
+    return true;
+}
+
+bool RemoveCinematicCameraKeyUVE(CinematicComponentUVE& cinematic, const std::size_t index) {
+    if (index >= cinematic.cameraKeys.size()) {
+        return false;
+    }
+    cinematic.cameraKeys.erase(cinematic.cameraKeys.begin() + static_cast<std::ptrdiff_t>(index));
+    return true;
+}
+
+std::optional<CinematicCameraPoseUVE> SampleCinematicCameraUVE(const CinematicComponentUVE& cinematic,
+                                                               const double timeSeconds) noexcept {
+    if (cinematic.cameraKeys.empty() || !std::isfinite(timeSeconds)) {
+        return std::nullopt;
+    }
+    const auto upper = std::upper_bound(
+        cinematic.cameraKeys.begin(), cinematic.cameraKeys.end(), timeSeconds,
+        [](const double time, const CinematicCameraKeyUVE& existing) { return time < existing.timeSeconds; });
+    if (upper == cinematic.cameraKeys.begin()) {
+        const CinematicCameraKeyUVE& first = cinematic.cameraKeys.front();
+        return CinematicCameraPoseUVE{first.position, first.rotation};
+    }
+    if (upper == cinematic.cameraKeys.end()) {
+        const CinematicCameraKeyUVE& last = cinematic.cameraKeys.back();
+        return CinematicCameraPoseUVE{last.position, last.rotation};
+    }
+    const CinematicCameraKeyUVE& right = *upper;
+    const CinematicCameraKeyUVE& left = *(upper - 1);
+    const double span = right.timeSeconds - left.timeSeconds;
+    const float alpha =
+        span <= 0.0 ? 0.0F : static_cast<float>((timeSeconds - left.timeSeconds) / span);
+    CinematicCameraPoseUVE pose;
+    pose.position = left.position + (right.position - left.position) * alpha;
+    if (!Math::TrySlerpUVE(left.rotation, right.rotation, alpha, pose.rotation)) {
+        pose.rotation = left.rotation;
+    }
+    return pose;
+}
+
+void WriteCinematicCameraPoseUVE(const CinematicCameraPoseUVE& pose, TransformComponentUVE& target) noexcept {
+    target.localPosition = pose.position;
+    Math::QuaternionUVE normalized{};
+    if (Math::TryNormalizeUVE(pose.rotation, normalized)) {
+        target.localRotation = normalized;
+        Math::Vector3UVE euler{};
+        if (Math::TryToEulerOrderedUVE(normalized, target.eulerOrder, euler)) {
+            target.localEulerRadians = euler;
+        }
+    }
 }
 
 std::vector<std::string> PlayCinematicUVE(CinematicComponentUVE& cinematic) noexcept {
@@ -180,6 +260,9 @@ CinematicStepResultUVE StepCinematicUVE(CinematicComponentUVE& cinematic, const 
         }
     }
     result.activeCamera = CameraCutAtUVE(cinematic.cuts, cinematic.currentTimeSeconds);
+    if (!cinematic.cameraKeys.empty()) {
+        result.cameraPose = SampleCinematicCameraUVE(cinematic, cinematic.currentTimeSeconds);
+    }
     return result;
 }
 

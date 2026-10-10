@@ -94,6 +94,10 @@ TEST_F(GameplaySerializationUVETest, Cinematic_RoundTripThroughCaptureRestore) {
     ASSERT_TRUE(AddCinematicEventUVE(cinematic, 5.0, "mid"));
     ASSERT_TRUE(AddCinematicCutUVE(cinematic, 0.0, camA));
     ASSERT_TRUE(AddCinematicCutUVE(cinematic, 5.0, camB));
+    ASSERT_TRUE(AddCinematicCameraKeyUVE(cinematic, 0.0, Math::Vector3UVE{1.0F, 2.0F, 3.0F},
+                                         Math::QuaternionUVE{0.0F, 0.70710678F, 0.0F, 0.70710678F}));
+    ASSERT_TRUE(AddCinematicCameraKeyUVE(cinematic, 10.0, Math::Vector3UVE{4.0F, 5.0F, 6.0F},
+                                         Math::QuaternionUVE{}));
     entityManager.AddComponentUVE<CinematicComponentUVE>(source, cinematic);
 
     const std::optional<SceneSnapshotUVE> snapshot =
@@ -115,6 +119,7 @@ TEST_F(GameplaySerializationUVETest, Cinematic_RoundTripThroughCaptureRestore) {
     EXPECT_FLOAT_EQ(revived.speed, 2.0F);
     EXPECT_EQ(revived.loopMode, CinematicLoopModeUVE::Loop);
     EXPECT_EQ(revived.events, cinematic.events);
+    EXPECT_EQ(revived.cameraKeys, cinematic.cameraKeys);
     ASSERT_EQ(revived.cuts.size(), 2U);
     EXPECT_DOUBLE_EQ(revived.cuts[0].timeSeconds, 0.0);
     EXPECT_DOUBLE_EQ(revived.cuts[1].timeSeconds, 5.0);

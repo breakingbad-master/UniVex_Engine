@@ -3,8 +3,12 @@
 #pragma once
 
 #include "uve/component/entity_uve.h"
+#include "uve/component/transform_component_uve.h"
+#include "uve/math/quaternion_uve.h"
+#include "uve/math/vector3_uve.h"
 
 #include <cstddef>
+#include <optional>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -23,9 +27,14 @@ namespace UVE::Scene {
 // time the playhead sits on (a key exactly under the playhead does not refire every frame).
 // Keys at 0.0 fire on Play, not on the first Step. Loop wraps refire the wrapped span. Scrubbing
 // and reverse motion never fire - they only move the clock and resolve the camera.
+// The camera move track poses the cut-resolved camera: each step samples position (linear) and
+// rotation (spherical) at the playhead and writes both into that camera's local transform, the
+// same semantics as the animation track sampler. An empty track poses nothing, and keys never
+// pick a camera - a timeline with keys but no cuts still needs one cut naming its camera.
 
 inline constexpr std::size_t kMaximumCinematicEventsUVE = 64U;
 inline constexpr std::size_t kMaximumCinematicCutsUVE = 32U;
+inline constexpr std::size_t kMaximumCinematicCameraKeysUVE = 64U;
 inline constexpr std::size_t kMaximumCinematicEventIdBytesUVE = 64U;
 
 enum class CinematicLoopModeUVE : std::uint8_t {
@@ -47,10 +56,30 @@ struct CinematicCameraCutUVE final {
     [[nodiscard]] bool operator==(const CinematicCameraCutUVE&) const = default;
 };
 
+/// One camera pose on the move track: world-space position plus a unit-quaternion rotation.
+/// Stored rotations are always normalized (Add normalizes, the validator demands it), so the
+/// sampler never has to ask whether a slerp endpoint is usable.
+struct CinematicCameraKeyUVE final {
+    double timeSeconds = 0.0;
+    Math::Vector3UVE position{};
+    Math::QuaternionUVE rotation{};
+
+    [[nodiscard]] bool operator==(const CinematicCameraKeyUVE&) const = default;
+};
+
+/// The move track sampled at one instant: what the live camera takes this frame.
+struct CinematicCameraPoseUVE final {
+    Math::Vector3UVE position{};
+    Math::QuaternionUVE rotation{};
+
+    [[nodiscard]] bool operator==(const CinematicCameraPoseUVE&) const = default;
+};
+
 struct CinematicComponentUVE final {
     double durationSeconds = 0.0;
     std::vector<CinematicEventKeyUVE> events;
     std::vector<CinematicCameraCutUVE> cuts;
+    std::vector<CinematicCameraKeyUVE> cameraKeys;
     /// Cutscenes stay parked until something presses play; autoplay is opt-in per shot.
     bool autoplay = false;
     float speed = 1.0F;
@@ -63,7 +92,8 @@ struct CinematicComponentUVE final {
 };
 
 /// Finite positive duration and speed, key times inside [0, duration], usable event ids, valid
-/// cut cameras, both lists sorted by time and within their caps.
+/// cut cameras, both lists sorted by time and within their caps, plus a sorted camera-key track
+/// whose positions are finite and whose rotations are finite unit quaternions.
 [[nodiscard]] bool IsCinematicComponentValidUVE(const CinematicComponentUVE& value) noexcept;
 
 /// Inserts an event key keeping time order (equal times keep insertion order). False for a bad
@@ -81,6 +111,27 @@ struct CinematicComponentUVE final {
 [[nodiscard]] bool RemoveCinematicEventUVE(CinematicComponentUVE& cinematic, std::size_t index);
 [[nodiscard]] bool RemoveCinematicCutUVE(CinematicComponentUVE& cinematic, std::size_t index);
 
+/// Inserts a camera key keeping time order. The rotation is normalized on store. False for a
+/// non-finite position, a zero-length rotation, a time outside [0, duration], or a full track.
+[[nodiscard]] bool AddCinematicCameraKeyUVE(CinematicComponentUVE& cinematic, double timeSeconds,
+                                            Math::Vector3UVE position, Math::QuaternionUVE rotation);
+
+/// Removes the camera key at `index`. False when out of range.
+[[nodiscard]] bool RemoveCinematicCameraKeyUVE(CinematicComponentUVE& cinematic, std::size_t index);
+
+/// The move track at `timeSeconds`: linear position, spherical rotation between the two keys
+/// around it, clamped to the first and last. Nullopt when the track is empty or the time is not
+/// finite - what scrubbing previews and what each step carries.
+[[nodiscard]] std::optional<CinematicCameraPoseUVE>
+SampleCinematicCameraUVE(const CinematicComponentUVE& cinematic, double timeSeconds) noexcept;
+
+/// Writes `pose` into a camera's local transform: position outright, rotation normalized and
+/// mirrored into the stored Euler angles so the Inspector shows what is on screen - the same two
+/// channels WriteAnimatedPoseUVE would write, without the scale channel a camera has no use for.
+/// A zero rotation keeps the previous orientation rather than collapsing it.
+void WriteCinematicCameraPoseUVE(const CinematicCameraPoseUVE& pose,
+                                 TransformComponentUVE& target) noexcept;
+
 /// Restarts the clock and fires the keys sitting exactly at 0.0, returning their ids. A
 /// non-positive duration starts nothing and fires nothing.
 [[nodiscard]] std::vector<std::string> PlayCinematicUVE(CinematicComponentUVE& cinematic) noexcept;
@@ -91,13 +142,15 @@ void StopCinematicUVE(CinematicComponentUVE& cinematic) noexcept;
 struct CinematicStepResultUVE final {
     std::vector<std::string> firedEventIds;
     EntityUVE activeCamera = kInvalidEntityUVE;
+    std::optional<CinematicCameraPoseUVE> cameraPose;
     bool justFinished = false;
 
     [[nodiscard]] bool operator==(const CinematicStepResultUVE&) const = default;
 };
 
 /// Advances a playing cinematic by `deltaSeconds` (scaled by speed): collects the fired keys,
-/// resolves the live camera cut, and parks at the end for Once (looping wraps instead). Returns
+/// resolves the live camera cut, samples the move track at the new time, and parks at the end
+/// for Once (looping wraps instead). Returns
 /// nothing and moves nothing when parked, finished, or stepped by a non-positive/non-finite dt.
 [[nodiscard]] CinematicStepResultUVE StepCinematicUVE(CinematicComponentUVE& cinematic, float deltaSeconds);
 

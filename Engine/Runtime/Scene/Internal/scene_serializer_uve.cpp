@@ -253,11 +253,18 @@ namespace {
     for (const CinematicCameraCutUVE& cut : component.cuts) {
         cuts.push_back({{"timeSeconds", cut.timeSeconds}});
     }
+    nlohmann::json cameraKeys = nlohmann::json::array();
+    for (const CinematicCameraKeyUVE& key : component.cameraKeys) {
+        cameraKeys.push_back({{"timeSeconds", key.timeSeconds},
+                              {"position", ToJsonUVE(key.position)},
+                              {"rotation", ToJsonUVE(key.rotation)}});
+    }
     // Player state (isPlaying, finished, currentTime) is deliberately not written: a loaded
     // cinematic reseeds parked at zero, the same rule as Decal3D and Health.
     return {{"durationSeconds", component.durationSeconds},
             {"events", std::move(events)},
             {"cuts", std::move(cuts)},
+            {"cameraKeys", std::move(cameraKeys)},
             {"autoplay", component.autoplay},
             {"speed", component.speed},
             {"loopMode", static_cast<std::uint8_t>(component.loopMode)}};
@@ -286,6 +293,15 @@ namespace {
             CinematicCameraCutUVE cut;
             cut.timeSeconds = entry.value("timeSeconds", 0.0);
             value.cuts.push_back(std::move(cut));
+        }
+    }
+    if (const auto keys = json.find("cameraKeys"); keys != json.end() && keys->is_array()) {
+        for (const nlohmann::json& entry : *keys) {
+            CinematicCameraKeyUVE key;
+            key.timeSeconds = entry.value("timeSeconds", 0.0);
+            key.position = Vector3FromJsonUVE(entry.at("position"));
+            key.rotation = QuaternionFromJsonUVE(entry.at("rotation"));
+            value.cameraKeys.push_back(std::move(key));
         }
     }
     return value;
