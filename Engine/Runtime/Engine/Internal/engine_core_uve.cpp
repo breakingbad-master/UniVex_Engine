@@ -2057,8 +2057,8 @@ void EngineCoreUVE::SyncGameplayAttributesUVE(const float deltaSeconds) {
         for (const Scene::GameplayAttributeTickResultUVE& result : results) {
             if (result.attributeId == Scene::kReservedHealthAttributeIdUVE) {
                 // The tick computes health-bound effects but never applies them - it cannot see
-                // hit points. Damage lands here; restorative magnitudes have no health-heal path
-                // in G1 and are dropped.
+                // hit points. Damage lands here through the strike applier and restorative
+                // magnitudes through the heal applier, each with its own event.
                 if (health != nullptr && result.amount > 0.0F) {
                     const Scene::HealthDamageResultUVE damage =
                         Scene::ApplyHealthDamageUVE(*health, result.amount);
@@ -2069,6 +2069,14 @@ void EngineCoreUVE::SyncGameplayAttributesUVE(const float deltaSeconds) {
                         if (damage.depleted) {
                             m_eventSystem->QueueEvent(Gameplay::HealthDepletedEventUVE{entity});
                         }
+                    }
+                }
+                if (health != nullptr && result.amount < 0.0F) {
+                    const Scene::HealthDamageResultUVE heal =
+                        Scene::ApplyHealthHealUVE(*health, -result.amount);
+                    if (heal.applied) {
+                        m_eventSystem->QueueEvent(Gameplay::HealthHealedEventUVE{
+                            entity, result.effectId, heal.amount, heal.remaining});
                     }
                 }
                 continue;

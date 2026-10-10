@@ -3,6 +3,7 @@
 #include "uve/gameplay/status_effects_uve.h"
 
 #include <cmath>
+#include <limits>
 #include <utility>
 #include <vector>
 
@@ -20,7 +21,62 @@ namespace {
 [[nodiscard]] bool IsUsableUVE(const StatusEffectUVE& effect) noexcept {
     return IsValidIdUVE(effect.effectId) && IsValidTargetUVE(effect.attributeId) &&
            std::isfinite(effect.magnitudePerSecond) && std::isfinite(effect.remainingSeconds) &&
-           effect.remainingSeconds >= 0.0F;
+           effect.remainingSeconds >= 0.0F &&
+           static_cast<std::uint8_t>(effect.stacking) <=
+               static_cast<std::uint8_t>(StatusEffectStackingUVE::Stack) &&
+           effect.stacks >= 1U && effect.maxStacks >= 1U && effect.stacks <= effect.maxStacks &&
+           std::isfinite(effect.maxDelta);
+}
+
+void ClampPoolToMaximumUVE(GameplayAttributeUVE& pool) noexcept {
+    if (!std::isfinite(pool.maximum) || pool.maximum < 0.0F) {
+        pool.maximum = 0.0F;
+    }
+    if (!std::isfinite(pool.current) || pool.current < 0.0F) {
+        pool.current = 0.0F;
+    } else if (pool.current > pool.maximum) {
+        pool.current = pool.maximum;
+    }
+}
+
+void ShiftPoolMaximumUVE(GameplayAttributeUVE& pool, const float delta) noexcept {
+    const double shifted = static_cast<double>(pool.maximum) + static_cast<double>(delta);
+    if (!std::isfinite(shifted)) {
+        pool.maximum = delta > 0.0F ? std::numeric_limits<float>::max() : 0.0F;
+    } else {
+        pool.maximum = static_cast<float>(shifted);
+    }
+    ClampPoolToMaximumUVE(pool);
+}
+
+/// Settles a pending maxDelta once the target pool exists. A no-op when settled, zero, missing
+/// or broken - the tick retries every frame, so a late pool picks the shift up on arrival.
+void SettleEffectMaximumUVE(GameplayAttributesComponentUVE& attributes, StatusEffectUVE& effect) noexcept {
+    if (effect.maxDelta == 0.0F || effect.maxApplied) {
+        return;
+    }
+    GameplayAttributeUVE* pool = FindGameplayAttributeUVE(attributes, effect.attributeId);
+    if (pool == nullptr || !std::isfinite(pool->maximum)) {
+        return;
+    }
+    ShiftPoolMaximumUVE(*pool, effect.maxDelta);
+    effect.maxApplied = true;
+}
+
+/// Unwinds a settled maxDelta (remove, expiry, retarget). True when the restored ceiling zeroed
+/// a pool that still held something - the only unwind the tick reports as Depleted.
+bool ReverseEffectMaximumUVE(GameplayAttributesComponentUVE& attributes, StatusEffectUVE& effect) noexcept {
+    if (!effect.maxApplied || effect.maxDelta == 0.0F) {
+        return false;
+    }
+    effect.maxApplied = false;
+    GameplayAttributeUVE* pool = FindGameplayAttributeUVE(attributes, effect.attributeId);
+    if (pool == nullptr) {
+        return false;
+    }
+    const float before = pool->current;
+    ShiftPoolMaximumUVE(*pool, -effect.maxDelta);
+    return before > 0.0F && pool->current <= 0.0F;
 }
 
 } // namespace
@@ -44,19 +100,40 @@ bool IsStatusEffectsComponentValidUVE(const StatusEffectsComponentUVE& value) no
     return true;
 }
 
-bool ApplyStatusEffectUVE(StatusEffectsComponentUVE& effects, std::string effectId, std::string attributeId,
-                           const float magnitudePerSecond, const float durationSeconds) {
+bool ApplyStatusEffectUVE(GameplayAttributesComponentUVE& attributes, StatusEffectsComponentUVE& effects,
+                           std::string effectId, std::string attributeId, const float magnitudePerSecond,
+                           const float durationSeconds, const StatusEffectStackingUVE stacking,
+                           const std::uint32_t maxStacks, const float maxDelta) {
     if (!IsValidIdUVE(effectId) || !IsValidTargetUVE(attributeId) || !std::isfinite(magnitudePerSecond) ||
-        !std::isfinite(durationSeconds) || durationSeconds <= 0.0F) {
+        !std::isfinite(durationSeconds) || durationSeconds <= 0.0F ||
+        static_cast<std::uint8_t>(stacking) > static_cast<std::uint8_t>(StatusEffectStackingUVE::Stack) ||
+        maxStacks == 0U || !std::isfinite(maxDelta) ||
+        (maxDelta != 0.0F && attributeId == kReservedHealthAttributeIdUVE)) {
         return false;
     }
-    for (StatusEffectUVE& held : effects.effects) {
-        if (held.effectId == effectId) {
-            held.attributeId = std::move(attributeId);
-            held.magnitudePerSecond = magnitudePerSecond;
-            held.remainingSeconds = durationSeconds;
-            return true;
+    if (maxDelta != 0.0F) {
+        GameplayAttributeUVE* pool = FindGameplayAttributeUVE(attributes, attributeId);
+        if (pool != nullptr && !std::isfinite(pool->maximum)) {
+            return false;
         }
+    }
+    for (StatusEffectUVE& held : effects.effects) {
+        if (held.effectId != effectId) {
+            continue;
+        }
+        static_cast<void>(ReverseEffectMaximumUVE(attributes, held));
+        held.attributeId = std::move(attributeId);
+        held.magnitudePerSecond = magnitudePerSecond;
+        held.remainingSeconds = durationSeconds;
+        held.stacking = stacking;
+        held.maxStacks = maxStacks;
+        held.maxDelta = maxDelta;
+        held.maxApplied = false;
+        held.stacks = stacking == StatusEffectStackingUVE::Stack
+                          ? (held.stacks < maxStacks ? held.stacks + 1U : maxStacks)
+                          : 1U;
+        SettleEffectMaximumUVE(attributes, held);
+        return true;
     }
     if (effects.effects.size() >= kMaximumStatusEffectsUVE) {
         return false;
@@ -66,14 +143,25 @@ bool ApplyStatusEffectUVE(StatusEffectsComponentUVE& effects, std::string effect
     effect.attributeId = std::move(attributeId);
     effect.magnitudePerSecond = magnitudePerSecond;
     effect.remainingSeconds = durationSeconds;
+    effect.stacking = stacking;
+    effect.maxStacks = maxStacks;
+    effect.maxDelta = maxDelta;
+    SettleEffectMaximumUVE(attributes, effect);
     effects.effects.push_back(std::move(effect));
     return true;
 }
 
-bool RemoveStatusEffectUVE(StatusEffectsComponentUVE& effects, const std::string_view effectId) {
-    const auto removed = std::erase_if(effects.effects,
-                                       [effectId](const StatusEffectUVE& held) { return held.effectId == effectId; });
-    return removed > 0;
+bool RemoveStatusEffectUVE(GameplayAttributesComponentUVE& attributes, StatusEffectsComponentUVE& effects,
+                            const std::string_view effectId) {
+    for (auto held = effects.effects.begin(); held != effects.effects.end(); ++held) {
+        if (held->effectId != effectId) {
+            continue;
+        }
+        static_cast<void>(ReverseEffectMaximumUVE(attributes, *held));
+        effects.effects.erase(held);
+        return true;
+    }
+    return false;
 }
 
 std::vector<GameplayAttributeTickResultUVE> TickGameplayAttributesUVE(GameplayAttributesComponentUVE& attributes,
@@ -85,14 +173,16 @@ std::vector<GameplayAttributeTickResultUVE> TickGameplayAttributesUVE(GameplayAt
     }
     if (status != nullptr) {
         for (StatusEffectUVE& effect : status->effects) {
+            SettleEffectMaximumUVE(attributes, effect);
             GameplayAttributeTickResultUVE result;
             result.effectId = effect.effectId;
             result.attributeId = effect.attributeId;
             if (effect.attributeId == kReservedHealthAttributeIdUVE) {
-                result.amount = effect.magnitudePerSecond * deltaSeconds;
+                result.amount = effect.magnitudePerSecond * static_cast<float>(effect.stacks) * deltaSeconds;
             } else if (GameplayAttributeUVE* pool = FindGameplayAttributeUVE(attributes, effect.attributeId);
                        pool != nullptr) {
-                const float drift = effect.magnitudePerSecond * deltaSeconds;
+                const float drift =
+                    effect.magnitudePerSecond * static_cast<float>(effect.stacks) * deltaSeconds;
                 if (drift >= 0.0F) {
                     const GameplayAttributeDamageResultUVE damage = DamageGameplayAttributeUVE(*pool, drift);
                     result.amount = damage.amount;
@@ -108,6 +198,9 @@ std::vector<GameplayAttributeTickResultUVE> TickGameplayAttributesUVE(GameplayAt
             }
             effect.remainingSeconds -= deltaSeconds;
             result.expired = effect.remainingSeconds <= 0.0F;
+            if (result.expired && ReverseEffectMaximumUVE(attributes, effect)) {
+                result.depleted = true;
+            }
             results.push_back(std::move(result));
         }
         std::erase_if(status->effects,

@@ -241,7 +241,12 @@ namespace {
         effects.push_back({{"effectId", effect.effectId},
                            {"attributeId", effect.attributeId},
                            {"magnitudePerSecond", effect.magnitudePerSecond},
-                           {"remainingSeconds", effect.remainingSeconds}});
+                           {"remainingSeconds", effect.remainingSeconds},
+                           {"stacking", static_cast<unsigned int>(effect.stacking)},
+                           {"stacks", effect.stacks},
+                           {"maxStacks", effect.maxStacks},
+                           {"maxDelta", effect.maxDelta},
+                           {"maxApplied", effect.maxApplied}});
     }
     return {{"effects", std::move(effects)}};
 }
@@ -2027,6 +2032,12 @@ MakeMetadataRegistrationUVE(const std::string& componentName,
                                   effect.attributeId = entry.value("attributeId", std::string{});
                                   effect.magnitudePerSecond = entry.value("magnitudePerSecond", 0.0F);
                                   effect.remainingSeconds = entry.value("remainingSeconds", 0.0F);
+                                  effect.stacking = static_cast<StatusEffectStackingUVE>(
+                                      entry.value("stacking", 0U));
+                                  effect.stacks = entry.value("stacks", 1U);
+                                  effect.maxStacks = entry.value("maxStacks", 1U);
+                                  effect.maxDelta = entry.value("maxDelta", 0.0F);
+                                  effect.maxApplied = entry.value("maxApplied", false);
                                   effects.effects.push_back(std::move(effect));
                               }
                           }

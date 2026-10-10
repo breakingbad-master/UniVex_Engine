@@ -65,9 +65,19 @@ TEST_F(GameplaySerializationUVETest, Tags_RoundTripThroughCaptureRestore) {
 
 TEST_F(GameplaySerializationUVETest, StatusEffects_RoundTripThroughCaptureRestore) {
     const EntityUVE source = entityManager.CreateEntityUVE();
+    GameplayAttributesComponentUVE attributes;
+    ASSERT_TRUE(AddGameplayAttributeUVE(attributes, "stamina", 100.0F, 100.0F));
     StatusEffectsComponentUVE effects;
-    ASSERT_TRUE(ApplyStatusEffectUVE(effects, "poison", "stamina", 10.0F, 3.0F));
-    ASSERT_TRUE(ApplyStatusEffectUVE(effects, "regen-aura", "mana", -5.0F, 9.5F));
+    ASSERT_TRUE(ApplyStatusEffectUVE(attributes, effects, "poison", "stamina", 10.0F, 3.0F,
+                                     StatusEffectStackingUVE::Stack, 3U));
+    ASSERT_TRUE(ApplyStatusEffectUVE(attributes, effects, "poison", "stamina", 10.0F, 3.0F,
+                                     StatusEffectStackingUVE::Stack, 3U));
+    ASSERT_TRUE(ApplyStatusEffectUVE(attributes, effects, "regen-aura", "mana", -5.0F, 9.5F));
+    ASSERT_TRUE(ApplyStatusEffectUVE(attributes, effects, "might", "stamina", 0.0F, 30.0F,
+                                     StatusEffectStackingUVE::Refresh, 1U, 25.0F));
+    ASSERT_EQ(effects.effects.size(), 3U);
+    ASSERT_EQ(effects.effects[0].stacks, 2U);
+    ASSERT_TRUE(effects.effects[2].maxApplied);
     entityManager.AddComponentUVE<StatusEffectsComponentUVE>(source, effects);
 
     const std::optional<SceneSnapshotUVE> snapshot =
