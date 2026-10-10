@@ -7,6 +7,7 @@
 #include <cstdint>
 #include <limits>
 #include <string>
+#include <vector>
 
 #include "uve/component/camera_component_uve.h"
 #include "uve/component/hierarchy_component_uve.h"
@@ -51,9 +52,12 @@ bool IsPlayer3DObjectComponentValidUVE(const PlayerComponentUVE& value) noexcept
 }
 
 bool IsPlayer3DObjectDefinitionValidUVE(const Player3DObjectDefinitionUVE& value) noexcept {
+    ControllerComponentUVE authoredController;
+    authoredController.kind = value.controllerKind;
     return IsColliderComponentValidUVE(value.collider) &&
            IsCharacterControllerComponentValidUVE(value.controller) &&
-           IsPlayer3DObjectComponentValidUVE(value.player) && IsHealthComponentValidUVE(value.health);
+           IsPlayer3DObjectComponentValidUVE(value.player) && IsHealthComponentValidUVE(value.health) &&
+           IsControllerComponentValidUVE(authoredController);
 }
 
 void ApplyPlayer3DObjectDefinitionUVE(IEntityManagerUVE& entityManager, const EntityUVE entity,
@@ -77,6 +81,37 @@ void ApplyPlayer3DObjectDefinitionUVE(IEntityManagerUVE& entityManager, const En
     if (!entityManager.HasComponentUVE<HealthComponentUVE>(entity)) {
         entityManager.AddComponentUVE<HealthComponentUVE>(entity, value.health);
     }
+    if (!entityManager.HasComponentUVE<PawnComponentUVE>(entity)) {
+        entityManager.AddComponentUVE<PawnComponentUVE>(entity, PawnComponentUVE{});
+    }
+    if (!entityManager.HasComponentUVE<ControllerComponentUVE>(entity)) {
+        ControllerComponentUVE possession;
+        possession.kind = value.controllerKind;
+        entityManager.AddComponentUVE<ControllerComponentUVE>(entity, possession);
+    }
+}
+
+void MaintainPlayerPossessionUVE(IEntityManagerUVE& entityManager) {
+    std::vector<EntityUVE> flagged;
+    entityManager.ForEachUVE<PlayerComponentUVE>(
+        [&entityManager, &flagged](const EntityUVE entity, const PlayerComponentUVE& player) {
+            if (!player.possessOnPlay || !IsPlayer3DObjectComponentValidUVE(player) ||
+                !entityManager.HasComponentUVE<PawnComponentUVE>(entity) ||
+                !entityManager.HasComponentUVE<ControllerComponentUVE>(entity)) {
+                return;
+            }
+            const ControllerComponentUVE& controller =
+                entityManager.GetComponentUVE<ControllerComponentUVE>(entity);
+            const PawnComponentUVE& pawn = entityManager.GetComponentUVE<PawnComponentUVE>(entity);
+            if (controller.kind != ControllerKindUVE::Player ||
+                controller.pawn != kInvalidEntityUVE || pawn.controller != kInvalidEntityUVE) {
+                return;
+            }
+            flagged.push_back(entity);
+        });
+    for (const EntityUVE entity : flagged) {
+        static_cast<void>(PossessControllerUVE(entityManager, entity, entity));
+    }
 }
 
 EntityUVE ResolvePossessedPlayerUVE(IEntityManagerUVE& entityManager) {
@@ -87,6 +122,12 @@ EntityUVE ResolvePossessedPlayerUVE(IEntityManagerUVE& entityManager) {
                 !entityManager.HasComponentUVE<CharacterControllerComponentUVE>(entity) ||
                 !entityManager.HasComponentUVE<TransformComponentUVE>(entity) ||
                 !entityManager.HasComponentUVE<HierarchyComponentUVE>(entity)) {
+                return;
+            }
+            const EntityUVE driver = FindPawnControllerUVE(entityManager, entity);
+            if (driver == kInvalidEntityUVE ||
+                entityManager.GetComponentUVE<ControllerComponentUVE>(driver).kind !=
+                    ControllerKindUVE::Player) {
                 return;
             }
             if (best == kInvalidEntityUVE || IsEarlierEntityUVE(entity, best)) {

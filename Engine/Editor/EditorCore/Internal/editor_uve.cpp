@@ -622,6 +622,7 @@ bool EditorUVE::ApplyPlayEntrySpawnUVE() {
     Scene::IEntityManagerUVE& entityManager = m_services->GetEntityManagerUVE();
     Scene::ISceneGraphUVE& sceneGraph = m_services->GetSceneGraphUVE();
 
+    Scene::MaintainPlayerPossessionUVE(entityManager);
     Scene::EntityUVE player = Scene::ResolvePossessedPlayerUVE(entityManager);
     if (player == Scene::kInvalidEntityUVE) {
         const std::string relative = GetDefaultPlayerEntityUVE();
@@ -637,6 +638,7 @@ bool EditorUVE::ApplyPlayEntrySpawnUVE() {
                         entityManager, sceneGraph, m_services->GetAssetDatabaseUVE(), guid,
                         GetDocumentSceneRootUVE()));
                     sceneGraph.UpdateUVE(entityManager);
+                    Scene::MaintainPlayerPossessionUVE(entityManager);
                     player = Scene::ResolvePossessedPlayerUVE(entityManager);
                 }
             }

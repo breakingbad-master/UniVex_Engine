@@ -1728,6 +1728,9 @@ void EngineCoreUVE::SyncKinematic3DObjectsUVE(const float fixedDeltaTimeSeconds)
 }
 
 void EngineCoreUVE::SyncCharacterControllersUVE(const float fixedDeltaTimeSeconds) {
+    // Possession is timeless: fill before resolving so a single editor step drives the player
+    // even when no variable frame ran Maintain first.
+    Scene::MaintainPlayerPossessionUVE(*m_entityManager);
     if (fixedDeltaTimeSeconds <= 0.0F) {
         return;
     }
@@ -2833,6 +2836,7 @@ void EngineCoreUVE::Update() {
     m_inputSystem->UpdateUVE();
     if (m_simulationExecutionMode == SimulationExecutionModeUVE::Running) {
         const Gameplay::GameplayInputUVE gameplayInput = Gameplay::CollectGameplayInputUVE(*m_inputSystem);
+        Scene::MaintainPlayerPossessionUVE(*m_entityManager);
         Scene::RouteGameplayInputUVE(*m_entityManager, gameplayInput);
         const Scene::EntityUVE player = Scene::ResolvePossessedPlayerUVE(*m_entityManager);
         if (player != Scene::kInvalidEntityUVE &&

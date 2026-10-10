@@ -19,13 +19,15 @@ namespace UVE::Scene {
 // ordinary call, not surgery.
 //
 // The polled keyboard/gamepad snapshot routes to the pawns of Player controllers only; AI
-// controllers own their pawns' input themselves (brains write it in a follow-up). Routing also
+// controllers own their pawns' input themselves: brains select action ids, and mapping those
+// to input is game code's, never the engine's. Routing also
 // self-heals: a link whose other side lost its component is cleared, and an orphaned pawn's
 // input is purged, so a destroyed controller can never leave a pawn running on stale input.
 //
 // Possession changes are caller-known imperative calls, so v1 queues no events. And the
-// player-look/interact flow still resolves its player the old way (the possessOnPlay scan) -
-// rewiring it onto pawns is the immediate follow-up, deliberately not smuggled into this one.
+// player-look/interact/character flow resolves its player through possession (a maintained
+// self-possession fill keeps possessOnPlay bodies driven). Movement still reads the raw polled
+// snapshot rather than pawn input - closing that loop is the next slice, not this one.
 
 enum class ControllerKindUVE : std::uint8_t {
     /// Driven by the polled input snapshot through RouteGameplayInputUVE().

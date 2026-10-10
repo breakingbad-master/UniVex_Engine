@@ -40,6 +40,7 @@
 #include "uve/math/quaternion_uve.h"
 #include "uve/memory/memory_manager_uve.h"
 #include "uve/objects/3d/all_objects_3d_uve.h"
+#include "uve/gameplay/pawn_uve.h"
 #include "uve/scene/objects/scene_object_registry_uve.h"
 #include "uve/scene/objects/scene_object_type_uve.h"
 #include "uve/scene/objects/scene_root_uve.h"
@@ -313,6 +314,10 @@ TEST_F(Object3DDefinitionsUVETest, Player3DIsACharacterMarkedAsThePossessedBody)
     EXPECT_TRUE(entityManager.GetComponentUVE<PlayerComponentUVE>(entity).possessOnPlay);
     ASSERT_TRUE(entityManager.HasComponentUVE<HealthComponentUVE>(entity));
     EXPECT_FLOAT_EQ(entityManager.GetComponentUVE<HealthComponentUVE>(entity).maxHealth, 100.0F);
+    ASSERT_TRUE(entityManager.HasComponentUVE<PawnComponentUVE>(entity));
+    ASSERT_TRUE(entityManager.HasComponentUVE<ControllerComponentUVE>(entity));
+    EXPECT_EQ(entityManager.GetComponentUVE<ControllerComponentUVE>(entity).kind,
+              ControllerKindUVE::Player);
     EXPECT_EQ(ResolveSceneObjectKindUVE(entityManager, entity), Objects::SceneObjectKindUVE::Player3D);
 }
 

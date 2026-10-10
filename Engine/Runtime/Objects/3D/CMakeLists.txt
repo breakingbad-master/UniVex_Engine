@@ -63,7 +63,7 @@ add_library(uve_objects_3d STATIC
     Internal/script_uve.cpp
 )
 target_include_directories(uve_objects_3d PUBLIC Expose Physics/Expose ../AI/3D/Expose ../Animation/Expose)
-target_link_libraries(uve_objects_3d PUBLIC uve_math uve_component uve_entity uve_animation PRIVATE uve_retarget)
+target_link_libraries(uve_objects_3d PUBLIC uve_math uve_component uve_entity uve_animation uve_gameplay PRIVATE uve_retarget)
 target_include_directories(uve_objects_3d PRIVATE Internal Physics/Internal ../AI/3D/Internal ../Animation/Internal)
 target_compile_features(uve_objects_3d PUBLIC cxx_std_23)
 uve_set_warnings(uve_objects_3d)
