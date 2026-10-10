@@ -13,6 +13,7 @@
 #include "uve/gameplay/gameplay_tags_uve.h"
 #include "uve/gameplay/status_effects_uve.h"
 #include "uve/gameplay/trigger_volume_uve.h"
+#include "uve/gameplay/pawn_uve.h"
 #include "uve/memory/memory_manager_uve.h"
 
 #include <gtest/gtest.h>
@@ -91,6 +92,56 @@ TEST_F(GameplaySerializationUVETest, StatusEffects_RoundTripThroughCaptureRestor
     EXPECT_EQ(revived, effects);
 }
 
+
+TEST_F(GameplaySerializationUVETest, PawnController_RoundTripThroughCaptureRestore) {
+    const EntityUVE controllerEntity = entityManager.CreateEntityUVE();
+    ControllerComponentUVE controller;
+    controller.kind = ControllerKindUVE::AI;
+    entityManager.AddComponentUVE<ControllerComponentUVE>(controllerEntity, controller);
+    const EntityUVE pawnEntity = entityManager.CreateEntityUVE();
+    entityManager.AddComponentUVE<PawnComponentUVE>(pawnEntity, PawnComponentUVE{});
+    ASSERT_TRUE(PossessControllerUVE(entityManager, controllerEntity, pawnEntity));
+    Gameplay::GameplayInputUVE snapshot;
+    snapshot.move = {1.0F, 2.0F, 3.0F};
+    snapshot.jumpPressed = true;
+    entityManager.GetComponentUVE<PawnComponentUVE>(pawnEntity).input = snapshot;
+
+    const std::optional<SceneSnapshotUVE> captured =
+        serializer.CaptureUVE(entityManager, {controllerEntity, pawnEntity}, SceneAssetTypeUVE::Scene);
+    ASSERT_TRUE(captured.has_value());
+    const std::vector<EntityUVE> restored = serializer.RestoreUVE(entityManager, *captured);
+    ASSERT_EQ(restored.size(), 2U);
+    const EntityUVE revivedController =
+        entityManager.HasComponentUVE<ControllerComponentUVE>(restored[0]) ? restored[0] : restored[1];
+    const EntityUVE revivedPawn =
+        revivedController == restored[0] ? restored[1] : restored[0];
+    ASSERT_TRUE(entityManager.HasComponentUVE<PawnComponentUVE>(revivedPawn));
+    const ControllerComponentUVE& revivedControllerComp =
+        entityManager.GetComponentUVE<ControllerComponentUVE>(revivedController);
+    const PawnComponentUVE& revivedPawnComp =
+        entityManager.GetComponentUVE<PawnComponentUVE>(revivedPawn);
+    EXPECT_EQ(revivedControllerComp.kind, ControllerKindUVE::AI);
+    EXPECT_EQ(revivedControllerComp.pawn, revivedPawn);
+    EXPECT_EQ(revivedPawnComp.controller, revivedController);
+    EXPECT_EQ(revivedPawnComp.input, snapshot);
+}
+
+TEST_F(GameplaySerializationUVETest, PawnController_DropsLinksOutsideTheSavedSet) {
+    const EntityUVE controllerEntity = entityManager.CreateEntityUVE();
+    entityManager.AddComponentUVE<ControllerComponentUVE>(controllerEntity, ControllerComponentUVE{});
+    const EntityUVE pawnEntity = entityManager.CreateEntityUVE();
+    entityManager.AddComponentUVE<PawnComponentUVE>(pawnEntity, PawnComponentUVE{});
+    ASSERT_TRUE(PossessControllerUVE(entityManager, controllerEntity, pawnEntity));
+
+    const std::optional<SceneSnapshotUVE> captured =
+        serializer.CaptureUVE(entityManager, {pawnEntity}, SceneAssetTypeUVE::Scene);
+    ASSERT_TRUE(captured.has_value());
+    const std::vector<EntityUVE> restored = serializer.RestoreUVE(entityManager, *captured);
+    ASSERT_EQ(restored.size(), 1U);
+    const PawnComponentUVE& revived =
+        entityManager.GetComponentUVE<PawnComponentUVE>(restored.front());
+    EXPECT_EQ(revived.controller, kInvalidEntityUVE);
+}
 
 TEST_F(GameplaySerializationUVETest, TriggerVolume_RoundTripThroughCaptureRestore) {
     const EntityUVE source = entityManager.CreateEntityUVE();

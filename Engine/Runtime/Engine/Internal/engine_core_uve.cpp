@@ -86,6 +86,7 @@
 #include "uve/gameplay/interact_requested_event_uve.h"
 #include "uve/gameplay/trigger_events_uve.h"
 #include "uve/gameplay/trigger_volume_uve.h"
+#include "uve/gameplay/pawn_uve.h"
 #include "uve/input/mobile_gesture_system_uve.h"
 #include "uve/input/mobile_input_system_uve.h"
 #include "uve/physics/area_3d_runtime_uve.h"
@@ -2832,6 +2833,7 @@ void EngineCoreUVE::Update() {
     m_inputSystem->UpdateUVE();
     if (m_simulationExecutionMode == SimulationExecutionModeUVE::Running) {
         const Gameplay::GameplayInputUVE gameplayInput = Gameplay::CollectGameplayInputUVE(*m_inputSystem);
+        Scene::RouteGameplayInputUVE(*m_entityManager, gameplayInput);
         const Scene::EntityUVE player = Scene::ResolvePossessedPlayerUVE(*m_entityManager);
         if (player != Scene::kInvalidEntityUVE &&
             m_entityManager->HasComponentUVE<Scene::PlayerComponentUVE>(player) &&

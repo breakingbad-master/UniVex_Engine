@@ -11,6 +11,7 @@ add_library(uve_gameplay STATIC
     Internal/gameplay_tags_uve.cpp
     Internal/status_effects_uve.cpp
     Internal/trigger_volume_uve.cpp
+    Internal/pawn_uve.cpp
     Internal/cinematic_uve.cpp
 )
 target_include_directories(uve_gameplay PUBLIC Expose)

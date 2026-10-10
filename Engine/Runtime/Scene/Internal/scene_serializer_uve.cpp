@@ -9,6 +9,7 @@
 #include "uve/gameplay/gameplay_tags_uve.h"
 #include "uve/gameplay/status_effects_uve.h"
 #include "uve/gameplay/trigger_volume_uve.h"
+#include "uve/gameplay/pawn_uve.h"
 
 #include <algorithm>
 #include <cstddef>
@@ -250,6 +251,22 @@ namespace {
                            {"maxApplied", effect.maxApplied}});
     }
     return {{"effects", std::move(effects)}};
+}
+
+[[nodiscard]] nlohmann::json ToJsonUVE(const ControllerComponentUVE& component) {
+    // The pawn link is deliberately absent: entity references resolve through file-local ids.
+    return {{"kind", static_cast<unsigned int>(component.kind)}};
+}
+
+[[nodiscard]] nlohmann::json ToJsonUVE(const PawnComponentUVE& component) {
+    // The controller link is deliberately absent: entity references resolve through file-local ids.
+    return {{"input",
+             {{"move", ToJsonUVE(component.input.move)},
+              {"rise", component.input.rise},
+              {"jumpPressed", component.input.jumpPressed},
+              {"lookPointer", ToJsonUVE(component.input.lookPointer)},
+              {"lookStick", ToJsonUVE(component.input.lookStick)},
+              {"interactPressed", component.input.interactPressed}}}};
 }
 
 [[nodiscard]] nlohmann::json ToJsonUVE(const TriggerVolumeComponentUVE& component) {
@@ -966,6 +983,60 @@ template <typename VectorT>
     value.length = json.value("length", 100.0F);
     value.collisionMask = json.value("collisionMask", std::uint32_t{0xFFFFFFFFU});
     value.enabled = json.value("enabled", true);
+    return value;
+}
+
+[[nodiscard]] ControllerComponentUVE ControllerObjectFromJsonUVE(const nlohmann::json& json) {
+    ControllerComponentUVE value;
+    value.kind = static_cast<ControllerKindUVE>(json.value("kind", 0U));
+    return value;
+}
+
+/// The entity-aware half of reading a Controller: its pawn is an entity reference, so only the
+/// caller that owns the file's local-id table can resolve it. An unresolvable link drops to
+/// invalid - an unpossessed controller loads fine, a guessed one would drive a stranger.
+[[nodiscard]] ControllerComponentUVE ControllerComponentWithResolvedPawnUVE(
+    const nlohmann::json& json,
+    const std::unordered_map<std::uint32_t, EntityUVE>& localIdToEntity) {
+    ControllerComponentUVE value = ControllerObjectFromJsonUVE(json);
+    const std::int64_t localId =
+        json.value("pawnLocalId", static_cast<std::int64_t>(std::numeric_limits<std::uint32_t>::max()));
+    if (localId < 0 ||
+        static_cast<std::uint64_t>(localId) > std::numeric_limits<std::uint32_t>::max()) {
+        throw std::runtime_error("ControllerComponentUVE pawn local ID is outside the uint32 range");
+    }
+    const auto targetIt = localIdToEntity.find(static_cast<std::uint32_t>(localId));
+    value.pawn = targetIt != localIdToEntity.end() ? targetIt->second : kInvalidEntityUVE;
+    return value;
+}
+
+[[nodiscard]] PawnComponentUVE PawnObjectFromJsonUVE(const nlohmann::json& json) {
+    PawnComponentUVE value;
+    if (const auto input = json.find("input"); input != json.end() && input->is_object()) {
+        value.input.move = Vector3FromJsonUVE(input->at("move"));
+        value.input.rise = input->value("rise", 0.0F);
+        value.input.jumpPressed = input->value("jumpPressed", false);
+        value.input.lookPointer = Vector2FromJsonUVE(input->at("lookPointer"));
+        value.input.lookStick = Vector2FromJsonUVE(input->at("lookStick"));
+        value.input.interactPressed = input->value("interactPressed", false);
+    }
+    return value;
+}
+
+/// The entity-aware half of reading a Pawn, mirroring the controller's: the link drops to
+/// invalid when the file does not contain it.
+[[nodiscard]] PawnComponentUVE PawnComponentWithResolvedControllerUVE(
+    const nlohmann::json& json,
+    const std::unordered_map<std::uint32_t, EntityUVE>& localIdToEntity) {
+    PawnComponentUVE value = PawnObjectFromJsonUVE(json);
+    const std::int64_t localId = json.value(
+        "controllerLocalId", static_cast<std::int64_t>(std::numeric_limits<std::uint32_t>::max()));
+    if (localId < 0 ||
+        static_cast<std::uint64_t>(localId) > std::numeric_limits<std::uint32_t>::max()) {
+        throw std::runtime_error("PawnComponentUVE controller local ID is outside the uint32 range");
+    }
+    const auto targetIt = localIdToEntity.find(static_cast<std::uint32_t>(localId));
+    value.controller = targetIt != localIdToEntity.end() ? targetIt->second : kInvalidEntityUVE;
     return value;
 }
 
@@ -2033,6 +2104,26 @@ MakeMetadataRegistrationUVE(const std::string& componentName,
                           }
                           return tags;
                       }, IsGameplayTagComponentValidUVE));
+        table.emplace("ControllerComponentUVE",
+                      MakeRegistrationUVE<ControllerComponentUVE>(
+                          [](const nlohmann::json& json) {
+                              ControllerComponentUVE value = ControllerObjectFromJsonUVE(json);
+                              if (!IsControllerComponentValidUVE(value)) {
+                                  throw std::runtime_error("Invalid ControllerComponentUVE payload");
+                              }
+                              return value;
+                          },
+                          IsControllerComponentValidUVE));
+        table.emplace("PawnComponentUVE",
+                      MakeRegistrationUVE<PawnComponentUVE>(
+                          [](const nlohmann::json& json) {
+                              PawnComponentUVE value = PawnObjectFromJsonUVE(json);
+                              if (!IsPawnComponentValidUVE(value)) {
+                                  throw std::runtime_error("Invalid PawnComponentUVE payload");
+                              }
+                              return value;
+                          },
+                          IsPawnComponentValidUVE));
         table.emplace("TriggerVolumeComponentUVE",
                       MakeRegistrationUVE<TriggerVolumeComponentUVE>([](const nlohmann::json& json) {
                           TriggerVolumeComponentUVE volume;
@@ -2708,6 +2799,33 @@ MakeMetadataRegistrationUVE(const std::string& componentName,
                 }
                 componentsJson[*name]["exclusionsLocalIds"] = std::move(exclusionLocalIds);
             }
+            if (type == std::type_index(typeid(ControllerComponentUVE))) {
+                // A controller's pawn is an entity reference: written as a file-local id, with a
+                // target outside the saved set dropped exactly like an animation target.
+                const ControllerComponentUVE& controller =
+                    entityManager.GetComponentUVE<ControllerComponentUVE>(entity);
+                std::uint32_t pawnLocalId = std::numeric_limits<std::uint32_t>::max();
+                if (controller.pawn != kInvalidEntityUVE) {
+                    const auto found = entityToLocalId.find(controller.pawn);
+                    if (found != entityToLocalId.end()) {
+                        pawnLocalId = found->second;
+                    }
+                }
+                componentsJson[*name]["pawnLocalId"] = pawnLocalId;
+            }
+            if (type == std::type_index(typeid(PawnComponentUVE))) {
+                // A pawn's controller resolves the same way, from the other side of the link.
+                const PawnComponentUVE& pawn =
+                    entityManager.GetComponentUVE<PawnComponentUVE>(entity);
+                std::uint32_t controllerLocalId = std::numeric_limits<std::uint32_t>::max();
+                if (pawn.controller != kInvalidEntityUVE) {
+                    const auto found = entityToLocalId.find(pawn.controller);
+                    if (found != entityToLocalId.end()) {
+                        controllerLocalId = found->second;
+                    }
+                }
+                componentsJson[*name]["controllerLocalId"] = controllerLocalId;
+            }
             if (type == std::type_index(typeid(CinematicComponentUVE))) {
                 // Each cut's camera rides in a parallel file-local-id array (the cuts in toJson
                 // carry times only): the sentinel marks a camera outside the saved set, and the
@@ -3026,6 +3144,16 @@ void RollbackRestoredEntitiesUVE(IEntityManagerUVE& entityManager, std::vector<E
                 if (CanonicalComponentNameUVE(componentName) == "RayCast3DComponentUVE") {
                     entityManager.AddComponentUVE<RayCast3DComponentUVE>(
                         entity, RayCast3DComponentWithResolvedExclusionsUVE(componentJson, localIdToEntity));
+                    continue;
+                }
+                if (CanonicalComponentNameUVE(componentName) == "ControllerComponentUVE") {
+                    entityManager.AddComponentUVE<ControllerComponentUVE>(
+                        entity, ControllerComponentWithResolvedPawnUVE(componentJson, localIdToEntity));
+                    continue;
+                }
+                if (CanonicalComponentNameUVE(componentName) == "PawnComponentUVE") {
+                    entityManager.AddComponentUVE<PawnComponentUVE>(
+                        entity, PawnComponentWithResolvedControllerUVE(componentJson, localIdToEntity));
                     continue;
                 }
                 if (CanonicalComponentNameUVE(componentName) == "Hitbox3DComponentUVE") {
