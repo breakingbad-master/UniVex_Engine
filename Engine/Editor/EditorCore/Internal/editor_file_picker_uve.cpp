@@ -26,6 +26,18 @@ namespace {
     return text;
 }
 
+/// ".uvanimlib", or ".uvaudio, .wav" - the FILES header for the picker's kinds.
+[[nodiscard]] std::string JoinExtensionsUVE(const std::vector<std::string>& extensions) {
+    std::string joined;
+    for (const std::string& kind : extensions) {
+        if (!joined.empty()) {
+            joined += ", ";
+        }
+        joined += kind;
+    }
+    return joined;
+}
+
 /// The save target for the picker's name, or nullopt with the picker's status explaining why.
 [[nodiscard]] std::optional<std::filesystem::path> SaveTargetUVE(FilePickerStateUVE& picker,
                                                                  const std::filesystem::path& contentRoot) {
@@ -35,17 +47,23 @@ namespace {
         picker.statusIsError = true;
         return std::nullopt;
     }
+    if (picker.request.extensions.empty()) {
+        picker.status = "This picker names no file kind.";
+        picker.statusIsError = true;
+        return std::nullopt;
+    }
     const std::filesystem::path directory = contentRoot / picker.directory;
     std::error_code error;
     std::filesystem::create_directories(directory, error);
-    return EditorUVE::MakeUniqueContentPathUVE(directory, picker.saveName, picker.request.extension);
+    return EditorUVE::MakeUniqueContentPathUVE(directory, picker.saveName, picker.request.extensions.front());
 }
 
 } // namespace
 
 FilePickerListingUVE EditorUVE::BuildFilePickerListingUVE(const std::vector<Asset::ProjectFileEntryUVE>& entries,
                                                            const std::filesystem::path& directory,
-                                                           std::string_view extension, std::string_view search) {
+                                                           const std::vector<std::string>& extensions,
+                                                           std::string_view search) {
     FilePickerListingUVE listing;
     const std::string needle = LowerUVE(std::string{search});
     for (const Asset::ProjectFileEntryUVE& entry : entries) {
@@ -56,7 +74,12 @@ FilePickerListingUVE EditorUVE::BuildFilePickerListingUVE(const std::vector<Asse
             listing.folders.push_back(entry.relativePath);
             continue;
         }
-        if (entry.relativePath.extension() != extension) {
+        // Empty matches every file; otherwise one of the kinds must match.
+        const std::filesystem::path fileExtension = entry.relativePath.extension();
+        const bool kindMatches = extensions.empty() || std::ranges::any_of(extensions, [&](const std::string& kind) {
+            return fileExtension == kind;
+        });
+        if (!kindMatches) {
             continue;
         }
         if (!needle.empty() && LowerUVE(entry.relativePath.stem().string()).find(needle) == std::string::npos) {
@@ -150,7 +173,7 @@ void EditorUVE::DrawFilePickerUVE() {
     }
 
     const FilePickerListingUVE listing =
-        BuildFilePickerListingUVE(project.entries, picker.directory, picker.request.extension, picker.search);
+        BuildFilePickerListingUVE(project.entries, picker.directory, picker.request.extensions, picker.search);
     std::optional<std::filesystem::path> confirmed;
 
     ImGui::Spacing();
@@ -169,9 +192,14 @@ void EditorUVE::DrawFilePickerUVE() {
     }
 
     ImGui::Spacing();
-    ImGui::TextDisabled("FILES (%s)", picker.request.extension.c_str());
+    const std::string kinds = JoinExtensionsUVE(picker.request.extensions);
+    ImGui::TextDisabled("FILES (%s)", picker.request.extensions.empty() ? "every file" : kinds.c_str());
     if (listing.files.empty()) {
-        ImGui::TextDisabled("  No %s files here.", picker.request.extension.c_str());
+        if (picker.request.extensions.empty()) {
+            ImGui::TextDisabled("  No files here.");
+        } else {
+            ImGui::TextDisabled("  No %s here.", kinds.c_str());
+        }
     }
     for (const std::filesystem::path& file : listing.files) {
         const std::string name = file.filename().generic_string();
@@ -199,8 +227,9 @@ void EditorUVE::DrawFilePickerUVE() {
                                                   ImGuiInputTextFlags_EnterReturnsTrue);
         picker.saveName = buffer;
         const std::string stem = picker.saveName.empty() ? std::string{"New File"} : picker.saveName;
+        const std::string saveKind = picker.request.extensions.empty() ? std::string{} : picker.request.extensions.front();
         const std::filesystem::path preview =
-            MakeUniqueContentPathUVE(project.contentRoot / picker.directory, stem, picker.request.extension);
+            MakeUniqueContentPathUVE(project.contentRoot / picker.directory, stem, saveKind);
         ImGui::TextDisabled("Saves to %s", preview.filename().string().c_str());
         if (nameEntered) {
             confirmed = SaveTargetUVE(picker, project.contentRoot);

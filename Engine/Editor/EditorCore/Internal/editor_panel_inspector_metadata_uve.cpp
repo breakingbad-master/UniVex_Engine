@@ -684,15 +684,55 @@ void EditorUVE::DrawMetadataPropertyRowUVE(const TypeMetadataEntryUVE& entry,
             edited = SetSelectedComponentPropertyUVE(entry, property, &value);
         }
     } else if (property.typeId == Scene::kPropertyTypeStringUVE) {
+        // A "file:ext,..." row also browses: the text stays editable, and Browse opens the
+        // floating picker on the file kinds the property declares.
+        constexpr std::string_view kFilePrefix = "file:";
+        const bool isFileRow = property.customDrawerId.rfind(kFilePrefix, 0U) == 0U;
+        if (isFileRow) {
+            // A browse that landed since last frame commits like a typed edit, before the field
+            // is drawn, so the new path shows at once.
+            const std::uint32_t widget = ImGui::GetID("##value");
+            if (const auto found = m_fileRowPendingPicks.find(widget); found != m_fileRowPendingPicks.end()) {
+                edited = SetSelectedComponentPropertyUVE(entry, property, &found->second);
+                m_fileRowPendingPicks.erase(found);
+            }
+        }
         std::string value;
         property.getValue(instance, &value);
         // Committed once when the author finishes, so an edit is one history entry and clicking
         // away keeps it. The bound is the one this row always had.
         constexpr std::size_t kMaximumGenericStringBytesUVE = 255U;
+        if (isFileRow) {
+            ImGui::SetNextItemWidth(-80.0F);
+        }
         if (const std::optional<std::string> committed =
                 DrawCommittedTextInputUVE("##value", value, false, 0.0F, kMaximumGenericStringBytesUVE);
             committed.has_value()) {
             edited = SetSelectedComponentPropertyUVE(entry, property, &*committed);
+        }
+        if (isFileRow) {
+            ImGui::SameLine();
+            if (ImGui::SmallButton("Browse...")) {
+                FilePickerRequestUVE request;
+                request.mode = FilePickerModeUVE::Open;
+                request.title = property.label.empty() ? "Pick File" : property.label;
+                request.extensions = FileDrawerExtensionsUVE(property.customDrawerId);
+                const Asset::ProjectFileSnapshotUVE project = m_services->GetProjectFileIndexUVE().GetSnapshotUVE();
+                request.startDirectory =
+                    ClampPickerStartDirectoryUVE(project, std::filesystem::path{value}.parent_path());
+                const std::uint32_t widget = ImGui::GetID("##value");
+                request.onPick = [this, widget](const std::filesystem::path& absolute) {
+                    // Applies to the selection, re-resolved: whatever is selected when the pick
+                    // lands receives it.
+                    const Asset::ProjectFileSnapshotUVE current =
+                        m_services->GetProjectFileIndexUVE().GetSnapshotUVE();
+                    const std::filesystem::path relative = absolute.lexically_relative(current.contentRoot);
+                    m_fileRowPendingPicks[widget] = (relative.empty() || *relative.begin() == "..")
+                                                        ? absolute.generic_string()
+                                                        : relative.generic_string();
+                };
+                OpenFilePickerUVE(std::move(request));
+            }
         }
     } else if (property.typeId == Scene::kPropertyTypeAssetGuidUVE) {
         // A picker over the registered assets of the kind the property declares
@@ -707,7 +747,8 @@ void EditorUVE::DrawMetadataPropertyRowUVE(const TypeMetadataEntryUVE& entry,
             ImGui::EndDisabled();
         } else {
             const std::string extension = "." + property.customDrawerId.substr(kAssetPrefix.size());
-            if (const std::optional<Asset::AssetGuidUVE> chosen = DrawAssetPickerUVE("##value", value, extension)) {
+            if (const std::optional<Asset::AssetGuidUVE> chosen =
+                    DrawAssetPickerUVE("##value", value, extension, property.label)) {
                 edited = SetSelectedComponentPropertyUVE(entry, property, &*chosen);
             }
         }
@@ -750,9 +791,72 @@ void EditorUVE::DrawMetadataPropertyRowUVE(const TypeMetadataEntryUVE& entry,
     static_cast<void>(edited);
 }
 
+namespace {
+
+/// The picker's start folder for `clip`: the folder holding the clip file, or Content/Animations
+/// when it is unknown (Content itself when even that is missing). Found through the snapshot's
+/// registered GUIDs, never by guessing path spellings.
+[[nodiscard]] std::filesystem::path PickerStartDirectoryUVE(const Asset::ProjectFileSnapshotUVE& project,
+                                                            Asset::AssetGuidUVE clip) {
+    if (clip != Asset::AssetGuidUVE{}) {
+        for (const Asset::ProjectFileEntryUVE& entry : project.entries) {
+            if (entry.registeredAssetGuid.has_value() && *entry.registeredAssetGuid == clip) {
+                return entry.relativePath.parent_path();
+            }
+        }
+    }
+    const std::filesystem::path fallback{"Animations"};
+    for (const Asset::ProjectFileEntryUVE& entry : project.entries) {
+        if (entry.kind == Asset::ProjectFileEntryKindUVE::Directory && entry.relativePath == fallback) {
+            return fallback;
+        }
+    }
+    return std::filesystem::path{};
+}
+
+/// "file:uvaudio,wav" -> {".uvaudio", ".wav"}.
+[[nodiscard]] std::vector<std::string> FileDrawerExtensionsUVE(std::string_view drawerId) {
+    constexpr std::string_view kPrefix = "file:";
+    if (drawerId.size() <= kPrefix.size()) {
+        return {};
+    }
+    std::vector<std::string> extensions;
+    std::string_view rest = drawerId.substr(kPrefix.size());
+    while (!rest.empty()) {
+        const std::size_t comma = rest.find(',');
+        extensions.push_back("." + std::string{rest.substr(0U, comma)});
+        rest = comma == std::string_view::npos ? std::string_view{} : rest.substr(comma + 1U);
+    }
+    return extensions;
+}
+
+/// `wanted` when it is Content itself or a folder the snapshot knows, else Content itself.
+[[nodiscard]] std::filesystem::path ClampPickerStartDirectoryUVE(const Asset::ProjectFileSnapshotUVE& project,
+                                                                 const std::filesystem::path& wanted) {
+    if (wanted.empty()) {
+        return std::filesystem::path{};
+    }
+    for (const Asset::ProjectFileEntryUVE& entry : project.entries) {
+        if (entry.kind == Asset::ProjectFileEntryKindUVE::Directory && entry.relativePath == wanted) {
+            return wanted;
+        }
+    }
+    return std::filesystem::path{};
+}
+
+} // namespace
+
 std::optional<Asset::AssetGuidUVE> EditorUVE::DrawAssetPickerUVE(const char* const id, const Asset::AssetGuidUVE value,
-                                                                const std::string& extension) {
+                                                                const std::string& extension,
+                                                                const std::string& title) {
+    static_assert(sizeof(std::uint32_t) == sizeof(ImGuiID), "pending picks are keyed by widget id");
     std::optional<Asset::AssetGuidUVE> picked;
+    // A Browse pick lands here on the next frame, under this widget's own id.
+    const std::uint32_t widget = ImGui::GetID(id);
+    if (const auto found = m_assetPickerPendingPicks.find(widget); found != m_assetPickerPendingPicks.end()) {
+        picked = found->second;
+        m_assetPickerPendingPicks.erase(found);
+    }
     const Asset::IAssetDatabaseUVE& database = m_services->GetAssetDatabaseUVE();
     std::string preview = "(none)";
     if (value != Asset::kInvalidAssetGuidUVE) {
@@ -760,6 +864,19 @@ std::optional<Asset::AssetGuidUVE> EditorUVE::DrawAssetPickerUVE(const char* con
         preview = path.empty() ? "(missing asset)" : path.stem().string();
     }
     if (ImGui::BeginCombo(id, preview.c_str())) {
+        if (ImGui::Selectable("Browse...")) {
+            FilePickerRequestUVE request;
+            request.mode = FilePickerModeUVE::Open;
+            request.title = title.empty() ? "Browse " + extension : title;
+            request.extensions = {extension};
+            const Asset::ProjectFileSnapshotUVE project = m_services->GetProjectFileIndexUVE().GetSnapshotUVE();
+            request.startDirectory = PickerStartDirectoryUVE(project, value);
+            request.onPick = [this, widget](const std::filesystem::path& absolute) {
+                m_assetPickerPendingPicks[widget] = m_services->GetAssetDatabaseUVE().RegisterUVE(absolute);
+            };
+            OpenFilePickerUVE(std::move(request));
+            ImGui::CloseCurrentPopup();
+        }
         if (ImGui::Selectable("(none)", value == Asset::kInvalidAssetGuidUVE) &&
             value != Asset::kInvalidAssetGuidUVE) {
             picked = Asset::kInvalidAssetGuidUVE;

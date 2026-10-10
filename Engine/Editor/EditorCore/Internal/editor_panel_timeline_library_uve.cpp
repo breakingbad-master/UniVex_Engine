@@ -551,30 +551,10 @@ void EditorUVE::DrawAnimationPickerUVE(const Scene::EntityUVE player, const Scen
         if (ImGui::Selectable("+  New Animation")) {
             createNew = true;
         }
-        // Every clip in the project the player does not have yet, with its folder.
-        std::optional<std::filesystem::path> addPath;
-        if (ImGui::BeginMenu("+  Add from Project")) {
-            int shown = 0;
-            for (const Asset::ProjectFileEntryUVE& entry : project.entries) {
-                if (entry.kind != Asset::ProjectFileEntryKindUVE::File || entry.relativePath.extension() != ".uvanim") {
-                    continue;
-                }
-                const std::filesystem::path absolute = project.contentRoot / entry.relativePath;
-                const bool listed = entry.registeredAssetGuid.has_value() &&
-                                    std::ranges::find(list, *entry.registeredAssetGuid) != list.end();
-                if (listed || !matches(entry.relativePath.stem().string())) {
-                    continue;
-                }
-                ++shown;
-                const std::string folder = entry.relativePath.parent_path().string();
-                if (ImGui::MenuItem(entry.relativePath.stem().string().c_str(), folder.empty() ? "Content" : folder.c_str())) {
-                    addPath = absolute;
-                }
-            }
-            if (shown == 0) {
-                ImGui::TextDisabled("Every clip in the project is already here.");
-            }
-            ImGui::EndMenu();
+        // Any clip in Content: the floating picker finds it, however deep it lives.
+        bool addFromProject = false;
+        if (ImGui::Selectable("+  Add from Project...")) {
+            addFromProject = true;
         }
         // A library from anywhere in Content: importing one appends the clips the player lacks.
         bool importLibrary = false;
@@ -613,14 +593,22 @@ void EditorUVE::DrawAnimationPickerUVE(const Scene::EntityUVE player, const Scen
             }));
             ImGui::CloseCurrentPopup();
         }
-        if (addPath.has_value()) {
-            static_cast<void>(AddClipToAnimationSequencerUVE(player, *addPath));
+        if (addFromProject) {
+            FilePickerRequestUVE request;
+            request.mode = FilePickerModeUVE::Open;
+            request.title = "Add Animation";
+            request.extensions = {".uvanim"};
+            request.startDirectory = PickerStartDirectoryUVE(project, component.clip);
+            request.onPick = [this, player](const std::filesystem::path& path) {
+                static_cast<void>(AddClipToAnimationSequencerUVE(player, path));
+            };
+            OpenFilePickerUVE(std::move(request));
         }
         if (importLibrary) {
             FilePickerRequestUVE request;
             request.mode = FilePickerModeUVE::Open;
             request.title = "Import Library";
-            request.extension = ".uvanimlib";
+            request.extensions = {".uvanimlib"};
             request.startDirectory = PickerStartDirectoryUVE(project, component.clip);
             request.onPick = [this, player](const std::filesystem::path& path) {
                 static_cast<void>(ImportAnimationLibraryIntoSequencerUVE(player, path));
@@ -631,7 +619,7 @@ void EditorUVE::DrawAnimationPickerUVE(const Scene::EntityUVE player, const Scen
             FilePickerRequestUVE request;
             request.mode = FilePickerModeUVE::Open;
             request.title = "Link Library";
-            request.extension = ".uvanimlib";
+            request.extensions = {".uvanimlib"};
             request.startDirectory = PickerStartDirectoryUVE(project, component.clip);
             request.onPick = [this, player](const std::filesystem::path& path) {
                 static_cast<void>(LinkAnimationLibraryToSequencerUVE(player, path));
@@ -648,7 +636,7 @@ void EditorUVE::DrawAnimationPickerUVE(const Scene::EntityUVE player, const Scen
             FilePickerRequestUVE request;
             request.mode = FilePickerModeUVE::Save;
             request.title = "Export Library";
-            request.extension = ".uvanimlib";
+            request.extensions = {".uvanimlib"};
             request.startDirectory = PickerStartDirectoryUVE(project, component.clip);
             request.saveName = SafeLibraryStemUVE(owner) + " Library";
             request.onPick = [this, player](const std::filesystem::path& path) {

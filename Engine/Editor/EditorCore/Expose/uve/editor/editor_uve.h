@@ -304,8 +304,6 @@ struct AnimationLibraryWindowStateUVE final {
     std::filesystem::path assetPath;
     /// The library as last loaded or saved. Every mutation writes the file at once.
     Asset::AnimationLibraryAssetUVE library;
-    /// The Add Animation picker's pending choice; invalid until the user picks.
-    Asset::AssetGuidUVE pendingAdd{};
     /// The last result, one line.
     std::string status;
     bool statusIsError = false;
@@ -320,13 +318,14 @@ enum class FilePickerModeUVE {
     Save,
 };
 
-/// One floating file pick: what it picks and where the choice goes. `extension` is the dotted
-/// kind (".uvanimlib"); `startDirectory` is content-relative (empty is Content itself); `onPick`
-/// fires once with the absolute choice, or never when the pick is cancelled.
+/// One floating file pick: what it picks and where the choice goes. `extensions` holds the
+/// dotted kinds to offer (".uvanimlib"); empty offers every file. `startDirectory` is
+/// content-relative (empty is Content itself); `onPick` fires once with the absolute choice, or
+/// never when the pick is cancelled.
 struct FilePickerRequestUVE final {
     FilePickerModeUVE mode = FilePickerModeUVE::Open;
     std::string title;
-    std::string extension;
+    std::vector<std::string> extensions;
     std::filesystem::path startDirectory;
     std::string saveName;
     std::function<void(const std::filesystem::path&)> onPick;
@@ -606,10 +605,12 @@ public:
     void CloseFilePickerUVE();
     void DrawFilePickerUVE();
     /// The picker's listing for `directory` (content-relative, empty is Content): its subfolders
-    /// plus its files with `extension` whose stems contain `search` (case-insensitive). Sorted.
+    /// plus its files whose extension is one of `extensions` (empty matches every file) and whose
+    /// stems contain `search` (case-insensitive). Sorted.
     static FilePickerListingUVE BuildFilePickerListingUVE(const std::vector<Asset::ProjectFileEntryUVE>& entries,
                                                            const std::filesystem::path& directory,
-                                                           std::string_view extension, std::string_view search);
+                                                           const std::vector<std::string>& extensions,
+                                                           std::string_view search);
 
     /// Brings a model source (an FBX, glTF or OBJ in Content, by its content-relative path) into the
     /// scene as one undo step and returns its root. A file with bones becomes
@@ -1892,10 +1893,12 @@ private:
     /// The rows under the script slot: one control per `export` field of a `.uvs` script.
     void DrawScriptExportsPropertyUVE(const Core::TypeMetadataEntryUVE& entry,
                                       const Core::TypeMetadataPropertyUVE& property, const void* instance);
-    /// A combo over the project's assets with `extension` (".uvanim"). Returns the pick, if any;
-    /// kInvalidAssetGuidUVE means "(none)" was picked.
+    /// A combo over the project's assets with `extension` (".uvanim"), with a Browse row that
+    /// opens the floating picker. Returns the pick, if any; kInvalidAssetGuidUVE means "(none)"
+    /// was picked. `title` names the picker window, defaulting to "Browse <extension>".
     [[nodiscard]] std::optional<Asset::AssetGuidUVE> DrawAssetPickerUVE(const char* id, Asset::AssetGuidUVE value,
-                                                                      const std::string& extension);
+                                                                      const std::string& extension,
+                                                                      const std::string& title = {});
     /// AnimationGraph's parameter table and its graph (objects, wiring, transitions). Every edit
     /// writes the whole list back through SetSelectedComponentPropertyUVE, so it is one undo step
     /// and the graph is re-validated before it lands.
@@ -2147,6 +2150,11 @@ private:
     std::optional<RetargetWindowStateUVE> m_retargetWindow;
     std::optional<AnimationLibraryWindowStateUVE> m_animationLibraryWindow;
     std::optional<FilePickerStateUVE> m_filePicker;
+    /// Browse picks waiting for their widget: widget id (ImGui::GetID, kept as uint32_t like
+    /// m_inspectorTextEdits) to the pick. Asset combos take GUIDs, file rows take paths; each is
+    /// consumed by its own drawer on the next frame.
+    std::unordered_map<std::uint32_t, Asset::AssetGuidUVE> m_assetPickerPendingPicks;
+    std::unordered_map<std::uint32_t, std::string> m_fileRowPendingPicks;
     std::optional<RetargetPreviewUVE> m_retargetPreview;
     // Which workspace tab was active before EnterPlayModeUVE() switched to Game, so StopPlayModeUVE()
     // can restore it - mirrors Unity's own Scene<->Game auto-switch on Play/Stop.

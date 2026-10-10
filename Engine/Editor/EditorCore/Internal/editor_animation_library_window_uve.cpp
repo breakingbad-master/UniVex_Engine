@@ -238,37 +238,31 @@ void EditorUVE::DrawAnimationLibraryWindowUVE() {
     }
 
     ImGui::Separator();
-    if (const std::optional<Asset::AssetGuidUVE> picked =
-            DrawAssetPickerUVE("##lib-add-pick", window.pendingAdd, ".uvanim")) {
-        window.pendingAdd = *picked;
-    }
-    ImGui::SameLine();
     const bool full = window.library.entries.size() >= Asset::kMaximumAnimationLibraryEntriesUVE;
     if (full) {
         ImGui::TextDisabled("The library is full (%d entries).", static_cast<int>(window.library.entries.size()));
     } else {
-        ImGui::BeginDisabled(window.pendingAdd == Asset::kInvalidAssetGuidUVE);
-        if (ImGui::Button("Add Animation")) {
-            const std::filesystem::path clipPath = assetDatabase.ResolveUVE(window.pendingAdd);
-            Asset::AnimationClipAssetUVE probe;
-            if (clipPath.empty() || clipPath.extension() != ".uvanim" ||
-                !Asset::LoadAnimationClipAssetUVE(clipPath, probe)) {
-                window.status = "That clip no longer reads as an animation; nothing was added.";
-                window.statusIsError = true;
-            } else if (LibraryHasGuidUVE(window.library, window.pendingAdd)) {
-                window.status = "'" + LibraryEntryNameUVE(clipPath, probe) + "' is already in this library.";
-                window.statusIsError = false;
-            } else {
-                Asset::AnimationLibraryEntryUVE entry;
-                entry.clip = window.pendingAdd;
-                entry.name = LibraryEntryNameUVE(clipPath, probe);
-                window.library.entries.push_back(std::move(entry));
-                if (saveNow(("Added '" + window.library.entries.back().name + "'.").c_str())) {
-                    window.pendingAdd = Asset::kInvalidAssetGuidUVE;
+        if (ImGui::Button("Add Animation...")) {
+            const Asset::ProjectFileSnapshotUVE project = m_services->GetProjectFileIndexUVE().GetSnapshotUVE();
+            const std::filesystem::path relative = window.assetPath.lexically_relative(project.contentRoot);
+            FilePickerRequestUVE request;
+            request.mode = FilePickerModeUVE::Open;
+            request.title = "Add Animation";
+            request.extensions = {".uvanim"};
+            request.startDirectory = (relative.empty() || *relative.begin() == "..") ? std::filesystem::path{}
+                                                                                     : relative.parent_path();
+            const std::filesystem::path libraryAbsolute = window.assetPath;
+            request.onPick = [this, libraryAbsolute](const std::filesystem::path& picked) {
+                const std::size_t added = AppendClipsToAnimationLibraryUVE(libraryAbsolute, {picked});
+                RefreshAnimationLibraryWindowUVE(libraryAbsolute);
+                if (m_animationLibraryWindow.has_value() && m_animationLibraryWindow->assetPath == libraryAbsolute) {
+                    m_animationLibraryWindow->status =
+                        added > 0U ? "Added '" + picked.stem().string() + "'." : "Nothing new to add.";
+                    m_animationLibraryWindow->statusIsError = false;
                 }
-            }
+            };
+            OpenFilePickerUVE(std::move(request));
         }
-        ImGui::EndDisabled();
     }
 
     if (!window.status.empty()) {

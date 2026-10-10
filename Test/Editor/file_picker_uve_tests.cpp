@@ -30,7 +30,7 @@ using Asset::ProjectFileEntryUVE;
 
 TEST(FilePickerUVETest, ListingSplitsFoldersAndMatchingFilesSorted) {
     const FilePickerListingUVE listing =
-        EditorUVE::BuildFilePickerListingUVE(PickerEntriesUVE(), {}, ".uvanimlib", "");
+        EditorUVE::BuildFilePickerListingUVE(PickerEntriesUVE(), {}, {".uvanimlib"}, "");
     EXPECT_EQ(listing.folders, (std::vector<std::filesystem::path>{"Anims", "Props"}));
     EXPECT_EQ(listing.files, (std::vector<std::filesystem::path>{"Run.uvanimlib", "walk.uvanimlib"}));
 }
@@ -38,15 +38,24 @@ TEST(FilePickerUVETest, ListingSplitsFoldersAndMatchingFilesSorted) {
 TEST(FilePickerUVETest, ListingDescendsAndSearchIsCaseInsensitive) {
     const std::vector<ProjectFileEntryUVE> entries = PickerEntriesUVE();
     const FilePickerListingUVE sub =
-        EditorUVE::BuildFilePickerListingUVE(entries, "Anims", ".uvanimlib", "");
+        EditorUVE::BuildFilePickerListingUVE(entries, "Anims", {".uvanimlib"}, "");
     EXPECT_EQ(sub.folders, (std::vector<std::filesystem::path>{"Anims/nested"}));
     EXPECT_EQ(sub.files, (std::vector<std::filesystem::path>{"Anims/idle.uvanimlib"}));
-    const FilePickerListingUVE found = EditorUVE::BuildFilePickerListingUVE(entries, {}, ".uvanimlib", "run");
+    const FilePickerListingUVE found = EditorUVE::BuildFilePickerListingUVE(entries, {}, {".uvanimlib"}, "run");
     EXPECT_EQ(found.files, (std::vector<std::filesystem::path>{"Run.uvanimlib"}));
     // Folders never hide behind the search: navigation stays put.
     EXPECT_EQ(found.folders.size(), 2U);
-    const FilePickerListingUVE none = EditorUVE::BuildFilePickerListingUVE(entries, {}, ".uvscene", "");
+    const FilePickerListingUVE none = EditorUVE::BuildFilePickerListingUVE(entries, {}, {".uvscene"}, "");
     EXPECT_TRUE(none.files.empty());
+}
+
+TEST(FilePickerUVETest, ListingMatchesAnyOfSeveralKindsOrEveryFile) {
+    const std::vector<ProjectFileEntryUVE> entries = PickerEntriesUVE();
+    const FilePickerListingUVE multi =
+        EditorUVE::BuildFilePickerListingUVE(entries, {}, {".uvanimlib", ".txt"}, "");
+    EXPECT_EQ(multi.files, (std::vector<std::filesystem::path>{"Run.uvanimlib", "notes.txt", "walk.uvanimlib"}));
+    const FilePickerListingUVE all = EditorUVE::BuildFilePickerListingUVE(entries, {}, {}, "");
+    EXPECT_EQ(all.files.size(), 3U);
 }
 
 } // namespace

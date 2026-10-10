@@ -33,6 +33,20 @@ namespace {
 constexpr std::string_view kScriptFolderUVE = "scripts";
 constexpr std::string_view kUVScriptExtensionUVE = ".uvs";
 
+/// `wanted` when it is Content itself or a folder the snapshot knows, else Content itself.
+[[nodiscard]] std::filesystem::path ClampPickerStartDirectoryUVE(const Asset::ProjectFileSnapshotUVE& project,
+                                                                 const std::filesystem::path& wanted) {
+    if (wanted.empty()) {
+        return std::filesystem::path{};
+    }
+    for (const Asset::ProjectFileEntryUVE& entry : project.entries) {
+        if (entry.kind == Asset::ProjectFileEntryKindUVE::Directory && entry.relativePath == wanted) {
+            return wanted;
+        }
+    }
+    return std::filesystem::path{};
+}
+
 /// A file stem from an object name: letters, digits, '-' and '_' kept, anything else an underscore,
 /// runs of underscores collapsed. "Main Menu (old)" becomes "Main_Menu_old".
 [[nodiscard]] std::string ScriptFileStemUVE(const std::string& name) {
@@ -378,6 +392,23 @@ void EditorUVE::DrawScriptSlotPropertyUVE(const Core::TypeMetadataEntryUVE& entr
         ImGui::BeginDisabled(!problem.empty());
         const bool load = ImGui::Button("Load", ImVec2{120.0F, 0.0F}) || (submitted && problem.empty());
         ImGui::EndDisabled();
+        ImGui::SameLine();
+        if (ImGui::Button("Browse...", ImVec2{120.0F, 0.0F})) {
+            const Asset::ProjectFileSnapshotUVE project = m_services->GetProjectFileIndexUVE().GetSnapshotUVE();
+            FilePickerRequestUVE request;
+            request.mode = FilePickerModeUVE::Open;
+            request.title = "Load Script";
+            request.extensions = {".uvs"};
+            request.startDirectory =
+                ClampPickerStartDirectoryUVE(project, std::filesystem::path{m_scriptLoadPath}.parent_path());
+            request.onPick = [this](const std::filesystem::path& absolute) {
+                const Asset::ProjectFileSnapshotUVE current = m_services->GetProjectFileIndexUVE().GetSnapshotUVE();
+                const std::filesystem::path relative = absolute.lexically_relative(current.contentRoot);
+                m_scriptLoadPath = (relative.empty() || *relative.begin() == "..") ? absolute.filename().generic_string()
+                                                                                   : relative.generic_string();
+            };
+            OpenFilePickerUVE(std::move(request));
+        }
         if (load && AssignScriptToSelectedEntityUVE(m_scriptLoadPath)) {
             closeMenu = true;
             ImGui::CloseCurrentPopup();
