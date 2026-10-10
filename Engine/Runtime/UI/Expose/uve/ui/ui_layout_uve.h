@@ -15,6 +15,11 @@ namespace UVE::UI {
 /// before it positions its own children. Only positions are written - child sizes and the
 /// container's own rect are preserved - and an invalid container is skipped entirely.
 ///
+/// A nonzero `wrapAfter` turns the stack into a grid: at most that many items per line along the
+/// direction axis, uniform cells sized to the largest participating child, spacing on both axes,
+/// and `alignment` resolving within each cell. The grid always starts at the inner edge, and a
+/// short line is still spaced as a grid, never packed as a stack.
+///
 /// Buttons and images lay out at their rect size, nested containers at their own rect size, and
 /// text at {0, fontSize} because the font atlas exposes no text measurement yet. A child
 /// carrying several positioned components advances the stack by one extent - button first, image

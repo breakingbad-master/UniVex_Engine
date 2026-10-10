@@ -43,7 +43,7 @@ protected:
     Scene::EntityUVE MakeContainerUVE(const Math::RectUVE rect, const Scene::UILayoutDirectionUVE direction,
                                       const Scene::UILayoutAlignmentUVE alignment, const float padding,
                                       const float spacing, const Scene::EntityUVE parent = Scene::kInvalidEntityUVE,
-                                      const std::int64_t order = 0) {
+                                      const std::int64_t order = 0, const std::uint32_t wrapAfter = 0U) {
         const Scene::EntityUVE entity = entityManager.CreateEntityUVE();
         Scene::UILayoutContainerComponentUVE container;
         container.rect = rect;
@@ -51,6 +51,7 @@ protected:
         container.alignment = alignment;
         container.padding = padding;
         container.spacing = spacing;
+        container.wrapAfter = wrapAfter;
         entityManager.AddComponentUVE<Scene::UILayoutContainerComponentUVE>(entity, container);
         LinkUVE(entity, parent, order);
         return entity;
@@ -249,6 +250,82 @@ TEST_F(UILayoutUVETest, TickIntegration_LaidOutButtonHitTestsAtItsLaidOutRect) {
     EXPECT_EQ(updated.rect.position, (Math::Vector2UVE{110.0F, 110.0F}));
     EXPECT_TRUE(updated.isHovered);
     EXPECT_TRUE(updated.wasClickedThisFrame);
+}
+
+TEST_F(UILayoutUVETest, HorizontalWrap_FlowsAcrossThenDownWithPartialLastLine) {
+    const Scene::EntityUVE container =
+        MakeContainerUVE(Math::RectUVE{{0.0F, 0.0F}, {400.0F, 400.0F}}, Scene::UILayoutDirectionUVE::Horizontal,
+                         Scene::UILayoutAlignmentUVE::Start, 0.0F, 5.0F, Scene::kInvalidEntityUVE, 0, 2U);
+    const Scene::EntityUVE first = MakeButtonUVE(container, 0, {60.0F, 20.0F});
+    const Scene::EntityUVE second = MakeButtonUVE(container, 1, {60.0F, 20.0F});
+    const Scene::EntityUVE third = MakeButtonUVE(container, 2, {60.0F, 20.0F});
+    const Scene::EntityUVE fourth = MakeButtonUVE(container, 3, {60.0F, 20.0F});
+    const Scene::EntityUVE fifth = MakeButtonUVE(container, 4, {60.0F, 20.0F});
+
+    LayoutUIContainersUVE(entityManager);
+
+    EXPECT_EQ(entityManager.GetComponentUVE<Scene::UIButtonComponentUVE>(first).rect.position,
+              (Math::Vector2UVE{0.0F, 0.0F}));
+    EXPECT_EQ(entityManager.GetComponentUVE<Scene::UIButtonComponentUVE>(second).rect.position,
+              (Math::Vector2UVE{65.0F, 0.0F}));
+    EXPECT_EQ(entityManager.GetComponentUVE<Scene::UIButtonComponentUVE>(third).rect.position,
+              (Math::Vector2UVE{0.0F, 25.0F}));
+    EXPECT_EQ(entityManager.GetComponentUVE<Scene::UIButtonComponentUVE>(fourth).rect.position,
+              (Math::Vector2UVE{65.0F, 25.0F}));
+    EXPECT_EQ(entityManager.GetComponentUVE<Scene::UIButtonComponentUVE>(fifth).rect.position,
+              (Math::Vector2UVE{0.0F, 50.0F}));
+}
+
+TEST_F(UILayoutUVETest, VerticalWrap_FlowsDownThenAcross) {
+    const Scene::EntityUVE container =
+        MakeContainerUVE(Math::RectUVE{{0.0F, 0.0F}, {400.0F, 400.0F}}, Scene::UILayoutDirectionUVE::Vertical,
+                         Scene::UILayoutAlignmentUVE::Start, 10.0F, 4.0F, Scene::kInvalidEntityUVE, 0, 2U);
+    const Scene::EntityUVE first = MakeButtonUVE(container, 0, {50.0F, 30.0F});
+    const Scene::EntityUVE second = MakeButtonUVE(container, 1, {50.0F, 30.0F});
+    const Scene::EntityUVE third = MakeButtonUVE(container, 2, {50.0F, 30.0F});
+
+    LayoutUIContainersUVE(entityManager);
+
+    EXPECT_EQ(entityManager.GetComponentUVE<Scene::UIButtonComponentUVE>(first).rect.position,
+              (Math::Vector2UVE{10.0F, 10.0F}));
+    EXPECT_EQ(entityManager.GetComponentUVE<Scene::UIButtonComponentUVE>(second).rect.position,
+              (Math::Vector2UVE{10.0F, 44.0F}));
+    EXPECT_EQ(entityManager.GetComponentUVE<Scene::UIButtonComponentUVE>(third).rect.position,
+              (Math::Vector2UVE{64.0F, 10.0F}));
+}
+
+TEST_F(UILayoutUVETest, Wrap_AlignsSmallerChildrenWithinUniformCells) {
+    const Scene::EntityUVE container =
+        MakeContainerUVE(Math::RectUVE{{0.0F, 0.0F}, {400.0F, 400.0F}}, Scene::UILayoutDirectionUVE::Horizontal,
+                         Scene::UILayoutAlignmentUVE::Center, 0.0F, 10.0F, Scene::kInvalidEntityUVE, 0, 2U);
+    const Scene::EntityUVE large = MakeButtonUVE(container, 0, {100.0F, 30.0F});
+    const Scene::EntityUVE small = MakeButtonUVE(container, 1, {40.0F, 10.0F});
+
+    LayoutUIContainersUVE(entityManager);
+
+    // Cells are (100, 30): the small child starts a full cell over and centers in its own.
+    EXPECT_EQ(entityManager.GetComponentUVE<Scene::UIButtonComponentUVE>(large).rect.position,
+              (Math::Vector2UVE{0.0F, 0.0F}));
+    EXPECT_EQ(entityManager.GetComponentUVE<Scene::UIButtonComponentUVE>(small).rect.position,
+              (Math::Vector2UVE{110.0F, 10.0F}));
+}
+
+TEST_F(UILayoutUVETest, Wrap_IgnoresNonWidgetChildrenInCellMeasureAndSlots) {
+    const Scene::EntityUVE container =
+        MakeContainerUVE(Math::RectUVE{{0.0F, 0.0F}, {400.0F, 400.0F}}, Scene::UILayoutDirectionUVE::Vertical,
+                         Scene::UILayoutAlignmentUVE::Start, 0.0F, 10.0F, Scene::kInvalidEntityUVE, 0, 2U);
+    const Scene::EntityUVE first = MakeButtonUVE(container, 0, {50.0F, 20.0F});
+    const Scene::EntityUVE bare = entityManager.CreateEntityUVE();
+    LinkUVE(bare, container, 1);
+    const Scene::EntityUVE second = MakeButtonUVE(container, 2, {50.0F, 20.0F});
+
+    LayoutUIContainersUVE(entityManager);
+
+    // The bare entity takes no slot: both buttons share the first line, packed as a grid.
+    EXPECT_EQ(entityManager.GetComponentUVE<Scene::UIButtonComponentUVE>(first).rect.position,
+              (Math::Vector2UVE{0.0F, 0.0F}));
+    EXPECT_EQ(entityManager.GetComponentUVE<Scene::UIButtonComponentUVE>(second).rect.position,
+              (Math::Vector2UVE{0.0F, 30.0F}));
 }
 
 } // namespace
