@@ -845,7 +845,7 @@ call sites are already allocating from the wrong place.
 | 2.4 | Multiple render targets on `RenderPassDescUVE` | `RHI/RHI` + backends | any deferred/G-buffer path | a two-attachment pass records and replays |
 | 2.5 | `StoreOpUVE` to pair with `LoadOpUVE` | `RHI/RHI` + backends | tiler efficiency; explicit resolve/discard | every pass declares both |
 | 2.6 | Per-joint animation channels in `AnimationClipAssetUVE` + a skeleton asset | `Asset` | the entire skeletal animation pipeline, and four data-only nodes | a glTF skinned mesh animates — parts landed (AnimationAssetBoneTrackUVE, skeleton_asset_uve, renderer skinning of posed skeletons); confirm the literal glTF eyeball on a GL run |
-| 2.7 | Remaining PBR texture slots on `MaterialAssetUVE` | `Asset` | full PBR materials | metallic/roughness/emissive maps render |
+| 2.7 | Remaining PBR texture slots on `MaterialAssetUVE` | `Asset` | full PBR materials | metallic/roughness/emissive maps render - landed: slots on the asset, renderer binds slots 12/13, lit_shadowed_3d samples them (B metallic, G roughness); confirm pixels on a GL run |
 | 2.8 | Debug line/shape renderer | `RHI/RenderSystems` | visualising bounds, frusta, contacts — pays for itself on the first spatial bug | a bounding box can be drawn from one call |
 
 ## Tier 3 — systems that are blocked, not missing
@@ -856,11 +856,11 @@ consumer. They are cheap relative to how large they look.
 | # | Item | Blocked on | Note |
 |---|---|---|---|
 | 3.1 | Animation runtime — clip sampler, skinning pass, engine tick | 2.6 | Landed (verified Oct 2026 by source read): step fns in Objects/Animation for sequencer + authored graph, SyncAnimationUVE ticks every frame and physics step, renderer_3d CPU-skins posed skeletons to the GPU. GPU compute skin (mesh_skin_compute + mesh_skin.glsl) built but unwired: perf follow-up, GL-side. |
-| 3.2 | Parallel gameplay systems | Tier 0 containers | `ThreadPoolUVE`, `JobGraphUVE` and `FrameSchedulerUVE` are built and unused by gameplay |
+| 3.2 | Parallel gameplay systems | Tier 0 containers | PARTIAL (Oct 2026): ThreadPoolUVE is live in assets, particles and shaders; JobGraphUVE/FrameSchedulerUVE built and tested but unwired. No defined consumer until frame scheduling or Tier 4 gameplay exists - do not start without one. |
 | 3.3 | Audio mixer routing | — | Landed (verified Oct 2026 by source read): AudioSystemUVE::UpdateUVE applies group multipliers to every live voice per frame; component mixerGroup syncs incl. live reassignment |
-| 3.4 | Script bytecode execution | — | The IR and bytecode encoder/decoder exist; the VM walks the graph instead. Decide whether to execute the bytecode or delete the pipeline |
+| 3.4 | Script bytecode execution | — | Landed (verified Oct 2026): the bytecode VM executes (editor instant reload) and release builds generate C++23 from the same bytecode; the visual graph was removed. Decision made: execute. |
 | 3.5 | Plugin host | — | Landed: NativePluginHostUVE loads/unloads native plugins (dlopen + LoadLibrary), negotiates the ABI, registers manifests, rolls back failed loads; tested incl. real .so fixtures |
-| 3.6 | Occlusion culling | 2.8 (to see it) and GPU queries | The data path and cost table are documented at the hook point |
+| 3.6 | Occlusion culling | 2.8 (to see it) and GPU queries | Still open (Oct 2026): frustum culling live (camera, decal, compute); occlusion queries explicitly deferred, GL-side (needs a GPU query path in a real backend). |
 
 ## Tier 4 — genuinely new subsystems
 
