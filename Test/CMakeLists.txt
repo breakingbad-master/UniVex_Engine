@@ -102,6 +102,7 @@ add_executable(uve_core_tests
     Engine/render_backend_selection_uve_tests.cpp
     Network/reliable_packet_window_uve_tests.cpp
     Plugins/plugin_registry_uve_tests.cpp
+    Plugins/native_plugin_host_uve_tests.cpp
     ProjectCheck/project_checker_uve_tests.cpp
     Input/input_system_uve_tests.cpp
     Gameplay/gameplay_input_uve_tests.cpp
@@ -200,6 +201,20 @@ if(TARGET uve_jpeg_ep)
 endif()
 target_compile_features(uve_core_tests PRIVATE cxx_std_23)
 target_compile_definitions(uve_core_tests PRIVATE UVE_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
+
+# Native plugin host fixtures: tiny real shared libraries the host loads end to end.
+add_library(uve_test_plugin_valid MODULE Plugins/Fixtures/uve_test_plugin_valid.cpp)
+add_library(uve_test_plugin_bad_protocol MODULE Plugins/Fixtures/uve_test_plugin_bad_protocol.cpp)
+add_library(uve_test_plugin_no_entry MODULE Plugins/Fixtures/uve_test_plugin_no_entry.cpp)
+foreach(fixture IN ITEMS uve_test_plugin_valid uve_test_plugin_bad_protocol uve_test_plugin_no_entry)
+    target_include_directories(${fixture} PRIVATE ${CMAKE_SOURCE_DIR}/Engine/Runtime/Plugins/Expose)
+    target_compile_features(${fixture} PRIVATE cxx_std_23)
+endforeach()
+target_compile_definitions(uve_core_tests PRIVATE
+    UVE_TEST_PLUGIN_VALID_PATH="$<TARGET_FILE:uve_test_plugin_valid>"
+    UVE_TEST_PLUGIN_BAD_PROTOCOL_PATH="$<TARGET_FILE:uve_test_plugin_bad_protocol>"
+    UVE_TEST_PLUGIN_NO_ENTRY_PATH="$<TARGET_FILE:uve_test_plugin_no_entry>")
+add_dependencies(uve_core_tests uve_test_plugin_valid uve_test_plugin_bad_protocol uve_test_plugin_no_entry)
 uve_set_warnings(uve_core_tests)
 
 # Support/ holds the suite's shared test-only helpers. Test/ itself goes on the include path

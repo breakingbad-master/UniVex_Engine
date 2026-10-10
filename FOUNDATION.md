@@ -857,9 +857,9 @@ consumer. They are cheap relative to how large they look.
 |---|---|---|---|
 | 3.1 | Animation runtime — clip sampler, skinning pass, engine tick | 2.6 | Landed (verified Oct 2026 by source read): step fns in Objects/Animation for sequencer + authored graph, SyncAnimationUVE ticks every frame and physics step, renderer_3d CPU-skins posed skeletons to the GPU. GPU compute skin (mesh_skin_compute + mesh_skin.glsl) built but unwired: perf follow-up, GL-side. |
 | 3.2 | Parallel gameplay systems | Tier 0 containers | `ThreadPoolUVE`, `JobGraphUVE` and `FrameSchedulerUVE` are built and unused by gameplay |
-| 3.3 | Audio mixer routing | — | `AudioMixerGroupUVE` exists; voices simply do not route through it |
+| 3.3 | Audio mixer routing | — | Landed (verified Oct 2026 by source read): AudioSystemUVE::UpdateUVE applies group multipliers to every live voice per frame; component mixerGroup syncs incl. live reassignment |
 | 3.4 | Script bytecode execution | — | The IR and bytecode encoder/decoder exist; the VM walks the graph instead. Decide whether to execute the bytecode or delete the pipeline |
-| 3.5 | Plugin host | — | Manifest validation exists; `dlopen`/`LoadLibrary` does not |
+| 3.5 | Plugin host | — | Landed: NativePluginHostUVE loads/unloads native plugins (dlopen + LoadLibrary), negotiates the ABI, registers manifests, rolls back failed loads; tested incl. real .so fixtures |
 | 3.6 | Occlusion culling | 2.8 (to see it) and GPU queries | The data path and cost table are documented at the hook point |
 
 ## Tier 4 — genuinely new subsystems
