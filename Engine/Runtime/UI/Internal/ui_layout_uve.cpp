@@ -31,27 +31,6 @@ struct OrderedChildUVE final {
     std::int64_t siblingOrder = 0;
 };
 
-[[nodiscard]] std::size_t ContainerDepthUVE(Scene::IEntityManagerUVE& entityManager,
-                                            Scene::EntityUVE container) {
-    std::size_t depth = 0U;
-    Scene::EntityUVE cursor = container;
-    // The canvas ancestry cap, reused: a cycle bottoms out at the cap instead of hanging.
-    for (std::size_t walk = 0U; walk < kMaximumCanvasAncestorWalkUVE; ++walk) {
-        if (!entityManager.IsAliveUVE(cursor) ||
-            !entityManager.HasComponentUVE<Scene::HierarchyComponentUVE>(cursor)) {
-            return depth;
-        }
-        const Scene::EntityUVE parent =
-            entityManager.GetComponentUVE<Scene::HierarchyComponentUVE>(cursor).parent;
-        if (parent == Scene::kInvalidEntityUVE) {
-            return depth;
-        }
-        cursor = parent;
-        ++depth;
-    }
-    return depth;
-}
-
 [[nodiscard]] bool IsEarlierChildUVE(const OrderedChildUVE& lhs, const OrderedChildUVE& rhs) {
     if (lhs.siblingOrder != rhs.siblingOrder) {
         return lhs.siblingOrder < rhs.siblingOrder;
@@ -181,7 +160,7 @@ void LayoutUIContainersUVE(Scene::IEntityManagerUVE& entityManager) {
     std::vector<OrderedContainerUVE> containers;
     entityManager.ForEachUVE<Scene::UILayoutContainerComponentUVE>(
         [&entityManager, &containers](const Scene::EntityUVE entity, const Scene::UILayoutContainerComponentUVE&) {
-            containers.push_back(OrderedContainerUVE{entity, ContainerDepthUVE(entityManager, entity)});
+            containers.push_back(OrderedContainerUVE{entity, UIHierarchyDepthUVE(entityManager, entity)});
         });
     std::sort(containers.begin(), containers.end(), [](const OrderedContainerUVE& lhs, const OrderedContainerUVE& rhs) {
         if (lhs.depth != rhs.depth) {

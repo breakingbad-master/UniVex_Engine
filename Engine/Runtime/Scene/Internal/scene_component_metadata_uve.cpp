@@ -36,6 +36,7 @@
 #include "uve/component/script_component_uve.h"
 #include "uve/component/surface_instance_component_uve.h"
 #include "uve/component/transform_component_uve.h"
+#include "uve/component/ui_anchor_component_uve.h"
 #include "uve/component/ui_button_component_uve.h"
 #include "uve/component/ui_image_component_uve.h"
 #include "uve/component/ui_layout_container_component_uve.h"
@@ -1885,6 +1886,19 @@ void DeclareMediaAndUIUVE(std::vector<TypeMetadataEntryUVE>& entries) {
                                                                             kPropertyTypeFloatUVE),
                          DeclareUVE<&UILayoutContainerComponentUVE::wrapAfter>("wrapAfter", "Wrap After",
                                                                               kPropertyTypeUInt32UVE),
+                     }));
+    AddValidatedUVE<UIAnchorComponentUVE, &IsUIAnchorComponentValidUVE>(
+        entries,
+        MakeEntryUVE("component.ui_anchor", "UIAnchorComponentUVE", "UI Anchor", kSectionOrderTypeSpecificUVE,
+                     {
+                         DeclareUVE<&UIAnchorComponentUVE::anchorMin>("anchorMin", "Anchor Min",
+                                                                     kPropertyTypeVector2UVE),
+                         DeclareUVE<&UIAnchorComponentUVE::anchorMax>("anchorMax", "Anchor Max",
+                                                                     kPropertyTypeVector2UVE),
+                         DeclareUVE<&UIAnchorComponentUVE::offsetMin>("offsetMin", "Offset Min",
+                                                                     kPropertyTypeVector2UVE),
+                         DeclareUVE<&UIAnchorComponentUVE::offsetMax>("offsetMax", "Offset Max",
+                                                                     kPropertyTypeVector2UVE),
                      }));
 }
 

@@ -567,8 +567,9 @@ script per node; see `Engine/Runtime/UVScript/README.md`.
 - [x] A baked bitmap font atlas approach for UI text rendering
 - [ ] Layout containers (horizontal/vertical stacks, grids, anchors/margins that respond to
   screen-size and aspect-ratio changes) — horizontal/vertical stack containers with
-  padding/spacing/alignment have landed and run inside UIRuntimeUVE::TickUVE, and stacks
-  wrap into uniform-cell grids via wrapAfter; anchors/margins, auto-sizing, and text
+  padding/spacing/alignment have landed and run inside UIRuntimeUVE::TickUVE, stacks
+  wrap into uniform-cell grids via wrapAfter, and normalized anchors with pixel margins
+  resolve against parents or the viewport ahead of layout; auto-sizing and text
   measurement are still open
 - [ ] Additional widget types: sliders, checkboxes, dropdowns, text input fields, scroll
   views, progress bars, tooltips

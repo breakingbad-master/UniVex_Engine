@@ -13,6 +13,7 @@
 #include "uve/component/ui_text_component_uve.h"
 #include "uve/input/mouse_button_uve.h"
 #include "uve/ui/canvas_ancestry_uve.h"
+#include "uve/ui/ui_anchors_uve.h"
 #include "uve/ui/ui_layout_uve.h"
 
 namespace UVE::UI {
@@ -58,10 +59,20 @@ void UIRuntimeUVE::SetCoordinateTransformUVE(const UICoordinateTransformUVE& tra
     m_coordinateTransform = transform;
 }
 
+void UIRuntimeUVE::SetViewportSizeUVE(const Math::Vector2UVE& viewportSize) noexcept {
+    if (!std::isfinite(viewportSize.x) || !std::isfinite(viewportSize.y) || viewportSize.x < 0.0F ||
+        viewportSize.y < 0.0F) {
+        return;
+    }
+    m_viewportSize = viewportSize;
+}
+
 void UIRuntimeUVE::TickUVE(Scene::IEntityManagerUVE& entityManager, const Input::IInputSystemUVE& inputSystem,
                            const UITextLocalizationUVE& localization) {
-    // Containers position their children before anything reads a widget rect, so hit-testing and
-    // every emitted quad agree on where a laid-out widget is within the same tick.
+    // Anchors resolve first (roots against the viewport, children against fresh parent rects),
+    // then containers position their children: hit-testing and every emitted quad agree on where
+    // a widget is within the same tick.
+    ResolveUIAnchorsUVE(entityManager, m_viewportSize);
     LayoutUIContainersUVE(entityManager);
     m_drawBatch.quads.clear();
     std::vector<RankedWidgetUVE> ranked;

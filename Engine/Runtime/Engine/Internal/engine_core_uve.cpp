@@ -1129,9 +1129,15 @@ void EngineCoreUVE::SyncUIRuntimeUVE() {
     }
 
     UI::UICoordinateTransformUVE uiTransform;
+    std::uint32_t anchorFramebufferWidth = 0U;
+    std::uint32_t anchorFramebufferHeight = 0U;
+    float anchorContentScaleX = 1.0F;
+    float anchorContentScaleY = 1.0F;
     if (m_windowedRenderingActiveUVE && m_windowManager != nullptr) {
         const std::uint32_t framebufferWidth = m_windowManager->GetWidthUVE();
         const std::uint32_t framebufferHeight = m_windowManager->GetHeightUVE();
+        anchorFramebufferWidth = framebufferWidth;
+        anchorFramebufferHeight = framebufferHeight;
         if (framebufferWidth > 0U && framebufferHeight > 0U) {
             float contentScaleX = 1.0F;
             float contentScaleY = 1.0F;
@@ -1142,6 +1148,8 @@ void EngineCoreUVE::SyncUIRuntimeUVE() {
             if (!(contentScaleY > 0.0F) || !std::isfinite(contentScaleY)) {
                 contentScaleY = 1.0F;
             }
+            anchorContentScaleX = contentScaleX;
+            anchorContentScaleY = contentScaleY;
 
             std::optional<Render::ViewportRectUVE> outputRegion = m_editorViewportRegionUVE;
             Window::PresentationLayoutUVE viewportLayout;
@@ -1251,6 +1259,22 @@ void EngineCoreUVE::SyncUIRuntimeUVE() {
                 }
             }
         }
+    }
+    // The authored-space size roots anchor against, from the same metrics as the transform so
+    // the two can never disagree about which space is which: the reference resolution whenever a
+    // stretch mode scales authored pixels onto the target (a shrunken editor viewport region
+    // still resolves against the full design space), device points when stretching is off and
+    // authored pixels are device pixels. Headless frames set nothing and keep the last size.
+    if (anchorFramebufferWidth > 0U && anchorFramebufferHeight > 0U) {
+        Math::Vector2UVE anchorViewport{};
+        if (m_config.stretchModeUVE == Platform::StretchModeUVE::Disabled) {
+            anchorViewport = Math::Vector2UVE{static_cast<float>(anchorFramebufferWidth) / anchorContentScaleX,
+                                              static_cast<float>(anchorFramebufferHeight) / anchorContentScaleY};
+        } else {
+            anchorViewport = Math::Vector2UVE{static_cast<float>(m_config.windowWidth),
+                                              static_cast<float>(m_config.windowHeight)};
+        }
+        m_uiRuntime.SetViewportSizeUVE(anchorViewport);
     }
     m_uiRuntime.SetCoordinateTransformUVE(uiTransform);
 
