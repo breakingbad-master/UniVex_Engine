@@ -49,6 +49,7 @@
 #include "uve/component/audio_source_component_uve.h"
 #include "uve/component/bone_modifier_component_uve.h"
 #include "uve/component/camera_component_uve.h"
+#include "uve/component/camera_follow_component_uve.h"
 #include "uve/component/canvas_component_uve.h"
 #include "uve/component/character_controller_component_uve.h"
 #include "uve/component/collider_component_uve.h"
@@ -267,6 +268,12 @@ namespace {
               {"lookPointer", ToJsonUVE(component.input.lookPointer)},
               {"lookStick", ToJsonUVE(component.input.lookStick)},
               {"interactPressed", component.input.interactPressed}}}};
+}
+
+[[nodiscard]] nlohmann::json ToJsonUVE(const CameraFollowComponentUVE& component) {
+    // The target link is deliberately absent: entity references resolve through file-local ids.
+    return {{"offset", ToJsonUVE(component.offset)},
+            {"followPossessedPawn", component.followPossessedPawn}};
 }
 
 [[nodiscard]] nlohmann::json ToJsonUVE(const TriggerVolumeComponentUVE& component) {
@@ -1037,6 +1044,31 @@ template <typename VectorT>
     }
     const auto targetIt = localIdToEntity.find(static_cast<std::uint32_t>(localId));
     value.controller = targetIt != localIdToEntity.end() ? targetIt->second : kInvalidEntityUVE;
+    return value;
+}
+
+[[nodiscard]] CameraFollowComponentUVE CameraFollowObjectFromJsonUVE(const nlohmann::json& json) {
+    CameraFollowComponentUVE value;
+    value.offset =
+        json.contains("offset") ? Vector3FromJsonUVE(json.at("offset")) : Math::Vector3UVE{};
+    value.followPossessedPawn = json.value("followPossessedPawn", false);
+    return value;
+}
+
+/// The entity-aware half of reading a CameraFollow, mirroring the pawn's: the link drops to
+/// invalid when the file does not contain it.
+[[nodiscard]] CameraFollowComponentUVE CameraFollowComponentWithResolvedTargetUVE(
+    const nlohmann::json& json,
+    const std::unordered_map<std::uint32_t, EntityUVE>& localIdToEntity) {
+    CameraFollowComponentUVE value = CameraFollowObjectFromJsonUVE(json);
+    const std::int64_t localId = json.value(
+        "targetLocalId", static_cast<std::int64_t>(std::numeric_limits<std::uint32_t>::max()));
+    if (localId < 0 ||
+        static_cast<std::uint64_t>(localId) > std::numeric_limits<std::uint32_t>::max()) {
+        throw std::runtime_error("CameraFollowComponentUVE target local ID is outside the uint32 range");
+    }
+    const auto targetIt = localIdToEntity.find(static_cast<std::uint32_t>(localId));
+    value.target = targetIt != localIdToEntity.end() ? targetIt->second : kInvalidEntityUVE;
     return value;
 }
 
@@ -2124,6 +2156,16 @@ MakeMetadataRegistrationUVE(const std::string& componentName,
                               return value;
                           },
                           IsPawnComponentValidUVE));
+        table.emplace("CameraFollowComponentUVE",
+                      MakeRegistrationUVE<CameraFollowComponentUVE>(
+                          [](const nlohmann::json& json) {
+                              CameraFollowComponentUVE value = CameraFollowObjectFromJsonUVE(json);
+                              if (!IsCameraFollowComponentValidUVE(value)) {
+                                  throw std::runtime_error("Invalid CameraFollowComponentUVE payload");
+                              }
+                              return value;
+                          },
+                          IsCameraFollowComponentValidUVE));
         table.emplace("TriggerVolumeComponentUVE",
                       MakeRegistrationUVE<TriggerVolumeComponentUVE>([](const nlohmann::json& json) {
                           TriggerVolumeComponentUVE volume;
@@ -2826,6 +2868,20 @@ MakeMetadataRegistrationUVE(const std::string& componentName,
                 }
                 componentsJson[*name]["controllerLocalId"] = controllerLocalId;
             }
+            if (type == std::type_index(typeid(CameraFollowComponentUVE))) {
+                // A follow camera's target is an entity reference: written as a file-local id,
+                // with a target outside the saved set dropped exactly like a pawn link.
+                const CameraFollowComponentUVE& follow =
+                    entityManager.GetComponentUVE<CameraFollowComponentUVE>(entity);
+                std::uint32_t targetLocalId = std::numeric_limits<std::uint32_t>::max();
+                if (follow.target != kInvalidEntityUVE) {
+                    const auto found = entityToLocalId.find(follow.target);
+                    if (found != entityToLocalId.end()) {
+                        targetLocalId = found->second;
+                    }
+                }
+                componentsJson[*name]["targetLocalId"] = targetLocalId;
+            }
             if (type == std::type_index(typeid(CinematicComponentUVE))) {
                 // Each cut's camera rides in a parallel file-local-id array (the cuts in toJson
                 // carry times only): the sentinel marks a camera outside the saved set, and the
@@ -3154,6 +3210,11 @@ void RollbackRestoredEntitiesUVE(IEntityManagerUVE& entityManager, std::vector<E
                 if (CanonicalComponentNameUVE(componentName) == "PawnComponentUVE") {
                     entityManager.AddComponentUVE<PawnComponentUVE>(
                         entity, PawnComponentWithResolvedControllerUVE(componentJson, localIdToEntity));
+                    continue;
+                }
+                if (CanonicalComponentNameUVE(componentName) == "CameraFollowComponentUVE") {
+                    entityManager.AddComponentUVE<CameraFollowComponentUVE>(
+                        entity, CameraFollowComponentWithResolvedTargetUVE(componentJson, localIdToEntity));
                     continue;
                 }
                 if (CanonicalComponentNameUVE(componentName) == "Hitbox3DComponentUVE") {

@@ -14,6 +14,7 @@
 #include "uve/gameplay/status_effects_uve.h"
 #include "uve/gameplay/trigger_volume_uve.h"
 #include "uve/gameplay/pawn_uve.h"
+#include "uve/component/camera_follow_component_uve.h"
 #include "uve/memory/memory_manager_uve.h"
 
 #include <gtest/gtest.h>
@@ -252,4 +253,47 @@ TEST_F(GameplaySerializationUVETest, Cinematic_DropsCutsOutsideTheSavedSet) {
     EXPECT_TRUE(revived.animationKeys.empty());
     EXPECT_TRUE(IsCinematicComponentValidUVE(revived));
 }
+TEST_F(GameplaySerializationUVETest, CameraFollow_RoundTripThroughCaptureRestore) {
+    const EntityUVE target = entityManager.CreateEntityUVE();
+    const EntityUVE camera = entityManager.CreateEntityUVE();
+    CameraFollowComponentUVE follow;
+    follow.target = target;
+    follow.offset = {0.0F, 5.0F, -8.0F};
+    follow.followPossessedPawn = true;
+    entityManager.AddComponentUVE<CameraFollowComponentUVE>(camera, follow);
+
+    const std::optional<SceneSnapshotUVE> captured =
+        serializer.CaptureUVE(entityManager, {camera, target}, SceneAssetTypeUVE::Scene);
+    ASSERT_TRUE(captured.has_value());
+    const std::vector<EntityUVE> restored = serializer.RestoreUVE(entityManager, *captured);
+    ASSERT_EQ(restored.size(), 2U);
+    const EntityUVE revivedCamera =
+        entityManager.HasComponentUVE<CameraFollowComponentUVE>(restored[0]) ? restored[0] : restored[1];
+    const EntityUVE revivedTarget = revivedCamera == restored[0] ? restored[1] : restored[0];
+    const CameraFollowComponentUVE& revived =
+        entityManager.GetComponentUVE<CameraFollowComponentUVE>(revivedCamera);
+    EXPECT_EQ(revived.target, revivedTarget);
+    EXPECT_EQ(revived.offset, (Math::Vector3UVE{0.0F, 5.0F, -8.0F}));
+    EXPECT_TRUE(revived.followPossessedPawn);
+}
+
+TEST_F(GameplaySerializationUVETest, CameraFollow_DropsTargetOutsideTheSavedSet) {
+    const EntityUVE target = entityManager.CreateEntityUVE();
+    const EntityUVE camera = entityManager.CreateEntityUVE();
+    CameraFollowComponentUVE follow;
+    follow.target = target;
+    follow.followPossessedPawn = true;
+    entityManager.AddComponentUVE<CameraFollowComponentUVE>(camera, follow);
+
+    const std::optional<SceneSnapshotUVE> captured =
+        serializer.CaptureUVE(entityManager, {camera}, SceneAssetTypeUVE::Scene);
+    ASSERT_TRUE(captured.has_value());
+    const std::vector<EntityUVE> restored = serializer.RestoreUVE(entityManager, *captured);
+    ASSERT_EQ(restored.size(), 1U);
+    const CameraFollowComponentUVE& revived =
+        entityManager.GetComponentUVE<CameraFollowComponentUVE>(restored.front());
+    EXPECT_EQ(revived.target, kInvalidEntityUVE);
+    EXPECT_TRUE(revived.followPossessedPawn);
+}
+
 } // namespace UVE::Scene::Tests

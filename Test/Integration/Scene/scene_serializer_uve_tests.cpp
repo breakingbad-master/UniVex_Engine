@@ -59,6 +59,7 @@
 #include "uve/component/visibility_component_uve.h"
 #include "uve/component/ui_button_component_uve.h"
 #include "uve/component/ui_image_component_uve.h"
+#include "uve/component/ui_layout_container_component_uve.h"
 #include "uve/component/ui_text_component_uve.h"
 #include "uve/component/world_transform_component_uve.h"
 #include "uve/component/light_emitter_component_uve.h"
@@ -2357,6 +2358,40 @@ TEST_F(SceneSerializerUVETest, SaveThenLoad_UIComponentsUVE_RoundTripExactly) {
     EXPECT_FLOAT_EQ(loadedButton.hoverColor.x, 0.2F);
     EXPECT_TRUE(loadedButton.isHovered);
     EXPECT_FALSE(loadedButton.wasClickedThisFrame);
+
+    std::filesystem::remove(path);
+}
+
+TEST_F(SceneSerializerUVETest, SaveThenLoad_LayoutContainer_RoundTripsExactly) {
+    const EntityUVE entity = entityManager.CreateEntityUVE();
+    UILayoutContainerComponentUVE container;
+    container.rect.position = Math::Vector2UVE{10.0F, 20.0F};
+    container.rect.size = Math::Vector2UVE{300.0F, 200.0F};
+    container.direction = UILayoutDirectionUVE::Horizontal;
+    container.alignment = UILayoutAlignmentUVE::Center;
+    container.padding = 8.0F;
+    container.spacing = 4.0F;
+    container.wrapAfter = 3U;
+    entityManager.AddComponentUVE<UILayoutContainerComponentUVE>(entity, container);
+
+    const std::filesystem::path path = "uve_scene_serializer_tests_layout_container.uvscene";
+    std::filesystem::remove(path);
+    ASSERT_TRUE(serializer.SaveUVE(entityManager, {entity}, path, SceneAssetTypeUVE::Scene));
+
+    EntityManagerUVE loadedManager(memoryManager.GetDefaultAllocatorUVE(), eventSystem);
+    const std::vector<EntityUVE> roots = serializer.LoadUVE(loadedManager, path);
+    ASSERT_EQ(roots.size(), 1U);
+    const UILayoutContainerComponentUVE& loaded =
+        loadedManager.GetComponentUVE<UILayoutContainerComponentUVE>(roots[0]);
+    EXPECT_FLOAT_EQ(loaded.rect.position.x, 10.0F);
+    EXPECT_FLOAT_EQ(loaded.rect.position.y, 20.0F);
+    EXPECT_FLOAT_EQ(loaded.rect.size.x, 300.0F);
+    EXPECT_FLOAT_EQ(loaded.rect.size.y, 200.0F);
+    EXPECT_EQ(loaded.direction, UILayoutDirectionUVE::Horizontal);
+    EXPECT_EQ(loaded.alignment, UILayoutAlignmentUVE::Center);
+    EXPECT_FLOAT_EQ(loaded.padding, 8.0F);
+    EXPECT_FLOAT_EQ(loaded.spacing, 4.0F);
+    EXPECT_EQ(loaded.wrapAfter, 3U);
 
     std::filesystem::remove(path);
 }

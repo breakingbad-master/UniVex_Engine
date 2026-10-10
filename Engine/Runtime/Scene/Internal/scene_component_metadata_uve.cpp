@@ -38,6 +38,7 @@
 #include "uve/component/transform_component_uve.h"
 #include "uve/component/ui_button_component_uve.h"
 #include "uve/component/ui_image_component_uve.h"
+#include "uve/component/ui_layout_container_component_uve.h"
 #include "uve/component/ui_text_component_uve.h"
 #include "uve/component/visibility_component_uve.h"
 #include "uve/logging/assert_uve.h"
@@ -1866,6 +1867,24 @@ void DeclareMediaAndUIUVE(std::vector<TypeMetadataEntryUVE>& entries) {
                              "isHovered", "Hovered", kPropertyTypeBoolUVE),
                          DeclareRuntimeStateUVE<&UIButtonComponentUVE::wasClickedThisFrame>(
                              "wasClickedThisFrame", "Clicked This Frame", kPropertyTypeBoolUVE),
+                     }));
+    AddValidatedUVE<UILayoutContainerComponentUVE, &IsUILayoutContainerComponentValidUVE>(
+        entries,
+        MakeEntryUVE("component.ui_layout_container", "UILayoutContainerComponentUVE", "UI Layout Container",
+                     kSectionOrderTypeSpecificUVE,
+                     {
+                         DeclareUVE<&UILayoutContainerComponentUVE::rect>("rect", "Rect",
+                                                                         kPropertyTypeRectUVE),
+                         DeclareEnumUVE<&UILayoutContainerComponentUVE::direction>(
+                             "direction", "Direction", {{0, "Vertical"}, {1, "Horizontal"}}),
+                         DeclareEnumUVE<&UILayoutContainerComponentUVE::alignment>(
+                             "alignment", "Alignment", {{0, "Start"}, {1, "Center"}, {2, "End"}}),
+                         DeclareUVE<&UILayoutContainerComponentUVE::padding>("padding", "Padding",
+                                                                            kPropertyTypeFloatUVE),
+                         DeclareUVE<&UILayoutContainerComponentUVE::spacing>("spacing", "Spacing",
+                                                                            kPropertyTypeFloatUVE),
+                         DeclareUVE<&UILayoutContainerComponentUVE::wrapAfter>("wrapAfter", "Wrap After",
+                                                                              kPropertyTypeUInt32UVE),
                      }));
 }
 

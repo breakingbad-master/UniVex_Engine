@@ -25,8 +25,8 @@ namespace UVE::Scene {
 /// yank the player's camera - and last-possessed wins when several Player controllers possess in
 /// one frame, so multi-controller scenes should target their cameras by hand.
 ///
-/// Serialization follows in a later slice: like the pawn links before it, this component's
-/// entity reference needs the serializer's local-id resolution, which does not exist yet.
+/// Serialization resolves `target` through file-local ids: a target outside the saved set
+/// loads back as invalid, parking the camera.
 struct CameraFollowComponentUVE final {
     EntityUVE target = kInvalidEntityUVE;
     Math::Vector3UVE offset{};

@@ -41,8 +41,8 @@ enum class UILayoutAlignmentUVE : std::uint8_t {
 /// Text participates with a laid-out extent of {0, fontSize}: vertical stacks of text advance by
 /// line height exactly, but horizontal stacks treat text as zero-width because the font atlas
 /// exposes no text measurement yet. Measure-based text width, anchors/margins, and auto-sizing
-/// are follow-ups; so is serialization (this component's plain data needs a serializer
-/// registration, which does not exist yet).
+/// are follow-ups. Persistence rides the metadata-driven serializer: every field above is a
+/// declared property, so no hand-written JSON exists for this component.
 struct UILayoutContainerComponentUVE final {
     Math::RectUVE rect{Math::Vector2UVE{0.0F, 0.0F}, Math::Vector2UVE{320.0F, 240.0F}};
     UILayoutDirectionUVE direction = UILayoutDirectionUVE::Vertical;
