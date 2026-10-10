@@ -84,6 +84,8 @@
 #include "uve/gameplay/status_effects_uve.h"
 #include "uve/gameplay/health_events_uve.h"
 #include "uve/gameplay/interact_requested_event_uve.h"
+#include "uve/gameplay/trigger_events_uve.h"
+#include "uve/gameplay/trigger_volume_uve.h"
 #include "uve/input/mobile_gesture_system_uve.h"
 #include "uve/input/mobile_input_system_uve.h"
 #include "uve/physics/area_3d_runtime_uve.h"
@@ -2970,6 +2972,16 @@ void EngineCoreUVE::PublishAreaOverlapLifecycleEventsUVE() {
         } else {
             m_eventSystem->QueueEvent(Physics::AreaOverlapExitedEventUVE{transition.pair});
         }
+    }
+
+    // Triggers author what the edges MEAN: one-shot, every-enter and while-occupied fire
+    // policies with cooldowns and an explicit re-arm, evaluated against the same snapshot and
+    // transitions above. A zero first-frame delta freezes trigger clocks but never drops edges.
+    const std::vector<Scene::TriggerFiredResultUVE> triggerFires = Scene::UpdateTriggerVolumesUVE(
+        *m_entityManager, snapshot, report.transitions, static_cast<float>(m_frameStats.deltaTimeSeconds));
+    for (const Scene::TriggerFiredResultUVE& fired : triggerFires) {
+        m_eventSystem->QueueEvent(
+            Gameplay::TriggerFiredEventUVE{fired.trigger, fired.interactor, fired.firedCount});
     }
 }
 

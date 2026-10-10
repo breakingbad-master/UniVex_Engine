@@ -8,6 +8,7 @@
 #include "uve/gameplay/gameplay_attributes_uve.h"
 #include "uve/gameplay/gameplay_tags_uve.h"
 #include "uve/gameplay/status_effects_uve.h"
+#include "uve/gameplay/trigger_volume_uve.h"
 
 #include <algorithm>
 #include <cstddef>
@@ -249,6 +250,17 @@ namespace {
                            {"maxApplied", effect.maxApplied}});
     }
     return {{"effects", std::move(effects)}};
+}
+
+[[nodiscard]] nlohmann::json ToJsonUVE(const TriggerVolumeComponentUVE& component) {
+    // Runtime state rides along on purpose: a spent one-shot must stay spent across save/load.
+    return {{"policy", static_cast<unsigned int>(component.policy)},
+            {"intervalSeconds", component.intervalSeconds},
+            {"cooldownSeconds", component.cooldownSeconds},
+            {"armed", component.armed},
+            {"firedCount", component.firedCount},
+            {"cooldownRemaining", component.cooldownRemaining},
+            {"intervalRemaining", component.intervalRemaining}};
 }
 
 [[nodiscard]] nlohmann::json ToJsonUVE(const PerceptionComponentUVE& component) {
@@ -2021,6 +2033,22 @@ MakeMetadataRegistrationUVE(const std::string& componentName,
                           }
                           return tags;
                       }, IsGameplayTagComponentValidUVE));
+        table.emplace("TriggerVolumeComponentUVE",
+                      MakeRegistrationUVE<TriggerVolumeComponentUVE>([](const nlohmann::json& json) {
+                          TriggerVolumeComponentUVE volume;
+                          volume.policy =
+                              static_cast<TriggerFirePolicyUVE>(json.value("policy", 0U));
+                          volume.intervalSeconds = json.value("intervalSeconds", 1.0F);
+                          volume.cooldownSeconds = json.value("cooldownSeconds", 0.0F);
+                          volume.armed = json.value("armed", true);
+                          volume.firedCount = json.value("firedCount", 0U);
+                          volume.cooldownRemaining = json.value("cooldownRemaining", 0.0F);
+                          volume.intervalRemaining = json.value("intervalRemaining", 0.0F);
+                          if (!IsTriggerVolumeComponentValidUVE(volume)) {
+                              throw std::runtime_error("Invalid TriggerVolumeComponentUVE payload");
+                          }
+                          return volume;
+                      }, IsTriggerVolumeComponentValidUVE));
         table.emplace("StatusEffectsComponentUVE",
                       MakeRegistrationUVE<StatusEffectsComponentUVE>([](const nlohmann::json& json) {
                           StatusEffectsComponentUVE effects;

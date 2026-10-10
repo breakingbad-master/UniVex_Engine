@@ -12,6 +12,7 @@
 #include "uve/gameplay/gameplay_attributes_uve.h"
 #include "uve/gameplay/gameplay_tags_uve.h"
 #include "uve/gameplay/status_effects_uve.h"
+#include "uve/gameplay/trigger_volume_uve.h"
 #include "uve/memory/memory_manager_uve.h"
 
 #include <gtest/gtest.h>
@@ -90,6 +91,29 @@ TEST_F(GameplaySerializationUVETest, StatusEffects_RoundTripThroughCaptureRestor
     EXPECT_EQ(revived, effects);
 }
 
+
+TEST_F(GameplaySerializationUVETest, TriggerVolume_RoundTripThroughCaptureRestore) {
+    const EntityUVE source = entityManager.CreateEntityUVE();
+    TriggerVolumeComponentUVE volume;
+    volume.policy = TriggerFirePolicyUVE::WhileOccupied;
+    volume.intervalSeconds = 2.5F;
+    volume.cooldownSeconds = 1.0F;
+    volume.armed = false;
+    volume.firedCount = 3U;
+    volume.cooldownRemaining = 0.5F;
+    volume.intervalRemaining = 1.5F;
+    ASSERT_TRUE(IsTriggerVolumeComponentValidUVE(volume));
+    entityManager.AddComponentUVE<TriggerVolumeComponentUVE>(source, volume);
+
+    const std::optional<SceneSnapshotUVE> snapshot =
+        serializer.CaptureUVE(entityManager, {source}, SceneAssetTypeUVE::Scene);
+    ASSERT_TRUE(snapshot.has_value());
+    const std::vector<EntityUVE> restored = serializer.RestoreUVE(entityManager, *snapshot);
+    ASSERT_EQ(restored.size(), 1U);
+    const TriggerVolumeComponentUVE& revived =
+        entityManager.GetComponentUVE<TriggerVolumeComponentUVE>(restored.front());
+    EXPECT_EQ(revived, volume);
+}
 
 TEST_F(GameplaySerializationUVETest, Cinematic_RoundTripThroughCaptureRestore) {
     const EntityUVE source = entityManager.CreateEntityUVE();
