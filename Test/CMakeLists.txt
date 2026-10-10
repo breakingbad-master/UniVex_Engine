@@ -106,6 +106,9 @@ add_executable(uve_core_tests
     ProjectCheck/project_checker_uve_tests.cpp
     Input/input_system_uve_tests.cpp
     Gameplay/gameplay_input_uve_tests.cpp
+    Gameplay/gameplay_attributes_uve_tests.cpp
+    Gameplay/gameplay_tags_uve_tests.cpp
+    Gameplay/status_effects_uve_tests.cpp
     Input/input_names_uve_tests.cpp
     Input/mobile_input_system_uve_tests.cpp
     Input/mobile_gesture_system_uve_tests.cpp
@@ -273,6 +276,7 @@ add_executable(uve_integration_tests
     Integration/Scene/object_common_components_uve_tests.cpp
     Integration/Scene/scene_component_metadata_uve_tests.cpp
     Integration/Scene/scene_serializer_uve_tests.cpp
+    Integration/Scene/gameplay_serialization_uve_tests.cpp
     Integration/Scene/scene_object_type_uve_tests.cpp
     Integration/Scene/prefab_system_uve_tests.cpp
     Integration/Scene/prefab_maturity_uve_tests.cpp
@@ -407,6 +411,7 @@ target_link_libraries(uve_integration_tests PRIVATE
     uve_window
     uve_input
     uve_ui
+    uve_gameplay
     GTest::gtest
     GTest::gtest_main
 )

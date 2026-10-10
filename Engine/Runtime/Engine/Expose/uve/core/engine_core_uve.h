@@ -608,6 +608,10 @@ private:
     /// carry what struck what, how deeply, along which axis and on which channel. The engine never
     /// applies a consequence of its own.
     void SyncHitbox3DObjectsUVE();
+    /// Ticks gameplay attribute pools (regen plus status effects) and queues the attribute and
+    /// health events the tick produced. Frame-rate: drift is delta-scaled, so wall-clock status
+    /// durations stay fair at any frame rate.
+    void SyncGameplayAttributesUVE(float deltaSeconds);
 
     /// The interaction scan, new wiring for previously unconsumed authored data (the
     /// Unreal-Lyra-style interactor/focus loop Godot leaves every game to hand-roll out of

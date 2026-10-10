@@ -2,6 +2,9 @@
 
 
 #include "uve/scene/scene_serializer_uve.h"
+#include "uve/gameplay/gameplay_attributes_uve.h"
+#include "uve/gameplay/gameplay_tags_uve.h"
+#include "uve/gameplay/status_effects_uve.h"
 
 #include <algorithm>
 #include <cstddef>
@@ -212,6 +215,32 @@ namespace {
     driver.rootMotion = static_cast<AnimationRootMotionModeUVE>(json.value("rootMotion", std::uint8_t{0}));
     driver.rootMotionBone = json.value("rootMotionBone", std::string{});
     return driver;
+}
+
+[[nodiscard]] nlohmann::json ToJsonUVE(const GameplayAttributesComponentUVE& component) {
+    nlohmann::json attributes = nlohmann::json::array();
+    for (const GameplayAttributeUVE& attribute : component.attributes) {
+        attributes.push_back({{"id", attribute.id},
+                              {"current", attribute.current},
+                              {"maximum", attribute.maximum},
+                              {"regenPerSecond", attribute.regenPerSecond}});
+    }
+    return {{"attributes", std::move(attributes)}};
+}
+
+[[nodiscard]] nlohmann::json ToJsonUVE(const GameplayTagComponentUVE& component) {
+    return {{"tags", component.tags}};
+}
+
+[[nodiscard]] nlohmann::json ToJsonUVE(const StatusEffectsComponentUVE& component) {
+    nlohmann::json effects = nlohmann::json::array();
+    for (const StatusEffectUVE& effect : component.effects) {
+        effects.push_back({{"effectId", effect.effectId},
+                           {"attributeId", effect.attributeId},
+                           {"magnitudePerSecond", effect.magnitudePerSecond},
+                           {"remainingSeconds", effect.remainingSeconds}});
+    }
+    return {{"effects", std::move(effects)}};
 }
 
 [[nodiscard]] nlohmann::json ToJsonUVE(const AnimationGraphComponentUVE& component) {
@@ -1683,7 +1712,8 @@ MakeMetadataRegistrationUVE(const std::string& componentName,
         //   list), TwoBoneIK3D. Unlock: metadata-driven remap plumbed through Save/Load.
         // - Custom JSON shapes (nested objects, derived counts, dynamic lists): AnimationGraph,
         //   LodGroup3D (prefix-encoded level arrays with a derived levelCount), ObjectMetadata,
-        //   Script, Skeleton3D (nested bones array). Unlock: a list/struct codec decision per shape.
+        //   Script, Skeleton3D (nested bones array), GameplayAttributes, GameplayTags,
+        //   StatusEffects (dynamic gameplay lists). Unlock: a list/struct codec decision per shape.
         // - Legacy-compat readers (old keys migrate on load): Transform (euler degrees),
         //   AnimationSequencer (clip paths, playOnAwake-era keys). Unlock: a compat horizon.
         // - Reseed-on-load readers (runtime state is recomputed from authored values, never
@@ -1763,6 +1793,59 @@ MakeMetadataRegistrationUVE(const std::string& componentName,
                           }
                           return animation;
                       }, IsAnimationSequencerComponentValidUVE));
+        table.emplace("GameplayAttributesComponentUVE",
+                      MakeRegistrationUVE<GameplayAttributesComponentUVE>([](const nlohmann::json& json) {
+                          GameplayAttributesComponentUVE attributes;
+                          if (const auto list = json.find("attributes");
+                              list != json.end() && list->is_array()) {
+                              for (const nlohmann::json& entry : *list) {
+                                  GameplayAttributeUVE attribute;
+                                  attribute.id = entry.value("id", std::string{});
+                                  attribute.current = entry.value("current", 0.0F);
+                                  attribute.maximum = entry.value("maximum", 0.0F);
+                                  attribute.regenPerSecond = entry.value("regenPerSecond", 0.0F);
+                                  attributes.attributes.push_back(std::move(attribute));
+                              }
+                          }
+                          if (!IsGameplayAttributesComponentValidUVE(attributes)) {
+                              throw std::runtime_error("Invalid GameplayAttributesComponentUVE payload");
+                          }
+                          return attributes;
+                      }, IsGameplayAttributesComponentValidUVE));
+        table.emplace("GameplayTagComponentUVE",
+                      MakeRegistrationUVE<GameplayTagComponentUVE>([](const nlohmann::json& json) {
+                          GameplayTagComponentUVE tags;
+                          if (const auto list = json.find("tags"); list != json.end() && list->is_array()) {
+                              for (const nlohmann::json& entry : *list) {
+                                  if (entry.is_string()) {
+                                      tags.tags.push_back(entry.get<std::string>());
+                                  }
+                              }
+                          }
+                          if (!IsGameplayTagComponentValidUVE(tags)) {
+                              throw std::runtime_error("Invalid GameplayTagComponentUVE payload");
+                          }
+                          return tags;
+                      }, IsGameplayTagComponentValidUVE));
+        table.emplace("StatusEffectsComponentUVE",
+                      MakeRegistrationUVE<StatusEffectsComponentUVE>([](const nlohmann::json& json) {
+                          StatusEffectsComponentUVE effects;
+                          if (const auto list = json.find("effects");
+                              list != json.end() && list->is_array()) {
+                              for (const nlohmann::json& entry : *list) {
+                                  StatusEffectUVE effect;
+                                  effect.effectId = entry.value("effectId", std::string{});
+                                  effect.attributeId = entry.value("attributeId", std::string{});
+                                  effect.magnitudePerSecond = entry.value("magnitudePerSecond", 0.0F);
+                                  effect.remainingSeconds = entry.value("remainingSeconds", 0.0F);
+                                  effects.effects.push_back(std::move(effect));
+                              }
+                          }
+                          if (!IsStatusEffectsComponentValidUVE(effects)) {
+                              throw std::runtime_error("Invalid StatusEffectsComponentUVE payload");
+                          }
+                          return effects;
+                      }, IsStatusEffectsComponentValidUVE));
         table.emplace("AnimationDriverComponentUVE",
                       MakeRegistrationUVE<AnimationDriverComponentUVE>([](const nlohmann::json& json) {
                           const AnimationDriverComponentUVE driver = AnimationDriverFromJsonUVE(json);

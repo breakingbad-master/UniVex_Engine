@@ -72,7 +72,10 @@
 #include "uve/events/event_system_uve.h"
 #include "uve/input/gamepad_input_system_uve.h"
 #include "uve/input/input_system_uve.h"
+#include "uve/gameplay/attribute_events_uve.h"
+#include "uve/gameplay/gameplay_attributes_uve.h"
 #include "uve/gameplay/gameplay_input_uve.h"
+#include "uve/gameplay/status_effects_uve.h"
 #include "uve/gameplay/health_events_uve.h"
 #include "uve/gameplay/interact_requested_event_uve.h"
 #include "uve/input/mobile_gesture_system_uve.h"
@@ -1833,6 +1836,55 @@ void EngineCoreUVE::SyncNavigationUVE(const float fixedDeltaTimeSeconds) {
     }
 }
 
+void EngineCoreUVE::SyncGameplayAttributesUVE(const float deltaSeconds) {
+    for (const Scene::EntityUVE entity :
+         CollectFixedStepOrderUVE<Scene::GameplayAttributesComponentUVE>(*m_entityManager, *m_sceneGraph)) {
+        Scene::GameplayAttributesComponentUVE& attributes =
+            m_entityManager->GetComponentUVE<Scene::GameplayAttributesComponentUVE>(entity);
+        Scene::StatusEffectsComponentUVE* status = nullptr;
+        if (m_entityManager->HasComponentUVE<Scene::StatusEffectsComponentUVE>(entity)) {
+            status = &m_entityManager->GetComponentUVE<Scene::StatusEffectsComponentUVE>(entity);
+        }
+        const std::vector<Scene::GameplayAttributeTickResultUVE> results =
+            Scene::TickGameplayAttributesUVE(attributes, status, deltaSeconds);
+        Scene::HealthComponentUVE* health = nullptr;
+        if (m_entityManager->HasComponentUVE<Scene::HealthComponentUVE>(entity)) {
+            health = &m_entityManager->GetComponentUVE<Scene::HealthComponentUVE>(entity);
+        }
+        for (const Scene::GameplayAttributeTickResultUVE& result : results) {
+            if (result.attributeId == Scene::kReservedHealthAttributeIdUVE) {
+                // The tick computes health-bound effects but never applies them - it cannot see
+                // hit points. Damage lands here; restorative magnitudes have no health-heal path
+                // in G1 and are dropped.
+                if (health != nullptr && result.amount > 0.0F) {
+                    const Scene::HealthDamageResultUVE damage =
+                        Scene::ApplyHealthDamageUVE(*health, result.amount);
+                    if (damage.applied) {
+                        m_eventSystem->QueueEvent(Gameplay::HealthDamagedEventUVE{
+                            entity, Scene::kInvalidEntityUVE, Scene::kInvalidEntityUVE, damage.amount,
+                            damage.remaining});
+                        if (damage.depleted) {
+                            m_eventSystem->QueueEvent(Gameplay::HealthDepletedEventUVE{entity});
+                        }
+                    }
+                }
+                continue;
+            }
+            if (!result.applied) {
+                continue;
+            }
+            if (!result.effectId.empty()) {
+                m_eventSystem->QueueEvent(Gameplay::AttributeDamagedEventUVE{
+                    entity, result.attributeId, result.amount, result.remaining});
+            }
+            if (result.depleted) {
+                m_eventSystem->QueueEvent(
+                    Gameplay::AttributeDepletedEventUVE{entity, result.attributeId});
+            }
+        }
+    }
+}
+
 void EngineCoreUVE::SyncHitbox3DObjectsUVE() {
     // The scan itself is Physics::SyncHitboxes3DUVE(): the hurtbox snapshot, every fail-closed
     // gate, the symmetric layer/mask acceptance, the damage-channel equality, the exact
@@ -2623,6 +2675,7 @@ void EngineCoreUVE::Update() {
 
     if (m_simulationExecutionMode == SimulationExecutionModeUVE::Running) {
         SyncAnimationUVE(static_cast<float>(m_timer->GetDeltaTimeUVE()), /*physicsStep=*/false);
+        SyncGameplayAttributesUVE(static_cast<float>(m_timer->GetDeltaTimeUVE()));
     }
     // Bone attachments follow the pose that was just evaluated, and do it before the graph
     // propagates world transforms: a weapon on a hand is on the hand in the same frame the hand

@@ -504,14 +504,14 @@ script per node; see `Engine/Runtime/UVScript/README.md`.
 - [ ] A formal actor/pawn/controller-style gameplay object model above raw ECS entities +
   components (something a gameplay programmer authors against directly, not just entities
   and components)
-- [ ] An input-action-mapping layer (bind a logical action like "Jump" to any physical
+- [x] An input-action-mapping layer (bind a logical action like "Jump" to any physical
   input across keyboard/gamepad, with rebinding support), rather than scripts polling raw
   key codes directly
-- [ ] A gameplay tag / gameplay-attribute system (health, stamina, status effects) as a
+- [x] A gameplay tag / gameplay-attribute system (health, stamina, status effects) as a
   reusable framework rather than one-off components per game
 - [ ] A cinematic/sequencer tool for cutscenes (keyframing cameras, animation, audio, and
   gameplay events on a shared timeline)
-- [ ] A trigger/event layer for level scripting lighter than a full script
+- [x] A trigger/event layer for level scripting lighter than a full script
   (lightweight "on overlap, do X" level logic)
 
 ### 7.3 AI
