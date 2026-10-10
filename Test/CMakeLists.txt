@@ -111,6 +111,7 @@ add_executable(uve_core_tests
     Gameplay/status_effects_uve_tests.cpp
     Gameplay/cinematic_uve_tests.cpp
     AI/utility_ai_uve_tests.cpp
+    AI/perception_uve_tests.cpp
     Input/input_names_uve_tests.cpp
     Input/mobile_input_system_uve_tests.cpp
     Input/mobile_gesture_system_uve_tests.cpp

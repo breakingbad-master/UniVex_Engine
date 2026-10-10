@@ -520,7 +520,7 @@ script per node; see `Engine/Runtime/UVScript/README.md`.
 - [x] A* / pathfinding over the generated navmesh, with agent avoidance (FindNavPathUVE +
   string-pulling; NavAgentUVE steers with separation from neighbours)
 - [x] A behavior-tree or utility-AI framework for authoring NPC decision-making (utility-AI: considerations, response curves, hysteresis selection over blackboards)
-- [ ] A perception system (sight/hearing cones feeding AI decisions)
+- [x] A perception system (sight/hearing cones feeding AI decisions: raycast-occluded sight cones over watched tags, hearing radius against decaying noise emitters, sensed into blackboards)
 - [ ] Crowd simulation for large numbers of agents (long-term)
 
 ---

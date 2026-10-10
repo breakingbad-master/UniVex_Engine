@@ -54,6 +54,21 @@ bool IsBlackboardComponentValidUVE(const BlackboardComponentUVE& board) noexcept
             }
         }
     }
+    if (board.vectors.size() > kMaximumAiBlackboardVectorsUVE) {
+        return false;
+    }
+    for (std::size_t index = 0U; index < board.vectors.size(); ++index) {
+        const AiBlackboardVectorEntryUVE& entry = board.vectors[index];
+        if (!IsUsableIdUVE(entry.key, kMaximumAiInputIdBytesUVE) || !std::isfinite(entry.value.x) ||
+            !std::isfinite(entry.value.y) || !std::isfinite(entry.value.z)) {
+            return false;
+        }
+        for (std::size_t earlier = 0U; earlier < index; ++earlier) {
+            if (board.vectors[earlier].key == entry.key) {
+                return false;
+            }
+        }
+    }
     return true;
 }
 
@@ -115,6 +130,44 @@ bool RemoveBlackboardValueUVE(BlackboardComponentUVE& board, const std::string_v
     for (auto entry = board.entries.begin(); entry != board.entries.end(); ++entry) {
         if (entry->key == key) {
             board.entries.erase(entry);
+            return true;
+        }
+    }
+    return false;
+}
+
+Math::Vector3UVE GetBlackboardVectorUVE(const BlackboardComponentUVE& board,
+                                        const std::string_view key) noexcept {
+    for (const AiBlackboardVectorEntryUVE& entry : board.vectors) {
+        if (entry.key == key) {
+            return entry.value;
+        }
+    }
+    return Math::Vector3UVE{};
+}
+
+bool SetBlackboardVectorUVE(BlackboardComponentUVE& board, std::string key, const Math::Vector3UVE value) {
+    if (!IsUsableIdUVE(key, kMaximumAiInputIdBytesUVE) || !std::isfinite(value.x) ||
+        !std::isfinite(value.y) || !std::isfinite(value.z)) {
+        return false;
+    }
+    for (AiBlackboardVectorEntryUVE& entry : board.vectors) {
+        if (entry.key == key) {
+            entry.value = value;
+            return true;
+        }
+    }
+    if (board.vectors.size() >= kMaximumAiBlackboardVectorsUVE) {
+        return false;
+    }
+    board.vectors.push_back(AiBlackboardVectorEntryUVE{std::move(key), value});
+    return true;
+}
+
+bool RemoveBlackboardVectorUVE(BlackboardComponentUVE& board, const std::string_view key) {
+    for (auto entry = board.vectors.begin(); entry != board.vectors.end(); ++entry) {
+        if (entry->key == key) {
+            board.vectors.erase(entry);
             return true;
         }
     }

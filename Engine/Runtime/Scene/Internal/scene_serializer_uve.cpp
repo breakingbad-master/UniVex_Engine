@@ -2,6 +2,7 @@
 
 
 #include "uve/scene/scene_serializer_uve.h"
+#include "uve/ai/perception_uve.h"
 #include "uve/ai/utility_ai_uve.h"
 #include "uve/gameplay/cinematic_uve.h"
 #include "uve/gameplay/gameplay_attributes_uve.h"
@@ -245,12 +246,28 @@ namespace {
     return {{"effects", std::move(effects)}};
 }
 
+[[nodiscard]] nlohmann::json ToJsonUVE(const PerceptionComponentUVE& component) {
+    return {{"watchedTag", component.watchedTag},
+            {"sightRangeMetres", component.sightRangeMetres},
+            {"sightFieldOfViewDegrees", component.sightFieldOfViewDegrees},
+            {"hearingRadiusMetres", component.hearingRadiusMetres},
+            {"requiresLineOfSight", component.requiresLineOfSight}};
+}
+
+[[nodiscard]] nlohmann::json ToJsonUVE(const NoiseEmitterComponentUVE& component) {
+    return {{"loudness", component.loudness}, {"decayPerSecond", component.decayPerSecond}};
+}
+
 [[nodiscard]] nlohmann::json ToJsonUVE(const BlackboardComponentUVE& component) {
     nlohmann::json entries = nlohmann::json::array();
     for (const AiBlackboardEntryUVE& entry : component.entries) {
         entries.push_back({{"key", entry.key}, {"value", entry.value}});
     }
-    return {{"entries", std::move(entries)}};
+    nlohmann::json vectors = nlohmann::json::array();
+    for (const AiBlackboardVectorEntryUVE& entry : component.vectors) {
+        vectors.push_back({{"key", entry.key}, {"value", ToJsonUVE(entry.value)}});
+    }
+    return {{"entries", std::move(entries)}, {"vectors", std::move(vectors)}};
 }
 
 [[nodiscard]] nlohmann::json ToJsonUVE(const AiBrainComponentUVE& component) {
@@ -1873,8 +1890,9 @@ MakeMetadataRegistrationUVE(const std::string& componentName,
         // - Custom JSON shapes (nested objects, derived counts, dynamic lists): AnimationGraph,
         //   LodGroup3D (prefix-encoded level arrays with a derived levelCount), ObjectMetadata,
         //   Script, Skeleton3D (nested bones array), GameplayAttributes, GameplayTags,
-        //   StatusEffects (dynamic gameplay lists), AiBrain, Blackboard (dynamic AI lists). Unlock:
-//   a list/struct codec decision per shape.
+        //   StatusEffects (dynamic gameplay lists), AiBrain, Blackboard (dynamic AI lists),
+//   Perception, NoiseEmitter (flat AI structs beside them). Unlock: a list/struct codec
+//   decision per shape.
         // - Legacy-compat readers (old keys migrate on load): Transform (euler degrees),
         //   AnimationSequencer (clip paths, playOnAwake-era keys). Unlock: a compat horizon.
         // - Reseed-on-load readers (runtime state is recomputed from authored values, never
@@ -2031,6 +2049,15 @@ MakeMetadataRegistrationUVE(const std::string& componentName,
                                   board.entries.push_back(std::move(item));
                               }
                           }
+                          if (const auto vectors = json.find("vectors");
+                              vectors != json.end() && vectors->is_array()) {
+                              for (const nlohmann::json& entry : *vectors) {
+                                  AiBlackboardVectorEntryUVE item;
+                                  item.key = entry.value("key", std::string{});
+                                  item.value = Vector3FromJsonUVE(entry.at("value"));
+                                  board.vectors.push_back(std::move(item));
+                              }
+                          }
                           if (!IsBlackboardComponentValidUVE(board)) {
                               throw std::runtime_error("Invalid BlackboardComponentUVE payload");
                           }
@@ -2067,6 +2094,30 @@ MakeMetadataRegistrationUVE(const std::string& componentName,
                           }
                           return brain;
                       }, IsAiBrainComponentValidUVE));
+        table.emplace("PerceptionComponentUVE",
+                      MakeRegistrationUVE<PerceptionComponentUVE>([](const nlohmann::json& json) {
+                          PerceptionComponentUVE sensor;
+                          sensor.watchedTag = json.value("watchedTag", std::string{});
+                          sensor.sightRangeMetres = json.value("sightRangeMetres", 20.0F);
+                          sensor.sightFieldOfViewDegrees =
+                              json.value("sightFieldOfViewDegrees", 90.0F);
+                          sensor.hearingRadiusMetres = json.value("hearingRadiusMetres", 15.0F);
+                          sensor.requiresLineOfSight = json.value("requiresLineOfSight", true);
+                          if (!IsPerceptionComponentValidUVE(sensor)) {
+                              throw std::runtime_error("Invalid PerceptionComponentUVE payload");
+                          }
+                          return sensor;
+                      }, IsPerceptionComponentValidUVE));
+        table.emplace("NoiseEmitterComponentUVE",
+                      MakeRegistrationUVE<NoiseEmitterComponentUVE>([](const nlohmann::json& json) {
+                          NoiseEmitterComponentUVE emitter;
+                          emitter.loudness = json.value("loudness", 1.0F);
+                          emitter.decayPerSecond = json.value("decayPerSecond", 0.0F);
+                          if (!IsNoiseEmitterComponentValidUVE(emitter)) {
+                              throw std::runtime_error("Invalid NoiseEmitterComponentUVE payload");
+                          }
+                          return emitter;
+                      }, IsNoiseEmitterComponentValidUVE));
         table.emplace("AnimationDriverComponentUVE",
                       MakeRegistrationUVE<AnimationDriverComponentUVE>([](const nlohmann::json& json) {
                           const AnimationDriverComponentUVE driver = AnimationDriverFromJsonUVE(json);

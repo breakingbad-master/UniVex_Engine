@@ -73,8 +73,10 @@
 #include "uve/input/gamepad_input_system_uve.h"
 #include "uve/input/input_system_uve.h"
 #include "uve/ai/ai_events_uve.h"
+#include "uve/ai/perception_uve.h"
 #include "uve/ai/utility_ai_uve.h"
 #include "uve/gameplay/attribute_events_uve.h"
+#include "uve/gameplay/gameplay_tags_uve.h"
 #include "uve/gameplay/cinematic_events_uve.h"
 #include "uve/gameplay/cinematic_uve.h"
 #include "uve/gameplay/gameplay_attributes_uve.h"
@@ -85,6 +87,8 @@
 #include "uve/input/mobile_gesture_system_uve.h"
 #include "uve/input/mobile_input_system_uve.h"
 #include "uve/physics/area_3d_runtime_uve.h"
+#include "uve/physics/i_raycast_system_uve.h"
+#include "uve/physics/raycast_query_uve.h"
 #include "uve/physics/area_overlap_events_uve.h"
 #include "uve/math/matrix4x4_uve.h"
 #include "uve/math/quaternion_uve.h"
@@ -1840,6 +1844,78 @@ void EngineCoreUVE::SyncNavigationUVE(const float fixedDeltaTimeSeconds) {
     }
 }
 
+void EngineCoreUVE::SyncPerceptionUVE(const float deltaSeconds) {
+    for (const Scene::EntityUVE entity :
+         CollectFixedStepOrderUVE<Scene::NoiseEmitterComponentUVE>(*m_entityManager, *m_sceneGraph)) {
+        Scene::DecayNoiseEmitterUVE(
+            m_entityManager->GetComponentUVE<Scene::NoiseEmitterComponentUVE>(entity), deltaSeconds);
+    }
+    for (const Scene::EntityUVE entity :
+         CollectFixedStepOrderUVE<Scene::PerceptionComponentUVE>(*m_entityManager, *m_sceneGraph)) {
+        if (!m_entityManager->HasComponentUVE<Scene::BlackboardComponentUVE>(entity) ||
+            !m_entityManager->HasComponentUVE<Scene::WorldTransformComponentUVE>(entity)) {
+            continue; // nowhere to record, or nowhere to stand: sensing needs both
+        }
+        const Scene::PerceptionComponentUVE& sensor =
+            m_entityManager->GetComponentUVE<Scene::PerceptionComponentUVE>(entity);
+        const Scene::WorldTransformComponentUVE& sensorWorld =
+            m_entityManager->GetComponentUVE<Scene::WorldTransformComponentUVE>(entity);
+        std::vector<Scene::SightTargetUVE> targets;
+        for (const Scene::EntityUVE tagged :
+             CollectFixedStepOrderUVE<Scene::GameplayTagComponentUVE>(*m_entityManager, *m_sceneGraph)) {
+            if (tagged == entity ||
+                !Scene::HasGameplayTagUVE(
+                    m_entityManager->GetComponentUVE<Scene::GameplayTagComponentUVE>(tagged),
+                    sensor.watchedTag) ||
+                !m_entityManager->HasComponentUVE<Scene::WorldTransformComponentUVE>(tagged)) {
+                continue;
+            }
+            targets.push_back(Scene::SightTargetUVE{
+                tagged, m_entityManager->GetComponentUVE<Scene::WorldTransformComponentUVE>(tagged)
+                            .worldPosition});
+        }
+        std::vector<Scene::HeardNoiseUVE> noises;
+        for (const Scene::EntityUVE emitter :
+             CollectFixedStepOrderUVE<Scene::NoiseEmitterComponentUVE>(*m_entityManager, *m_sceneGraph)) {
+            if (!m_entityManager->HasComponentUVE<Scene::WorldTransformComponentUVE>(emitter)) {
+                continue;
+            }
+            const float loudness =
+                m_entityManager->GetComponentUVE<Scene::NoiseEmitterComponentUVE>(emitter).loudness;
+            if (loudness <= 0.0F) {
+                continue;
+            }
+            noises.push_back(Scene::HeardNoiseUVE{
+                m_entityManager->GetComponentUVE<Scene::WorldTransformComponentUVE>(emitter)
+                    .worldPosition,
+                loudness});
+        }
+        const Math::Vector3UVE forward = Math::RotateVectorUVE(
+            sensorWorld.worldRotation, Math::Vector3UVE{0.0F, 0.0F, -1.0F});
+        const Scene::SightOcclusionQueryUVE occluded =
+            [this, entity](const Math::Vector3UVE& from, const Math::Vector3UVE& to,
+                           const Scene::EntityUVE target) {
+                const Math::Vector3UVE delta = to - from;
+                const float distance =
+                    std::sqrt(delta.x * delta.x + delta.y * delta.y + delta.z * delta.z);
+                Physics::RaycastQueryUVE query;
+                query.ray.origin = from;
+                query.ray.direction = delta * (1.0F / distance);
+                query.maxDistance = distance;
+                query.ignoreEntity = entity;
+                query.excludedEntities = std::span<const Scene::EntityUVE>(&target, 1);
+                return m_raycastSystem->RaycastUVE(*m_entityManager, query).has_value();
+            };
+        const Scene::SightResultUVE sight = Scene::SenseSightUVE(
+            sensorWorld.worldPosition, forward, sensor, targets, occluded);
+        const Scene::HearingResultUVE hearing = Scene::SenseHearingUVE(
+            sensorWorld.worldPosition, sensor.hearingRadiusMetres, noises);
+        Scene::WritePerceptionResultsUVE(
+            m_entityManager->GetComponentUVE<Scene::BlackboardComponentUVE>(entity),
+            sensor.watchedTag, sight, hearing);
+    }
+}
+
 void EngineCoreUVE::SyncAiBrainsUVE(const float) {
     const Scene::BlackboardComponentUVE empty;
     for (const Scene::EntityUVE entity :
@@ -2800,6 +2876,7 @@ void EngineCoreUVE::Update() {
         SyncGameplayAttributesUVE(static_cast<float>(m_timer->GetDeltaTimeUVE()));
         SyncCinematicUVE(static_cast<float>(m_timer->GetDeltaTimeUVE()));
         SyncAiBrainsUVE(static_cast<float>(m_timer->GetDeltaTimeUVE()));
+        SyncPerceptionUVE(static_cast<float>(m_timer->GetDeltaTimeUVE()));
     }
     // Bone attachments follow the pose that was just evaluated, and do it before the graph
     // propagates world transforms: a weapon on a hand is on the hand in the same frame the hand

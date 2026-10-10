@@ -2,6 +2,8 @@
 
 #pragma once
 
+#include "uve/math/vector3_uve.h"
+
 #include <cstddef>
 #include <cstdint>
 #include <string>
@@ -29,6 +31,7 @@ namespace UVE::Scene {
 inline constexpr std::size_t kMaximumAiActionsUVE = 32U;
 inline constexpr std::size_t kMaximumAiConsiderationsUVE = 8U;
 inline constexpr std::size_t kMaximumAiBlackboardEntriesUVE = 64U;
+inline constexpr std::size_t kMaximumAiBlackboardVectorsUVE = 32U;
 inline constexpr std::size_t kMaximumAiActionIdBytesUVE = 64U;
 inline constexpr std::size_t kMaximumAiInputIdBytesUVE = 64U;
 
@@ -51,9 +54,19 @@ struct AiBlackboardEntryUVE final {
     [[nodiscard]] bool operator==(const AiBlackboardEntryUVE&) const = default;
 };
 
-/// Working memory: named floats, first match wins on read, duplicates invalid.
+struct AiBlackboardVectorEntryUVE final {
+    std::string key;
+    Math::Vector3UVE value{};
+
+    [[nodiscard]] bool operator==(const AiBlackboardVectorEntryUVE&) const = default;
+};
+
+/// Working memory: named floats plus named positions, first match wins on read within each list,
+/// duplicates invalid. Floats score brains; vectors steer bodies (a seek target is a position, not
+/// a score). The two lists are separate namespaces - a float and a vector may share a key.
 struct BlackboardComponentUVE final {
     std::vector<AiBlackboardEntryUVE> entries;
+    std::vector<AiBlackboardVectorEntryUVE> vectors;
 
     [[nodiscard]] bool operator==(const BlackboardComponentUVE&) const = default;
 };
@@ -101,7 +114,7 @@ struct AiActionSelectionUVE final {
 /// `curve` applied to `input`, sanitized to 0..1 first (non-finite reads as zero).
 [[nodiscard]] float EvaluateAiResponseCurveUVE(AiResponseCurveUVE curve, float input) noexcept;
 
-/// Entries within cap, keys usable and unique, values finite.
+/// Entries and vectors within cap, keys usable and unique within each list, values finite.
 [[nodiscard]] bool IsBlackboardComponentValidUVE(const BlackboardComponentUVE& board) noexcept;
 /// Actions within cap with usable unique ids, base scores in 0..1, considerations within cap with
 /// usable input ids, known curves and finite non-negative weights, hysteresis finite and
@@ -118,6 +131,19 @@ struct AiActionSelectionUVE final {
 
 /// Removes the first entry for `key`. False when the board has none.
 [[nodiscard]] bool RemoveBlackboardValueUVE(BlackboardComponentUVE& board, std::string_view key);
+
+/// The first vector for `key`, or zero when the board has none.
+[[nodiscard]] Math::Vector3UVE GetBlackboardVectorUVE(const BlackboardComponentUVE& board,
+                                                      std::string_view key) noexcept;
+
+/// Sets the vector for `key`, replacing or appending like the float setter. False for an empty or
+/// oversized key, a non-finite vector, or a full vector list - though updating an existing key
+/// always succeeds, full or not.
+[[nodiscard]] bool SetBlackboardVectorUVE(BlackboardComponentUVE& board, std::string key,
+                                          Math::Vector3UVE value);
+
+/// Removes the first vector for `key`. False when the board has none.
+[[nodiscard]] bool RemoveBlackboardVectorUVE(BlackboardComponentUVE& board, std::string_view key);
 
 /// Base score times every consideration's curved score raised to its weight. Never NaN.
 [[nodiscard]] float ScoreAiActionUVE(const AiActionUVE& action, const BlackboardComponentUVE& board) noexcept;

@@ -619,6 +619,10 @@ private:
     /// Evaluates every AI brain against its blackboard (a missing blackboard reads as empty, so
     /// board-less priority brains work) and queues AiActionSelectedUVE when the selection changes.
     void SyncAiBrainsUVE(float);
+    /// Decays noise emitters, then senses for every perception component with a blackboard and a
+    /// world transform: watched-tagged entities resolve through sight (range, cone, raycast line of
+    /// sight), emitters through hearing, and both write the sensor's blackboard.
+    void SyncPerceptionUVE(float deltaSeconds);
 
     /// The interaction scan, new wiring for previously unconsumed authored data (the
     /// Unreal-Lyra-style interactor/focus loop Godot leaves every game to hand-roll out of

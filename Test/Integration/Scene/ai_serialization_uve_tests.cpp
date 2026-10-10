@@ -5,6 +5,7 @@
 #include <optional>
 #include <vector>
 
+#include "uve/ai/perception_uve.h"
 #include "uve/ai/utility_ai_uve.h"
 #include "uve/entity/entity_manager_uve.h"
 #include "uve/events/event_system_uve.h"
@@ -52,6 +53,61 @@ TEST_F(AiSerializationUVETest, Brain_RoundTripResetsSelectionState) {
     EXPECT_EQ(revived.actions, brain.actions);
     EXPECT_TRUE(revived.currentAction.empty());
     EXPECT_FLOAT_EQ(revived.currentScore, 0.0F);
+}
+
+TEST_F(AiSerializationUVETest, Perception_RoundTripThroughCaptureRestore) {
+    const EntityUVE source = entityManager.CreateEntityUVE();
+    PerceptionComponentUVE sensor;
+    sensor.watchedTag = "enemy";
+    sensor.sightRangeMetres = 30.0F;
+    sensor.sightFieldOfViewDegrees = 120.0F;
+    sensor.hearingRadiusMetres = 12.0F;
+    sensor.requiresLineOfSight = false;
+    entityManager.AddComponentUVE<PerceptionComponentUVE>(source, sensor);
+
+    const std::optional<SceneSnapshotUVE> snapshot =
+        serializer.CaptureUVE(entityManager, {source}, SceneAssetTypeUVE::Scene);
+    ASSERT_TRUE(snapshot.has_value());
+    const std::vector<EntityUVE> restored = serializer.RestoreUVE(entityManager, *snapshot);
+    ASSERT_EQ(restored.size(), 1U);
+    const PerceptionComponentUVE& revived =
+        entityManager.GetComponentUVE<PerceptionComponentUVE>(restored.front());
+    EXPECT_EQ(revived, sensor);
+}
+
+TEST_F(AiSerializationUVETest, NoiseEmitter_RoundTripThroughCaptureRestore) {
+    const EntityUVE source = entityManager.CreateEntityUVE();
+    NoiseEmitterComponentUVE emitter;
+    emitter.loudness = 0.6F;
+    emitter.decayPerSecond = 0.2F;
+    entityManager.AddComponentUVE<NoiseEmitterComponentUVE>(source, emitter);
+
+    const std::optional<SceneSnapshotUVE> snapshot =
+        serializer.CaptureUVE(entityManager, {source}, SceneAssetTypeUVE::Scene);
+    ASSERT_TRUE(snapshot.has_value());
+    const std::vector<EntityUVE> restored = serializer.RestoreUVE(entityManager, *snapshot);
+    ASSERT_EQ(restored.size(), 1U);
+    const NoiseEmitterComponentUVE& revived =
+        entityManager.GetComponentUVE<NoiseEmitterComponentUVE>(restored.front());
+    EXPECT_EQ(revived, emitter);
+}
+
+TEST_F(AiSerializationUVETest, BlackboardWithVectors_RoundTripThroughCaptureRestore) {
+    const EntityUVE source = entityManager.CreateEntityUVE();
+    BlackboardComponentUVE board;
+    ASSERT_TRUE(SetBlackboardValueUVE(board, "sight.enemy.visible", 1.0F));
+    ASSERT_TRUE(
+        SetBlackboardVectorUVE(board, "sight.enemy.position", Math::Vector3UVE{1.0F, 2.0F, 3.0F}));
+    entityManager.AddComponentUVE<BlackboardComponentUVE>(source, board);
+
+    const std::optional<SceneSnapshotUVE> snapshot =
+        serializer.CaptureUVE(entityManager, {source}, SceneAssetTypeUVE::Scene);
+    ASSERT_TRUE(snapshot.has_value());
+    const std::vector<EntityUVE> restored = serializer.RestoreUVE(entityManager, *snapshot);
+    ASSERT_EQ(restored.size(), 1U);
+    const BlackboardComponentUVE& revived =
+        entityManager.GetComponentUVE<BlackboardComponentUVE>(restored.front());
+    EXPECT_EQ(revived, board);
 }
 
 TEST_F(AiSerializationUVETest, Blackboard_RoundTripThroughCaptureRestore) {

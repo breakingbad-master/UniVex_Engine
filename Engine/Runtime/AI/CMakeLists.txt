@@ -7,6 +7,7 @@
 
 add_library(uve_ai STATIC
     Internal/utility_ai_uve.cpp
+    Internal/perception_uve.cpp
 )
 target_include_directories(uve_ai PUBLIC Expose)
 target_link_libraries(uve_ai PUBLIC uve_component)
