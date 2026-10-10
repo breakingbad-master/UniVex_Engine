@@ -448,7 +448,7 @@ void EditorUVE::DrawAnimationPickerUVE(const Scene::EntityUVE player, const Scen
         ImGui::OpenPopup("##tl-anim-picker");
     }
     if (ImGui::IsItemHovered()) {
-        ImGui::SetTooltip("This player's animations: switch, add, import, link, export, rename, duplicate, remove");
+        ImGui::SetTooltip("This player's animations: switch, add, import, quick import, link, export, rename, duplicate, remove");
     }
     // Opens upwards, over the tall part of the window, never over the button or down into the
     // Timeline's little space at the bottom.
@@ -551,15 +551,71 @@ void EditorUVE::DrawAnimationPickerUVE(const Scene::EntityUVE player, const Scen
         if (ImGui::Selectable("+  New Animation")) {
             createNew = true;
         }
-        // Any clip in Content: the floating picker finds it, however deep it lives.
+        // Any clip in Content: the file dialog finds it however deep it lives - or take it
+        // straight from the quick list.
         bool addFromProject = false;
-        if (ImGui::Selectable("+  Add from Project...")) {
-            addFromProject = true;
+        std::optional<std::filesystem::path> quickAddPath;
+        if (ImGui::BeginMenu("+  Add from Project")) {
+            if (ImGui::MenuItem("Import...")) {
+                addFromProject = true;
+            }
+            if (ImGui::BeginMenu("Quick Import")) {
+                int shown = 0;
+                for (const Asset::ProjectFileEntryUVE& entry : project.entries) {
+                    if (entry.kind != Asset::ProjectFileEntryKindUVE::File ||
+                        entry.relativePath.extension() != ".uvanim") {
+                        continue;
+                    }
+                    const bool listed = entry.registeredAssetGuid.has_value() &&
+                                        std::ranges::find(list, *entry.registeredAssetGuid) != list.end();
+                    if (listed || !matches(entry.relativePath.stem().string())) {
+                        continue;
+                    }
+                    ++shown;
+                    const std::string folder = entry.relativePath.parent_path().string();
+                    if (ImGui::MenuItem(entry.relativePath.stem().string().c_str(),
+                                        folder.empty() ? "Content" : folder.c_str())) {
+                        quickAddPath = project.contentRoot / entry.relativePath;
+                    }
+                }
+                if (shown == 0) {
+                    ImGui::TextDisabled("Every clip in the project is already here.");
+                }
+                ImGui::EndMenu();
+            }
+            ImGui::EndMenu();
         }
-        // A library from anywhere in Content: importing one appends the clips the player lacks.
+        // A library from anywhere in Content: importing one appends the clips the player lacks -
+        // through the file dialog, or straight from a quick list.
         bool importLibrary = false;
-        if (ImGui::Selectable("+  Import Library...")) {
-            importLibrary = true;
+        std::optional<std::filesystem::path> quickImportPath;
+        if (ImGui::BeginMenu("+  Import Library")) {
+            if (ImGui::MenuItem("Import...")) {
+                importLibrary = true;
+            }
+            if (ImGui::BeginMenu("Quick Import")) {
+                int shown = 0;
+                for (const Asset::ProjectFileEntryUVE& entry : project.entries) {
+                    if (entry.kind != Asset::ProjectFileEntryKindUVE::File ||
+                        entry.relativePath.extension() != ".uvanimlib") {
+                        continue;
+                    }
+                    if (!matches(entry.relativePath.stem().string())) {
+                        continue;
+                    }
+                    ++shown;
+                    const std::string folder = entry.relativePath.parent_path().string();
+                    if (ImGui::MenuItem(entry.relativePath.stem().string().c_str(),
+                                        folder.empty() ? "Content" : folder.c_str())) {
+                        quickImportPath = project.contentRoot / entry.relativePath;
+                    }
+                }
+                if (shown == 0) {
+                    ImGui::TextDisabled("No animation libraries in the project yet.");
+                }
+                ImGui::EndMenu();
+            }
+            ImGui::EndMenu();
         }
         bool linkLibrary = false;
         bool unlinkRequested = false;
@@ -593,6 +649,9 @@ void EditorUVE::DrawAnimationPickerUVE(const Scene::EntityUVE player, const Scen
             }));
             ImGui::CloseCurrentPopup();
         }
+        if (quickAddPath.has_value()) {
+            static_cast<void>(AddClipToAnimationSequencerUVE(player, *quickAddPath));
+        }
         if (addFromProject) {
             FilePickerRequestUVE request;
             request.mode = FilePickerModeUVE::Open;
@@ -603,6 +662,9 @@ void EditorUVE::DrawAnimationPickerUVE(const Scene::EntityUVE player, const Scen
                 static_cast<void>(AddClipToAnimationSequencerUVE(player, path));
             };
             OpenFilePickerUVE(std::move(request));
+        }
+        if (quickImportPath.has_value()) {
+            static_cast<void>(ImportAnimationLibraryIntoSequencerUVE(player, *quickImportPath));
         }
         if (importLibrary) {
             FilePickerRequestUVE request;

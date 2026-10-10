@@ -107,6 +107,10 @@ TEST(ContentCatalogueUVETest, ContentFileNamesNeverCollide) {
     std::ofstream(root / "Hero.uventity") << "x";
     std::ofstream(root / "Hero 2.uventity") << "x";
     EXPECT_EQ(EditorUVE::MakeUniqueContentPathUVE(root, "Hero", ".uventity"), root / "Hero 3.uventity");
+    // Folders take the same helper with an empty extension: the picker's + Folder.
+    EXPECT_EQ(EditorUVE::MakeUniqueContentPathUVE(root, "New Folder", ""), root / "New Folder");
+    std::filesystem::create_directories(root / "New Folder");
+    EXPECT_EQ(EditorUVE::MakeUniqueContentPathUVE(root, "New Folder", ""), root / "New Folder 2");
 
     const auto renamed = EditorUVE::RenameContentFileUVE(root / "Hero.uventity", "Player");
     ASSERT_TRUE(renamed.has_value());

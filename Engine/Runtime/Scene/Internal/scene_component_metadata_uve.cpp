@@ -1764,7 +1764,7 @@ void DeclareMediaAndUIUVE(std::vector<TypeMetadataEntryUVE>& entries) {
             {
                 WithCustomDrawerUVE(DeclareUVE<&AudioSourceComponentUVE::audioAssetPath>("audioAssetPath", "Clip",
                                                                                            kPropertyTypeStringUVE),
-                                      "file:uvaudio"),
+                                      "file:uvaudio,wav"),
                 DeclareUVE<&AudioSourceComponentUVE::mixerGroup>("mixerGroup", "Mixer Group",
                                                                  kPropertyTypeStringUVE),
                 WithRangeUVE(DeclareUVE<&AudioSourceComponentUVE::volume>("volume", "Volume",

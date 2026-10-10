@@ -178,6 +178,22 @@ void EditorUVE::DrawFilePickerUVE() {
 
     ImGui::Spacing();
     ImGui::TextDisabled("FOLDERS");
+    if (saveMode) {
+        ImGui::SameLine();
+        if (ImGui::SmallButton("+ Folder")) {
+            const std::filesystem::path created =
+                MakeUniqueContentPathUVE(project.contentRoot / picker.directory, "New Folder", "");
+            std::error_code error;
+            std::filesystem::create_directories(created, error);
+            if (error) {
+                picker.status = "Could not create a folder here.";
+                picker.statusIsError = true;
+            } else {
+                picker.status = "Created " + created.filename().generic_string() + ".";
+                picker.statusIsError = false;
+            }
+        }
+    }
     if (listing.folders.empty()) {
         ImGui::TextDisabled("  No folders here.");
     }
