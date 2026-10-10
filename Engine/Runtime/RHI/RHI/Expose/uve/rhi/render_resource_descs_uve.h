@@ -484,13 +484,15 @@ struct VertexAttributeUVE {
     return true;
 }
 
-/// How a pipeline's bound vertex/index buffers are assembled into primitives. Only `Triangles`
-/// exists today — lines/points aren't needed by anything built so far.
-enum class PrimitiveTopologyUVE : std::uint8_t { Triangles };
+/// How a pipeline's bound vertex/index buffers are assembled into primitives. `Triangles` is
+/// the mesh default; `Lines` assembles consecutive vertex/index pairs as 1px line segments for
+/// the debug renderer (Tier 2.8) — there is no strip/fan mode and no line-width state.
+enum class PrimitiveTopologyUVE : std::uint8_t { Triangles, Lines };
 
 [[nodiscard]] constexpr bool IsPrimitiveTopologyValidUVE(const PrimitiveTopologyUVE topology) noexcept {
     switch (topology) {
         case PrimitiveTopologyUVE::Triangles:
+        case PrimitiveTopologyUVE::Lines:
             return true;
     }
     return false;

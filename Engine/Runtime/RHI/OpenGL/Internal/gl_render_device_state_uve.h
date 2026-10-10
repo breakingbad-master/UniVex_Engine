@@ -166,6 +166,11 @@ struct GlDeviceStateUVE {
         float depthBiasSlopeFactor = 0.0F;
         DepthCompareUVE depthCompare = DepthCompareUVE::Less;
 
+        /// Tier 2.8: the draw mode, read by Draw*UVE at record time — GL takes topology as a
+        /// draw-call parameter rather than pipeline state, so the record carries what Vulkan
+        /// bakes into the pipeline object.
+        PrimitiveTopologyUVE topology = PrimitiveTopologyUVE::Triangles;
+
         /// M5a: true for programs linked from CreateComputePipelineUVE(). Such records carry no
         /// VAO/vertex layout and no render state — GlCommandBufferUVE skips the graphics-side
         /// setup for them and DispatchUVE() requires one to be the currently bound pipeline.

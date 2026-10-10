@@ -548,6 +548,27 @@ TEST(NullRenderDeviceUVETest, CreatePipelineUVE_UnknownBlendMode_ReturnsInvalidB
     EXPECT_EQ(validPipeline.value, 1U);
 }
 
+TEST(NullRenderDeviceUVETest, CreatePipelineUVE_LinesTopology_IsAccepted) {
+    NullRenderDeviceUVE device;
+    const ShaderHandleUVE vertexShader = device.CreateShaderUVE(ShaderDescUVE{ShaderStageUVE::Vertex, "vs"});
+    const ShaderHandleUVE fragmentShader = device.CreateShaderUVE(ShaderDescUVE{ShaderStageUVE::Fragment, "fs"});
+    PipelineDescUVE desc;
+    desc.vertexShader = vertexShader;
+    desc.fragmentShader = fragmentShader;
+    desc.topology = PrimitiveTopologyUVE::Lines;
+
+    const PipelineHandleUVE pipeline = device.CreatePipelineUVE(desc);
+    EXPECT_NE(pipeline, kInvalidPipelineHandleUVE);
+
+    EXPECT_TRUE(IsPrimitiveTopologyValidUVE(PrimitiveTopologyUVE::Triangles));
+    EXPECT_TRUE(IsPrimitiveTopologyValidUVE(PrimitiveTopologyUVE::Lines));
+    EXPECT_FALSE(IsPrimitiveTopologyValidUVE(static_cast<PrimitiveTopologyUVE>(0xFFU)));
+
+    PipelineDescUVE invalidDesc = desc;
+    invalidDesc.topology = static_cast<PrimitiveTopologyUVE>(0xFFU);
+    EXPECT_EQ(device.CreatePipelineUVE(invalidDesc), kInvalidPipelineHandleUVE);
+}
+
 TEST(NullRenderDeviceUVETest, CreatePipelineFromBinaryUVE_UnknownBlendMode_ReturnsInvalidBeforePublication) {
     NullRenderDeviceUVE device;
     const std::array<std::byte, 4> binary{};

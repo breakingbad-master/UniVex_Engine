@@ -3530,7 +3530,9 @@ PipelineHandleUVE VulkanRenderDeviceUVE::CreatePipelineUVE(const PipelineDescUVE
 
     VkPipelineInputAssemblyStateCreateInfo assembly{};
     assembly.sType = VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO;
-    assembly.topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST; // the only RHI topology today
+    // desc.topology passed IsPrimitiveTopologyValidUVE above, so only the two RHI modes arrive.
+    assembly.topology = desc.topology == PrimitiveTopologyUVE::Lines ? VK_PRIMITIVE_TOPOLOGY_LINE_LIST
+                                                                     : VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
     assembly.primitiveRestartEnable = VK_FALSE;
 
     // Viewport/scissor are DYNAMIC (set once per frame inside PresentUVE): the swapchain

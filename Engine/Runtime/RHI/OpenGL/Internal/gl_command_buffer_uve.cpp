@@ -47,6 +47,16 @@ namespace {
     return true;
 }
 
+[[nodiscard]] GLenum ToGlDrawModeUVE(PrimitiveTopologyUVE topology) noexcept {
+    switch (topology) {
+        case PrimitiveTopologyUVE::Triangles:
+            return GL_TRIANGLES;
+        case PrimitiveTopologyUVE::Lines:
+            return GL_LINES;
+    }
+    return GL_TRIANGLES;
+}
+
 [[nodiscard]] GLint VertexAttributeComponentCountUVE(VertexAttributeFormatUVE format) noexcept {
     switch (format) {
         case VertexAttributeFormatUVE::Float2:
@@ -1016,7 +1026,8 @@ void GlCommandBufferUVE::DrawIndexedUVE(std::uint32_t indexCount, std::uint32_t 
     if (!RequireInsideRenderPassUVE(m_insideRenderPass, "DrawIndexedUVE")) {
         return;
     }
-    if (FindCurrentPipelineUVE() == nullptr) {
+    const auto* const pipelineRecord = FindCurrentPipelineUVE();
+    if (pipelineRecord == nullptr) {
         UVE_ERROR("GlCommandBufferUVE: DrawIndexedUVE called without a live pipeline");
         return;
     }
@@ -1041,7 +1052,8 @@ void GlCommandBufferUVE::DrawIndexedUVE(std::uint32_t indexCount, std::uint32_t 
     if (instanceCount > 1) {
         UVE_WARNING("GlCommandBufferUVE: DrawIndexedUVE instanceCount > 1 is not yet supported - drawing once");
     }
-    glDrawElements(GL_TRIANGLES, static_cast<GLsizei>(indexCount), GL_UNSIGNED_INT, nullptr);
+    glDrawElements(ToGlDrawModeUVE(pipelineRecord->topology), static_cast<GLsizei>(indexCount),
+                     GL_UNSIGNED_INT, nullptr);
     UVE_GL_CHECK_ERROR_UVE("DrawIndexedUVE");
 }
 
@@ -1050,7 +1062,8 @@ void GlCommandBufferUVE::DrawIndexedIndirectUVE(const BufferHandleUVE buffer,
     if (!RequireInsideRenderPassUVE(m_insideRenderPass, "DrawIndexedIndirectUVE")) {
         return;
     }
-    if (FindCurrentPipelineUVE() == nullptr) {
+    const auto* const pipelineRecord = FindCurrentPipelineUVE();
+    if (pipelineRecord == nullptr) {
         UVE_ERROR("GlCommandBufferUVE: DrawIndexedIndirectUVE called without a live pipeline");
         return;
     }
@@ -1092,7 +1105,7 @@ void GlCommandBufferUVE::DrawIndexedIndirectUVE(const BufferHandleUVE buffer,
     }
     m_state->gl.glBindBuffer(GL_DRAW_INDIRECT_BUFFER, indirectIt->second.glBuffer);
     m_state->gl.glDrawElementsIndirect(
-        GL_TRIANGLES, GL_UNSIGNED_INT,
+        ToGlDrawModeUVE(pipelineRecord->topology), GL_UNSIGNED_INT,
         reinterpret_cast<const void*>(static_cast<std::uintptr_t>(offsetBytes)));
     UVE_GL_CHECK_ERROR_UVE("DrawIndexedIndirectUVE");
     // Leave no lingering indirect binding: the buffer's home target is the SSBO one, and a stale
@@ -1128,7 +1141,11 @@ void GlCommandBufferUVE::DrawUVE(std::uint32_t vertexCount, std::uint32_t instan
     if (instanceCount > 1) {
         UVE_WARNING("GlCommandBufferUVE: DrawUVE instanceCount > 1 is not yet supported - drawing once");
     }
-    glDrawArrays(GL_TRIANGLES, 0, static_cast<GLsizei>(vertexCount));
+    const auto* const drawPipelineRecord = FindCurrentPipelineUVE();
+    const GLenum drawMode = drawPipelineRecord != nullptr
+                                ? ToGlDrawModeUVE(drawPipelineRecord->topology)
+                                : GL_TRIANGLES;
+    glDrawArrays(drawMode, 0, static_cast<GLsizei>(vertexCount));
     UVE_GL_CHECK_ERROR_UVE("DrawUVE");
 }
 

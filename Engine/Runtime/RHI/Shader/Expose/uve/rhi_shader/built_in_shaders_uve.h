@@ -50,6 +50,11 @@ extern const std::string_view kParticleSource;
 inline constexpr std::string_view kDecalVirtualPath = "shaders/decal.glsl";
 extern const std::string_view kDecalSource;
 
+/// DebugRendererUVE's line pass: world-space positions with per-vertex colors through
+/// uViewProjection, so one batch carries every debug line of the frame in a single draw.
+inline constexpr std::string_view kDebugLineVirtualPath = "shaders/debug_line.glsl";
+extern const std::string_view kDebugLineSource;
+
 /// The compute kernel Render::ParticleComputeSimulationUVE dispatches (CS4) - the GPU twin of
 /// Scene::ParticleRuntimeUVE's per-particle integration. Unlike every other entry here this file
 /// holds a single COMPUTE stage, so it carries no VERTEX_SHADER/FRAGMENT_SHADER split and is

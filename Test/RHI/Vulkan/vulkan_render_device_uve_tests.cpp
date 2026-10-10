@@ -157,6 +157,35 @@ TEST_F(VulkanRenderDeviceUVETest, DeviceReportsUsableWithHonestBootstrapName) {
         << "backend name must report the exact slice and capability gate, got: " << name;
 }
 
+TEST_F(VulkanRenderDeviceUVETest, CreatePipelineUVE_LinesTopology_Succeeds) {
+    // Tier 2.8 Scope A: LINE_LIST assembly bakes without a validation error on a real device.
+    ShaderDescUVE vertexDesc{};
+    vertexDesc.stage = ShaderStageUVE::Vertex;
+    vertexDesc.sourceCode = kDepthUniformVertexSpirvUVE;
+    ShaderDescUVE fragmentDesc{};
+    fragmentDesc.stage = ShaderStageUVE::Fragment;
+    fragmentDesc.sourceCode = kDepthUniformFragmentSpirvUVE;
+    const ShaderHandleUVE vertexShader = device->CreateShaderUVE(vertexDesc);
+    const ShaderHandleUVE fragmentShader = device->CreateShaderUVE(fragmentDesc);
+    ASSERT_NE(vertexShader, kInvalidShaderHandleUVE);
+    ASSERT_NE(fragmentShader, kInvalidShaderHandleUVE);
+
+    PipelineDescUVE pipelineDesc{};
+    pipelineDesc.vertexShader = vertexShader;
+    pipelineDesc.fragmentShader = fragmentShader;
+    pipelineDesc.vertexStride = 12U;
+    pipelineDesc.vertexLayout.push_back(VertexAttributeUVE{"POSITION", VertexAttributeFormatUVE::Float3, 0U});
+    pipelineDesc.depthTestEnabled = true;
+    pipelineDesc.depthWriteEnabled = true;
+    pipelineDesc.topology = PrimitiveTopologyUVE::Lines;
+    const PipelineHandleUVE pipeline = device->CreatePipelineUVE(pipelineDesc);
+    EXPECT_NE(pipeline, kInvalidPipelineHandleUVE);
+
+    device->DestroyPipelineUVE(pipeline);
+    device->DestroyShaderUVE(vertexShader);
+    device->DestroyShaderUVE(fragmentShader);
+}
+
 TEST_F(VulkanRenderDeviceUVETest, PresentedFrameReadbackIsUniformBootstrapClear) {
     for (int frame = 0; frame < 6; ++frame) {
         device->PresentUVE();

@@ -1001,6 +1001,7 @@ PipelineHandleUVE GlRenderDeviceUVE::CreatePipelineUVE(const PipelineDescUVE& de
     record.depthBiasConstantFactor = desc.depthBiasConstantFactor;
     record.depthBiasSlopeFactor = desc.depthBiasSlopeFactor;
     record.depthCompare = desc.depthCompare;
+    record.topology = desc.topology;
     ReflectPipelineUniformsUVE(m_impl->state.gl, glProgram, record.uniforms);
 
     const std::uint32_t handleValue = m_impl->state.nextPipelineHandle++;
@@ -1209,6 +1210,7 @@ PipelineHandleUVE GlRenderDeviceUVE::CreatePipelineFromBinaryUVE(std::span<const
     record.depthBiasConstantFactor = desc.depthBiasConstantFactor;
     record.depthBiasSlopeFactor = desc.depthBiasSlopeFactor;
     record.depthCompare = desc.depthCompare;
+    record.topology = desc.topology;
     // Uniform locations are not guaranteed portable across a binary load even though behavior
     // is - reflection must always be re-run here, never assumed inherited from the original
     // compile that produced this binary.
