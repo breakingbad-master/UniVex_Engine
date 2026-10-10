@@ -70,10 +70,10 @@ void UIRuntimeUVE::SetViewportSizeUVE(const Math::Vector2UVE& viewportSize) noex
 void UIRuntimeUVE::TickUVE(Scene::IEntityManagerUVE& entityManager, const Input::IInputSystemUVE& inputSystem,
                            const UITextLocalizationUVE& localization) {
     // Anchors resolve first (roots against the viewport, children against fresh parent rects),
-    // then containers position their children: hit-testing and every emitted quad agree on where
-    // a widget is within the same tick.
+    // then containers auto-size to content and position their children: hit-testing and every
+    // emitted quad agree on where a widget is within the same tick.
     ResolveUIAnchorsUVE(entityManager, m_viewportSize);
-    LayoutUIContainersUVE(entityManager);
+    LayoutUIContainersUVE(entityManager, m_fontAtlas);
     m_drawBatch.quads.clear();
     std::vector<RankedWidgetUVE> ranked;
 

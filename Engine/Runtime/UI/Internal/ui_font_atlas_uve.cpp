@@ -106,4 +106,21 @@ void UIFontAtlasUVE::AppendTextQuadsUVE(const std::string_view text, float& curs
     }
 }
 
+float UIFontAtlasUVE::MeasureTextWidthUVE(const std::string_view text,
+                                          const float fontSizePixels) const noexcept {
+    if (!m_valid || fontSizePixels <= 0.0F) {
+        return 0.0F;
+    }
+    const float scale = fontSizePixels / kBakedFontPixelHeightUVE;
+    float width = 0.0F;
+    for (const char character : text) {
+        const UIGlyphUVE* glyph = FindGlyphUVE(character);
+        if (glyph == nullptr) {
+            continue;
+        }
+        width += glyph->advanceX * scale;
+    }
+    return width;
+}
+
 } // namespace UVE::UI

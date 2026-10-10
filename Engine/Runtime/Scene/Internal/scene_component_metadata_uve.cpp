@@ -1886,6 +1886,10 @@ void DeclareMediaAndUIUVE(std::vector<TypeMetadataEntryUVE>& entries) {
                                                                             kPropertyTypeFloatUVE),
                          DeclareUVE<&UILayoutContainerComponentUVE::wrapAfter>("wrapAfter", "Wrap After",
                                                                               kPropertyTypeUInt32UVE),
+                         DeclareUVE<&UILayoutContainerComponentUVE::autoSizeWidth>("autoSizeWidth", "Auto Size Width",
+                                                                                  kPropertyTypeBoolUVE),
+                         DeclareUVE<&UILayoutContainerComponentUVE::autoSizeHeight>(
+                             "autoSizeHeight", "Auto Size Height", kPropertyTypeBoolUVE),
                      }));
     AddValidatedUVE<UIAnchorComponentUVE, &IsUIAnchorComponentValidUVE>(
         entries,

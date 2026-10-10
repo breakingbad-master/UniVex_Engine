@@ -23,8 +23,13 @@ enum class UILayoutAlignmentUVE : std::uint8_t {
 /// this entity's direct hierarchy children (siblingOrder first, the entity handle breaking ties)
 /// inside `rect`, inset by `padding` on all four sides and separated by `spacing` along
 /// `direction`. Only positionable children participate (buttons, images, nested containers,
-/// text); anything else is ignored, not spaced. Child sizes are preserved - the pass writes
-/// positions only - and the container's own rect is authored, never auto-sized.
+/// text); anything else is ignored, not spaced. Child sizes are preserved by the position pass -
+/// it writes positions only - while each `autoSizeWidth`/`autoSizeHeight` axis fits the
+/// container to its content (children plus padding on both sides) in a deepest-first resize pass
+/// ahead of positioning, so a nested auto-sized container settles before its parent measures it.
+/// An empty auto-sized container keeps padding only, and an auto axis overwrites whatever the
+/// anchor pass wrote for that axis: anchors contribute position, content contributes size, with
+/// no iteration between them.
 ///
 /// `wrapAfter` turns the stack into a grid: at most that many items per line before wrapping to
 /// the next line (0 means never wrap - a pure stack). Wrapped lines use uniform cells sized to
@@ -38,11 +43,10 @@ enum class UILayoutAlignmentUVE : std::uint8_t {
 /// along either axis is allowed and unclipped: there is no clipping anywhere in the UI system
 /// yet.
 ///
-/// Text participates with a laid-out extent of {0, fontSize}: vertical stacks of text advance by
-/// line height exactly, but horizontal stacks treat text as zero-width because the font atlas
-/// exposes no text measurement yet. Measure-based text width, anchors/margins, and auto-sizing
-/// are follow-ups. Persistence rides the metadata-driven serializer: every field above is a
-/// declared property, so no hand-written JSON exists for this component.
+/// Text participates with a laid-out extent of {measured width, fontSize}: the width comes from
+/// the font atlas's advance sums, so horizontal stacks and grids pace text exactly as it draws.
+/// Persistence rides the metadata-driven serializer: every field above is a declared property,
+/// so no hand-written JSON exists for this component.
 struct UILayoutContainerComponentUVE final {
     Math::RectUVE rect{Math::Vector2UVE{0.0F, 0.0F}, Math::Vector2UVE{320.0F, 240.0F}};
     UILayoutDirectionUVE direction = UILayoutDirectionUVE::Vertical;
@@ -50,6 +54,8 @@ struct UILayoutContainerComponentUVE final {
     float padding = 0.0F;
     float spacing = 0.0F;
     std::uint32_t wrapAfter = 0U;
+    bool autoSizeWidth = false;
+    bool autoSizeHeight = false;
 
     [[nodiscard]] bool operator==(const UILayoutContainerComponentUVE&) const = default;
 };

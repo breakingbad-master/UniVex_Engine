@@ -76,6 +76,12 @@ public:
     void AppendTextQuadsUVE(std::string_view text, float& cursorX, float& cursorY, float fontSizePixels,
                              std::vector<UIGlyphQuadUVE>& outQuads) const;
 
+    /// The horizontal advance of `text` at `fontSizePixels`: the same per-glyph advance sum
+    /// AppendTextQuadsUVE walks the pen by, so measured width and drawn width agree by
+    /// construction. Unrenderable characters contribute nothing on either side; an invalid atlas
+    /// or a non-positive size measures zero.
+    [[nodiscard]] float MeasureTextWidthUVE(std::string_view text, float fontSizePixels) const noexcept;
+
 private:
     bool m_valid = false;
     std::vector<std::uint8_t> m_bitmap;

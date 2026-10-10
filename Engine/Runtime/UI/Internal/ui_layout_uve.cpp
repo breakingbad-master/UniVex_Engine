@@ -16,6 +16,7 @@
 #include "uve/entity/i_entity_manager_uve.h"
 #include "uve/math/vector2_uve.h"
 #include "uve/ui/canvas_ancestry_uve.h"
+#include "uve/ui/ui_font_atlas_uve.h"
 
 namespace UVE::UI {
 
@@ -66,22 +67,22 @@ void MoveChildUVE(Scene::IEntityManagerUVE& entityManager, const PositionableChi
     }
 }
 
-void LayoutContainerUVE(Scene::IEntityManagerUVE& entityManager, const Scene::EntityUVE container,
-                        const std::vector<OrderedChildUVE>& children) {
-    const Scene::UILayoutContainerComponentUVE layout =
-        entityManager.GetComponentUVE<Scene::UILayoutContainerComponentUVE>(container);
-    if (!IsUILayoutContainerComponentValidUVE(layout)) {
-        return;
+std::vector<OrderedChildUVE> CollectContainerChildrenUVE(Scene::IEntityManagerUVE& entityManager,
+                                                         const std::vector<OrderedChildUVE>& candidates,
+                                                         const Scene::EntityUVE container) {
+    std::vector<OrderedChildUVE> children;
+    for (const OrderedChildUVE& candidate : candidates) {
+        if (entityManager.GetComponentUVE<Scene::HierarchyComponentUVE>(candidate.entity).parent == container) {
+            children.push_back(candidate);
+        }
     }
-    const bool vertical = layout.direction == Scene::UILayoutDirectionUVE::Vertical;
-    const float innerMinX = layout.rect.position.x + layout.padding;
-    const float innerMinY = layout.rect.position.y + layout.padding;
-    const float innerWidth = std::max(0.0F, layout.rect.size.x - 2.0F * layout.padding);
-    const float innerHeight = std::max(0.0F, layout.rect.size.y - 2.0F * layout.padding);
-    const float alignFactor = layout.alignment == Scene::UILayoutAlignmentUVE::Start
-                                  ? 0.0F
-                                  : (layout.alignment == Scene::UILayoutAlignmentUVE::Center ? 0.5F : 1.0F);
+    std::sort(children.begin(), children.end(), IsEarlierChildUVE);
+    return children;
+}
 
+std::vector<PositionableChildUVE> CollectContainerItemsUVE(Scene::IEntityManagerUVE& entityManager,
+                                                           const std::vector<OrderedChildUVE>& children,
+                                                           const UIFontAtlasUVE& fontAtlas) {
     std::vector<PositionableChildUVE> items;
     for (const OrderedChildUVE& child : children) {
         PositionableChildUVE item;
@@ -101,12 +102,78 @@ void LayoutContainerUVE(Scene::IEntityManagerUVE& entityManager, const Scene::En
             item.extent =
                 entityManager.GetComponentUVE<Scene::UILayoutContainerComponentUVE>(child.entity).rect.size;
         } else {
-            item.extent = Math::Vector2UVE{0.0F,
-                                           entityManager.GetComponentUVE<Scene::UITextComponentUVE>(child.entity)
-                                               .fontSize};
+            const Scene::UITextComponentUVE& text =
+                entityManager.GetComponentUVE<Scene::UITextComponentUVE>(child.entity);
+            item.extent = Math::Vector2UVE{fontAtlas.MeasureTextWidthUVE(text.text, text.fontSize), text.fontSize};
         }
         items.push_back(item);
     }
+    return items;
+}
+
+/// The size the container's content asks for: children plus `spacing` between them, plus
+/// `padding` on both sides of each axis. Stacks sum the main axis and take the cross maximum;
+/// grids fit their cells, lines, and both-axis spacing. No items means padding only.
+[[nodiscard]] Math::Vector2UVE ContentSizeUVE(const Scene::UILayoutContainerComponentUVE& layout,
+                                             const std::vector<PositionableChildUVE>& items) {
+    const bool vertical = layout.direction == Scene::UILayoutDirectionUVE::Vertical;
+    float main = 0.0F;
+    float cross = 0.0F;
+    if (layout.wrapAfter != 0U) {
+        Math::Vector2UVE cell{};
+        for (const PositionableChildUVE& item : items) {
+            cell.x = std::max(cell.x, item.extent.x);
+            cell.y = std::max(cell.y, item.extent.y);
+        }
+        const std::size_t slots = std::min(items.size(), static_cast<std::size_t>(layout.wrapAfter));
+        if (slots > 0U) {
+            const float cellMain = vertical ? cell.y : cell.x;
+            const float cellCross = vertical ? cell.x : cell.y;
+            main = static_cast<float>(slots) * cellMain + static_cast<float>(slots - 1U) * layout.spacing;
+            const std::size_t lines = (items.size() + layout.wrapAfter - 1U) / layout.wrapAfter;
+            cross = static_cast<float>(lines) * cellCross + static_cast<float>(lines - 1U) * layout.spacing;
+        }
+    } else {
+        bool first = true;
+        for (const PositionableChildUVE& item : items) {
+            if (!first) {
+                main += layout.spacing;
+            }
+            first = false;
+            main += vertical ? item.extent.y : item.extent.x;
+            cross = std::max(cross, vertical ? item.extent.x : item.extent.y);
+        }
+    }
+    const Math::Vector2UVE content =
+        vertical ? Math::Vector2UVE{cross, main} : Math::Vector2UVE{main, cross};
+    return Math::Vector2UVE{content.x + 2.0F * layout.padding, content.y + 2.0F * layout.padding};
+}
+
+void AutoSizeContainerUVE(Scene::IEntityManagerUVE& entityManager, const Scene::EntityUVE container,
+                          const Scene::UILayoutContainerComponentUVE& layout,
+                          const std::vector<PositionableChildUVE>& items) {
+    const Math::Vector2UVE content = ContentSizeUVE(layout, items);
+    Scene::UILayoutContainerComponentUVE& stored =
+        entityManager.GetComponentUVE<Scene::UILayoutContainerComponentUVE>(container);
+    if (layout.autoSizeWidth) {
+        stored.rect.size.x = content.x;
+    }
+    if (layout.autoSizeHeight) {
+        stored.rect.size.y = content.y;
+    }
+}
+
+void PositionContainerItemsUVE(Scene::IEntityManagerUVE& entityManager,
+                               const Scene::UILayoutContainerComponentUVE& layout,
+                               const std::vector<PositionableChildUVE>& items) {
+    const bool vertical = layout.direction == Scene::UILayoutDirectionUVE::Vertical;
+    const float innerMinX = layout.rect.position.x + layout.padding;
+    const float innerMinY = layout.rect.position.y + layout.padding;
+    const float innerWidth = std::max(0.0F, layout.rect.size.x - 2.0F * layout.padding);
+    const float innerHeight = std::max(0.0F, layout.rect.size.y - 2.0F * layout.padding);
+    const float alignFactor = layout.alignment == Scene::UILayoutAlignmentUVE::Start
+                                  ? 0.0F
+                                  : (layout.alignment == Scene::UILayoutAlignmentUVE::Center ? 0.5F : 1.0F);
 
     if (layout.wrapAfter != 0U) {
         Math::Vector2UVE cell{};
@@ -156,7 +223,7 @@ void LayoutContainerUVE(Scene::IEntityManagerUVE& entityManager, const Scene::En
 
 } // namespace
 
-void LayoutUIContainersUVE(Scene::IEntityManagerUVE& entityManager) {
+void LayoutUIContainersUVE(Scene::IEntityManagerUVE& entityManager, const UIFontAtlasUVE& fontAtlas) {
     std::vector<OrderedContainerUVE> containers;
     entityManager.ForEachUVE<Scene::UILayoutContainerComponentUVE>(
         [&entityManager, &containers](const Scene::EntityUVE entity, const Scene::UILayoutContainerComponentUVE&) {
@@ -177,21 +244,41 @@ void LayoutUIContainersUVE(Scene::IEntityManagerUVE& entityManager) {
         [&candidates](const Scene::EntityUVE entity, const Scene::HierarchyComponentUVE& hierarchy) {
             candidates.push_back(OrderedChildUVE{entity, hierarchy.siblingOrder});
         });
+    // Two passes over one ordering, each re-gathering items: the resize pass runs deepest-first
+    // so an auto-sized container settles before its parent measures it, then the position pass
+    // runs shallowest-first so a nested container lands in its final parent before positioning
+    // its own children. The resize pass exists to change the very sizes the position pass reads,
+    // so sharing one gather between them would be a bug, not an optimization.
+    for (auto container = containers.rbegin(); container != containers.rend(); ++container) {
+        if (!entityManager.IsAliveUVE(container->entity) ||
+            !entityManager.HasComponentUVE<Scene::UILayoutContainerComponentUVE>(container->entity)) {
+            continue;
+        }
+        const Scene::UILayoutContainerComponentUVE layout =
+            entityManager.GetComponentUVE<Scene::UILayoutContainerComponentUVE>(container->entity);
+        if (!IsUILayoutContainerComponentValidUVE(layout) || (!layout.autoSizeWidth && !layout.autoSizeHeight)) {
+            continue;
+        }
+        const std::vector<OrderedChildUVE> children =
+            CollectContainerChildrenUVE(entityManager, candidates, container->entity);
+        AutoSizeContainerUVE(entityManager, container->entity, layout,
+                             CollectContainerItemsUVE(entityManager, children, fontAtlas));
+    }
     // One hierarchy scan shared by every container; each container filters its direct children.
     for (const OrderedContainerUVE& container : containers) {
         if (!entityManager.IsAliveUVE(container.entity) ||
             !entityManager.HasComponentUVE<Scene::UILayoutContainerComponentUVE>(container.entity)) {
             continue;
         }
-        std::vector<OrderedChildUVE> children;
-        for (const OrderedChildUVE& candidate : candidates) {
-            if (entityManager.GetComponentUVE<Scene::HierarchyComponentUVE>(candidate.entity).parent ==
-                container.entity) {
-                children.push_back(candidate);
-            }
+        const std::vector<OrderedChildUVE> children =
+            CollectContainerChildrenUVE(entityManager, candidates, container.entity);
+        const Scene::UILayoutContainerComponentUVE layout =
+            entityManager.GetComponentUVE<Scene::UILayoutContainerComponentUVE>(container.entity);
+        if (!IsUILayoutContainerComponentValidUVE(layout)) {
+            continue;
         }
-        std::sort(children.begin(), children.end(), IsEarlierChildUVE);
-        LayoutContainerUVE(entityManager, container.entity, children);
+        PositionContainerItemsUVE(entityManager, layout,
+                                  CollectContainerItemsUVE(entityManager, children, fontAtlas));
     }
 }
 

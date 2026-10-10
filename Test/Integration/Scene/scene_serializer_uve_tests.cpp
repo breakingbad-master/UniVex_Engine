@@ -2372,6 +2372,8 @@ TEST_F(SceneSerializerUVETest, SaveThenLoad_LayoutContainer_RoundTripsExactly) {
     container.padding = 8.0F;
     container.spacing = 4.0F;
     container.wrapAfter = 3U;
+    container.autoSizeWidth = true;
+    container.autoSizeHeight = false;
     entityManager.AddComponentUVE<UILayoutContainerComponentUVE>(entity, container);
 
     const std::filesystem::path path = "uve_scene_serializer_tests_layout_container.uvscene";
@@ -2392,6 +2394,8 @@ TEST_F(SceneSerializerUVETest, SaveThenLoad_LayoutContainer_RoundTripsExactly) {
     EXPECT_FLOAT_EQ(loaded.padding, 8.0F);
     EXPECT_FLOAT_EQ(loaded.spacing, 4.0F);
     EXPECT_EQ(loaded.wrapAfter, 3U);
+    EXPECT_TRUE(loaded.autoSizeWidth);
+    EXPECT_FALSE(loaded.autoSizeHeight);
 
     std::filesystem::remove(path);
 }
