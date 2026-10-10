@@ -1843,17 +1843,85 @@ void EngineCoreUVE::SyncCinematicUVE(const float deltaSeconds) {
          CollectFixedStepOrderUVE<Scene::CinematicComponentUVE>(*m_entityManager, *m_sceneGraph)) {
         Scene::CinematicComponentUVE& cinematic =
             m_entityManager->GetComponentUVE<Scene::CinematicComponentUVE>(entity);
+        // One-shots outlive the shot that fired them, so the sweep runs whether playing or not.
+        for (auto voice = cinematic.liveOneShots.begin(); voice != cinematic.liveOneShots.end();) {
+            const Audio::VoiceHandleUVE handle{*voice};
+            if (m_audioSystem->GetSourceStateUVE(handle) == Audio::VoicePlaybackStateUVE::Stopped) {
+                m_audioSystem->DestroySourceUVE(handle);
+                voice = cinematic.liveOneShots.erase(voice);
+            } else {
+                ++voice;
+            }
+        }
+        const auto triggerAnimations = [this](const std::vector<Scene::CinematicAnimationCueUVE>& cues) {
+            for (const Scene::CinematicAnimationCueUVE& cue : cues) {
+                if (!m_entityManager->IsAliveUVE(cue.target) ||
+                    !m_entityManager->HasComponentUVE<Scene::AnimationSequencerComponentUVE>(cue.target)) {
+                    continue;
+                }
+                Scene::AnimationSequencerComponentUVE& player =
+                    m_entityManager->GetComponentUVE<Scene::AnimationSequencerComponentUVE>(cue.target);
+                if (cue.clip != Asset::kInvalidAssetGuidUVE) {
+                    player.clip = cue.clip;
+                }
+                // Same load-and-wait rule as SyncAnimationUVE's clipFor: an unready clip skips.
+                const Asset::AnimationClipAssetUVE* clip = nullptr;
+                if (player.clip != Asset::kInvalidAssetGuidUVE) {
+                    auto cached = m_animationClips.find(player.clip.value);
+                    if (cached == m_animationClips.end()) {
+                        cached = m_animationClips
+                                     .emplace(player.clip.value,
+                                              m_assetManager->LoadUVE<Asset::AnimationClipAssetUVE>(
+                                                  player.clip, *m_assetDatabase))
+                                     .first;
+                    }
+                    clip = cached->second.TryGetUVE();
+                }
+                if (clip == nullptr) {
+                    continue;
+                }
+                const Scene::TransformComponentUVE targetNow =
+                    m_entityManager->HasComponentUVE<Scene::TransformComponentUVE>(cue.target)
+                        ? m_entityManager->GetComponentUVE<Scene::TransformComponentUVE>(cue.target)
+                        : Scene::TransformComponentUVE{};
+                Scene::PlayAnimationSequencerUVE(player, targetNow, clip->durationSeconds);
+            }
+        };
+        const auto fireAudio = [this, &cinematic](const std::vector<Scene::CinematicAudioCueUVE>& cues) {
+            for (const Scene::CinematicAudioCueUVE& cue : cues) {
+                if (cinematic.liveOneShots.size() >= Scene::kMaximumCinematicLiveOneShotsUVE) {
+                    break; // dense loops must not pile up voices without bound
+                }
+                Audio::AudioSourceDescUVE desc;
+                desc.audioAssetPath = cue.audioAssetPath;
+                desc.volume = cue.volume;
+                desc.spatial = false;
+                const Audio::VoiceHandleUVE voice = m_audioSystem->CreateSourceUVE(desc);
+                if (voice == Audio::kInvalidVoiceHandleUVE) {
+                    continue;
+                }
+                if (!m_audioSystem->PlayUVE(voice)) {
+                    m_audioSystem->DestroySourceUVE(voice);
+                    continue;
+                }
+                cinematic.liveOneShots.push_back(voice.value);
+            }
+        };
         if (cinematic.autoplay && !cinematic.isPlaying && !cinematic.finished) {
-            const std::vector<std::string> opened = Scene::PlayCinematicUVE(cinematic);
-            for (const std::string& eventId : opened) {
+            const Scene::CinematicPlayResultUVE opened = Scene::PlayCinematicUVE(cinematic);
+            for (const std::string& eventId : opened.firedEventIds) {
                 m_eventSystem->QueueEvent(Gameplay::CinematicEventFiredUVE{entity, eventId, 0.0});
             }
+            triggerAnimations(opened.animationCues);
+            fireAudio(opened.audioCues);
         }
         const Scene::CinematicStepResultUVE result = Scene::StepCinematicUVE(cinematic, deltaSeconds);
         for (const std::string& eventId : result.firedEventIds) {
             m_eventSystem->QueueEvent(
                 Gameplay::CinematicEventFiredUVE{entity, eventId, cinematic.currentTimeSeconds});
         }
+        triggerAnimations(result.firedAnimationCues);
+        fireAudio(result.firedAudioCues);
         if (result.activeCamera != Scene::kInvalidEntityUVE) {
             SetActiveCameraUVE(result.activeCamera);
         }

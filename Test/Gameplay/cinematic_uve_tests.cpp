@@ -29,14 +29,16 @@ TEST(CinematicUVETest, Play_FiresTimeZeroKeysAndRestarts) {
     CinematicComponentUVE cinematic = MakeCinematicUVE();
     ASSERT_TRUE(AddCinematicEventUVE(cinematic, 0.0, "open"));
     ASSERT_TRUE(AddCinematicEventUVE(cinematic, 5.0, "later"));
-    const std::vector<std::string> fired = PlayCinematicUVE(cinematic);
-    EXPECT_EQ(fired, (std::vector<std::string>{"open"}));
+    const CinematicPlayResultUVE opened = PlayCinematicUVE(cinematic);
+    EXPECT_EQ(opened.firedEventIds, (std::vector<std::string>{"open"}));
+    EXPECT_TRUE(opened.animationCues.empty());
+    EXPECT_TRUE(opened.audioCues.empty());
     EXPECT_TRUE(cinematic.isPlaying);
     EXPECT_FALSE(cinematic.finished);
     EXPECT_DOUBLE_EQ(cinematic.currentTimeSeconds, 0.0);
 
     CinematicComponentUVE broken;
-    EXPECT_TRUE(PlayCinematicUVE(broken).empty());
+    EXPECT_TRUE(PlayCinematicUVE(broken).firedEventIds.empty());
 }
 
 TEST(CinematicUVETest, Step_FiresKeysInPassingOrder) {
@@ -319,6 +321,82 @@ TEST(CinematicUVETest, Validity_RejectsBrokenCameraTracks) {
         1.0, Math::Vector3UVE{std::numeric_limits<float>::infinity(), 0.0F, 0.0F},
         Math::QuaternionUVE{}});
     EXPECT_FALSE(IsCinematicComponentValidUVE(badPosition));
+}
+
+
+TEST(CinematicUVETest, Play_FiresTimeZeroAnimationAndAudioCues) {
+    CinematicComponentUVE cinematic = MakeCinematicUVE();
+    ASSERT_TRUE(AddCinematicAnimationKeyUVE(cinematic, 0.0, MakeCameraUVE(5U), Asset::AssetGuidUVE{77U}));
+    ASSERT_TRUE(AddCinematicAnimationKeyUVE(cinematic, 5.0, MakeCameraUVE(6U), Asset::AssetGuidUVE{}));
+    ASSERT_TRUE(AddCinematicAudioKeyUVE(cinematic, 0.0, "sfx/open.uvaudio", 0.5F));
+    ASSERT_TRUE(AddCinematicAudioKeyUVE(cinematic, 5.0, "sfx/later.uvaudio", 1.0F));
+    const CinematicPlayResultUVE opened = PlayCinematicUVE(cinematic);
+    ASSERT_EQ(opened.animationCues.size(), 1U);
+    EXPECT_EQ(opened.animationCues.front().target, MakeCameraUVE(5U));
+    EXPECT_EQ(opened.animationCues.front().clip, Asset::AssetGuidUVE{77U});
+    ASSERT_EQ(opened.audioCues.size(), 1U);
+    EXPECT_EQ(opened.audioCues.front().audioAssetPath, "sfx/open.uvaudio");
+    EXPECT_FLOAT_EQ(opened.audioCues.front().volume, 0.5F);
+}
+
+TEST(CinematicUVETest, Step_CollectsAnimationAndAudioCuesInOrder) {
+    CinematicComponentUVE cinematic = MakeCinematicUVE();
+    ASSERT_TRUE(AddCinematicAnimationKeyUVE(cinematic, 3.0, MakeCameraUVE(3U), Asset::AssetGuidUVE{}));
+    ASSERT_TRUE(AddCinematicAnimationKeyUVE(cinematic, 1.0, MakeCameraUVE(1U), Asset::AssetGuidUVE{9U}));
+    ASSERT_TRUE(AddCinematicAudioKeyUVE(cinematic, 2.0, "sfx/mid.uvaudio", 0.75F));
+    static_cast<void>(PlayCinematicUVE(cinematic));
+    const CinematicStepResultUVE result = StepCinematicUVE(cinematic, 2.5F);
+    ASSERT_EQ(result.firedAnimationCues.size(), 1U);
+    EXPECT_EQ(result.firedAnimationCues.front().target, MakeCameraUVE(1U));
+    EXPECT_EQ(result.firedAnimationCues.front().clip, Asset::AssetGuidUVE{9U});
+    ASSERT_EQ(result.firedAudioCues.size(), 1U);
+    EXPECT_EQ(result.firedAudioCues.front().audioAssetPath, "sfx/mid.uvaudio");
+}
+
+TEST(CinematicUVETest, Add_RejectsBadAnimationAndAudioKeys) {
+    CinematicComponentUVE cinematic = MakeCinematicUVE();
+    EXPECT_FALSE(AddCinematicAnimationKeyUVE(cinematic, 1.0, kInvalidEntityUVE, Asset::AssetGuidUVE{}));
+    EXPECT_FALSE(
+        AddCinematicAnimationKeyUVE(cinematic, 11.0, MakeCameraUVE(1U), Asset::AssetGuidUVE{}));
+    EXPECT_FALSE(AddCinematicAudioKeyUVE(cinematic, 1.0, "", 1.0F));
+    EXPECT_FALSE(AddCinematicAudioKeyUVE(cinematic, 1.0, std::string(257U, 'x'), 1.0F));
+    EXPECT_FALSE(AddCinematicAudioKeyUVE(cinematic, 1.0, "sfx/x.uvaudio", -1.0F));
+    EXPECT_FALSE(AddCinematicAudioKeyUVE(cinematic, 1.0, "sfx/x.uvaudio",
+                                         std::numeric_limits<float>::quiet_NaN()));
+    EXPECT_FALSE(AddCinematicAudioKeyUVE(cinematic, 11.0, "sfx/x.uvaudio", 1.0F));
+    ASSERT_TRUE(AddCinematicAudioKeyUVE(cinematic, 5.0, "sfx/b.uvaudio", 1.0F));
+    ASSERT_TRUE(AddCinematicAudioKeyUVE(cinematic, 1.0, "sfx/a.uvaudio", 1.0F));
+    EXPECT_EQ(cinematic.audioKeys.front().audioAssetPath, "sfx/a.uvaudio");
+}
+
+TEST(CinematicUVETest, RemoveAnimationAndAudioKey_RespectsBounds) {
+    CinematicComponentUVE cinematic = MakeCinematicUVE();
+    ASSERT_TRUE(
+        AddCinematicAnimationKeyUVE(cinematic, 1.0, MakeCameraUVE(1U), Asset::AssetGuidUVE{}));
+    ASSERT_TRUE(AddCinematicAudioKeyUVE(cinematic, 1.0, "sfx/a.uvaudio", 1.0F));
+    EXPECT_FALSE(RemoveCinematicAnimationKeyUVE(cinematic, 1U));
+    EXPECT_TRUE(RemoveCinematicAnimationKeyUVE(cinematic, 0U));
+    EXPECT_FALSE(RemoveCinematicAudioKeyUVE(cinematic, 1U));
+    EXPECT_TRUE(RemoveCinematicAudioKeyUVE(cinematic, 0U));
+}
+
+TEST(CinematicUVETest, Validity_RejectsBrokenCueTracks) {
+    CinematicComponentUVE badTarget = MakeCinematicUVE();
+    badTarget.animationKeys.push_back(CinematicAnimationKeyUVE{1.0, kInvalidEntityUVE, Asset::AssetGuidUVE{}});
+    EXPECT_FALSE(IsCinematicComponentValidUVE(badTarget));
+
+    CinematicComponentUVE badPath = MakeCinematicUVE();
+    badPath.audioKeys.push_back(CinematicAudioKeyUVE{1.0, "", 1.0F});
+    EXPECT_FALSE(IsCinematicComponentValidUVE(badPath));
+
+    CinematicComponentUVE badVolume = MakeCinematicUVE();
+    badVolume.audioKeys.push_back(CinematicAudioKeyUVE{1.0, "sfx/a.uvaudio", -0.5F});
+    EXPECT_FALSE(IsCinematicComponentValidUVE(badVolume));
+
+    CinematicComponentUVE unsorted = MakeCinematicUVE();
+    ASSERT_TRUE(AddCinematicAudioKeyUVE(unsorted, 5.0, "sfx/a.uvaudio", 1.0F));
+    unsorted.audioKeys.push_back(CinematicAudioKeyUVE{1.0, "sfx/b.uvaudio", 1.0F});
+    EXPECT_FALSE(IsCinematicComponentValidUVE(unsorted));
 }
 
 } // namespace UVE::Scene::Tests

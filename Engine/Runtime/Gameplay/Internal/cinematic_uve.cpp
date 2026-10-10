@@ -46,13 +46,28 @@ template <typename KeyUVE>
     return camera;
 }
 
-void CollectForwardUVE(const std::vector<CinematicEventKeyUVE>& events, const double fromExclusive,
-                       const double toInclusive, std::vector<std::string>& out) {
-    for (const CinematicEventKeyUVE& key : events) {
+template <typename KeyUVE, typename CueUVE, typename ProjectUVE>
+void CollectTrackUVE(const std::vector<KeyUVE>& keys, const double fromExclusive,
+                     const double toInclusive, std::vector<CueUVE>& out, ProjectUVE project) {
+    for (const KeyUVE& key : keys) {
         if (key.timeSeconds > fromExclusive && key.timeSeconds <= toInclusive) {
-            out.push_back(key.eventId);
+            out.push_back(project(key));
         }
     }
+}
+
+void FirePassedKeysUVE(const CinematicComponentUVE& cinematic, const double fromExclusive,
+                       const double toInclusive, CinematicStepResultUVE& result) {
+    CollectTrackUVE(cinematic.events, fromExclusive, toInclusive, result.firedEventIds,
+                    [](const CinematicEventKeyUVE& key) { return key.eventId; });
+    CollectTrackUVE(cinematic.animationKeys, fromExclusive, toInclusive, result.firedAnimationCues,
+                    [](const CinematicAnimationKeyUVE& key) {
+                        return CinematicAnimationCueUVE{key.target, key.clip};
+                    });
+    CollectTrackUVE(cinematic.audioKeys, fromExclusive, toInclusive, result.firedAudioCues,
+                    [](const CinematicAudioKeyUVE& key) {
+                        return CinematicAudioCueUVE{key.audioAssetPath, key.volume};
+                    });
 }
 
 } // namespace
@@ -62,7 +77,9 @@ bool IsCinematicComponentValidUVE(const CinematicComponentUVE& value) noexcept {
         !std::isfinite(value.speed) || !std::isfinite(value.currentTimeSeconds) ||
         value.currentTimeSeconds < 0.0 || value.currentTimeSeconds > value.durationSeconds ||
         value.events.size() > kMaximumCinematicEventsUVE || value.cuts.size() > kMaximumCinematicCutsUVE ||
-        value.cameraKeys.size() > kMaximumCinematicCameraKeysUVE) {
+        value.cameraKeys.size() > kMaximumCinematicCameraKeysUVE ||
+        value.animationKeys.size() > kMaximumCinematicAnimationKeysUVE ||
+        value.audioKeys.size() > kMaximumCinematicAudioKeysUVE) {
         return false;
     }
     for (const CinematicEventKeyUVE& key : value.events) {
@@ -84,9 +101,23 @@ bool IsCinematicComponentValidUVE(const CinematicComponentUVE& value) noexcept {
             return false;
         }
     }
+    for (const CinematicAnimationKeyUVE& key : value.animationKeys) {
+        if (key.target == kInvalidEntityUVE) {
+            return false;
+        }
+    }
+    for (const CinematicAudioKeyUVE& key : value.audioKeys) {
+        if (key.audioAssetPath.empty() ||
+            key.audioAssetPath.size() > kMaximumCinematicAudioPathBytesUVE ||
+            !std::isfinite(key.volume) || key.volume < 0.0F) {
+            return false;
+        }
+    }
     return IsTimeOrderedUVE(value.events, value.durationSeconds) &&
            IsTimeOrderedUVE(value.cuts, value.durationSeconds) &&
-           IsTimeOrderedUVE(value.cameraKeys, value.durationSeconds);
+           IsTimeOrderedUVE(value.cameraKeys, value.durationSeconds) &&
+           IsTimeOrderedUVE(value.animationKeys, value.durationSeconds) &&
+           IsTimeOrderedUVE(value.audioKeys, value.durationSeconds);
 }
 
 bool AddCinematicEventUVE(CinematicComponentUVE& cinematic, const double timeSeconds, std::string eventId) {
@@ -163,6 +194,60 @@ bool RemoveCinematicCameraKeyUVE(CinematicComponentUVE& cinematic, const std::si
     return true;
 }
 
+bool AddCinematicAnimationKeyUVE(CinematicComponentUVE& cinematic, const double timeSeconds,
+                                 const EntityUVE target, const Asset::AssetGuidUVE clip) {
+    if (target == kInvalidEntityUVE || !IsValidKeyTimeUVE(timeSeconds, cinematic.durationSeconds) ||
+        cinematic.animationKeys.size() >= kMaximumCinematicAnimationKeysUVE) {
+        return false;
+    }
+    CinematicAnimationKeyUVE key;
+    key.timeSeconds = timeSeconds;
+    key.target = target;
+    key.clip = clip;
+    const auto slot = std::upper_bound(
+        cinematic.animationKeys.begin(), cinematic.animationKeys.end(), timeSeconds,
+        [](const double time, const CinematicAnimationKeyUVE& existing) {
+            return time < existing.timeSeconds;
+        });
+    cinematic.animationKeys.insert(slot, std::move(key));
+    return true;
+}
+
+bool RemoveCinematicAnimationKeyUVE(CinematicComponentUVE& cinematic, const std::size_t index) {
+    if (index >= cinematic.animationKeys.size()) {
+        return false;
+    }
+    cinematic.animationKeys.erase(cinematic.animationKeys.begin() + static_cast<std::ptrdiff_t>(index));
+    return true;
+}
+
+bool AddCinematicAudioKeyUVE(CinematicComponentUVE& cinematic, const double timeSeconds,
+                             std::string audioAssetPath, const float volume) {
+    if (audioAssetPath.empty() || audioAssetPath.size() > kMaximumCinematicAudioPathBytesUVE ||
+        !std::isfinite(volume) || volume < 0.0F ||
+        !IsValidKeyTimeUVE(timeSeconds, cinematic.durationSeconds) ||
+        cinematic.audioKeys.size() >= kMaximumCinematicAudioKeysUVE) {
+        return false;
+    }
+    CinematicAudioKeyUVE key;
+    key.timeSeconds = timeSeconds;
+    key.audioAssetPath = std::move(audioAssetPath);
+    key.volume = volume;
+    const auto slot = std::upper_bound(
+        cinematic.audioKeys.begin(), cinematic.audioKeys.end(), timeSeconds,
+        [](const double time, const CinematicAudioKeyUVE& existing) { return time < existing.timeSeconds; });
+    cinematic.audioKeys.insert(slot, std::move(key));
+    return true;
+}
+
+bool RemoveCinematicAudioKeyUVE(CinematicComponentUVE& cinematic, const std::size_t index) {
+    if (index >= cinematic.audioKeys.size()) {
+        return false;
+    }
+    cinematic.audioKeys.erase(cinematic.audioKeys.begin() + static_cast<std::ptrdiff_t>(index));
+    return true;
+}
+
 std::optional<CinematicCameraPoseUVE> SampleCinematicCameraUVE(const CinematicComponentUVE& cinematic,
                                                                const double timeSeconds) noexcept {
     if (cinematic.cameraKeys.empty() || !std::isfinite(timeSeconds)) {
@@ -204,11 +289,11 @@ void WriteCinematicCameraPoseUVE(const CinematicCameraPoseUVE& pose, TransformCo
     }
 }
 
-std::vector<std::string> PlayCinematicUVE(CinematicComponentUVE& cinematic) noexcept {
+CinematicPlayResultUVE PlayCinematicUVE(CinematicComponentUVE& cinematic) noexcept {
     cinematic.isPlaying = true;
     cinematic.finished = false;
     cinematic.currentTimeSeconds = 0.0;
-    std::vector<std::string> fired;
+    CinematicPlayResultUVE fired;
     if (cinematic.durationSeconds <= 0.0) {
         return fired;
     }
@@ -216,7 +301,19 @@ std::vector<std::string> PlayCinematicUVE(CinematicComponentUVE& cinematic) noex
         if (key.timeSeconds > 0.0) {
             break;
         }
-        fired.push_back(key.eventId);
+        fired.firedEventIds.push_back(key.eventId);
+    }
+    for (const CinematicAnimationKeyUVE& key : cinematic.animationKeys) {
+        if (key.timeSeconds > 0.0) {
+            break;
+        }
+        fired.animationCues.push_back(CinematicAnimationCueUVE{key.target, key.clip});
+    }
+    for (const CinematicAudioKeyUVE& key : cinematic.audioKeys) {
+        if (key.timeSeconds > 0.0) {
+            break;
+        }
+        fired.audioCues.push_back(CinematicAudioCueUVE{key.audioAssetPath, key.volume});
     }
     return fired;
 }
@@ -239,18 +336,18 @@ CinematicStepResultUVE StepCinematicUVE(CinematicComponentUVE& cinematic, const 
             wrapped += cinematic.durationSeconds;
         }
         if (advanced >= cinematic.durationSeconds) {
-            CollectForwardUVE(cinematic.events, from, cinematic.durationSeconds, result.firedEventIds);
-            CollectForwardUVE(cinematic.events, -1.0, wrapped, result.firedEventIds);
+            FirePassedKeysUVE(cinematic, from, cinematic.durationSeconds, result);
+            FirePassedKeysUVE(cinematic, -1.0, wrapped, result);
         } else if (advanced < 0.0) {
             // Reverse motion rewinds the clock and resolves the camera, but fires nothing.
         } else {
-            CollectForwardUVE(cinematic.events, from, wrapped, result.firedEventIds);
+            FirePassedKeysUVE(cinematic, from, wrapped, result);
         }
         cinematic.currentTimeSeconds = wrapped;
     } else {
         const double to = std::clamp(advanced, 0.0, cinematic.durationSeconds);
         if (to > from) {
-            CollectForwardUVE(cinematic.events, from, to, result.firedEventIds);
+            FirePassedKeysUVE(cinematic, from, to, result);
         }
         cinematic.currentTimeSeconds = to;
         if (advanced >= cinematic.durationSeconds) {

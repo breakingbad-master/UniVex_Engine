@@ -509,7 +509,7 @@ script per node; see `Engine/Runtime/UVScript/README.md`.
   key codes directly
 - [x] A gameplay tag / gameplay-attribute system (health, stamina, status effects) as a
   reusable framework rather than one-off components per game
-- [ ] A cinematic/sequencer tool for cutscenes (keyframing cameras, animation, audio, and
+- [x] A cinematic/sequencer tool for cutscenes (keyframing cameras, animation, audio, and
   gameplay events on a shared timeline)
 - [x] A trigger/event layer for level scripting lighter than a full script
   (lightweight "on overlap, do X" level logic)

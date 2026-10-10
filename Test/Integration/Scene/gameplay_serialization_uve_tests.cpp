@@ -85,6 +85,7 @@ TEST_F(GameplaySerializationUVETest, Cinematic_RoundTripThroughCaptureRestore) {
     const EntityUVE source = entityManager.CreateEntityUVE();
     const EntityUVE camA = entityManager.CreateEntityUVE();
     const EntityUVE camB = entityManager.CreateEntityUVE();
+    const EntityUVE actor = entityManager.CreateEntityUVE();
     CinematicComponentUVE cinematic;
     cinematic.durationSeconds = 10.0;
     cinematic.autoplay = true;
@@ -98,13 +99,15 @@ TEST_F(GameplaySerializationUVETest, Cinematic_RoundTripThroughCaptureRestore) {
                                          Math::QuaternionUVE{0.0F, 0.70710678F, 0.0F, 0.70710678F}));
     ASSERT_TRUE(AddCinematicCameraKeyUVE(cinematic, 10.0, Math::Vector3UVE{4.0F, 5.0F, 6.0F},
                                          Math::QuaternionUVE{}));
+    ASSERT_TRUE(AddCinematicAnimationKeyUVE(cinematic, 2.0, actor, Asset::AssetGuidUVE{12345U}));
+    ASSERT_TRUE(AddCinematicAudioKeyUVE(cinematic, 3.0, "sfx/boom.uvaudio", 0.5F));
     entityManager.AddComponentUVE<CinematicComponentUVE>(source, cinematic);
 
     const std::optional<SceneSnapshotUVE> snapshot =
-        serializer.CaptureUVE(entityManager, {source, camA, camB}, SceneAssetTypeUVE::Scene);
+        serializer.CaptureUVE(entityManager, {source, camA, camB, actor}, SceneAssetTypeUVE::Scene);
     ASSERT_TRUE(snapshot.has_value());
     const std::vector<EntityUVE> restored = serializer.RestoreUVE(entityManager, *snapshot);
-    ASSERT_EQ(restored.size(), 3U);
+    ASSERT_EQ(restored.size(), 4U);
     std::optional<EntityUVE> revivedEntity;
     for (const EntityUVE entity : restored) {
         if (entityManager.HasComponentUVE<CinematicComponentUVE>(entity)) {
@@ -120,6 +123,12 @@ TEST_F(GameplaySerializationUVETest, Cinematic_RoundTripThroughCaptureRestore) {
     EXPECT_EQ(revived.loopMode, CinematicLoopModeUVE::Loop);
     EXPECT_EQ(revived.events, cinematic.events);
     EXPECT_EQ(revived.cameraKeys, cinematic.cameraKeys);
+    EXPECT_EQ(revived.audioKeys, cinematic.audioKeys);
+    ASSERT_EQ(revived.animationKeys.size(), 1U);
+    EXPECT_DOUBLE_EQ(revived.animationKeys.front().timeSeconds, 2.0);
+    EXPECT_EQ(revived.animationKeys.front().clip, Asset::AssetGuidUVE{12345U});
+    EXPECT_NE(std::find(restored.begin(), restored.end(), revived.animationKeys.front().target),
+              restored.end());
     ASSERT_EQ(revived.cuts.size(), 2U);
     EXPECT_DOUBLE_EQ(revived.cuts[0].timeSeconds, 0.0);
     EXPECT_DOUBLE_EQ(revived.cuts[1].timeSeconds, 5.0);
@@ -140,6 +149,7 @@ TEST_F(GameplaySerializationUVETest, Cinematic_DropsCutsOutsideTheSavedSet) {
     cinematic.durationSeconds = 10.0;
     ASSERT_TRUE(AddCinematicEventUVE(cinematic, 1.0, "kept"));
     ASSERT_TRUE(AddCinematicCutUVE(cinematic, 1.0, outsider));
+    ASSERT_TRUE(AddCinematicAnimationKeyUVE(cinematic, 1.0, outsider, Asset::AssetGuidUVE{}));
     entityManager.AddComponentUVE<CinematicComponentUVE>(source, cinematic);
 
     const std::optional<SceneSnapshotUVE> snapshot =
@@ -151,6 +161,7 @@ TEST_F(GameplaySerializationUVETest, Cinematic_DropsCutsOutsideTheSavedSet) {
         entityManager.GetComponentUVE<CinematicComponentUVE>(restored.front());
     EXPECT_EQ(revived.events, cinematic.events);
     EXPECT_TRUE(revived.cuts.empty());
+    EXPECT_TRUE(revived.animationKeys.empty());
     EXPECT_TRUE(IsCinematicComponentValidUVE(revived));
 }
 } // namespace UVE::Scene::Tests

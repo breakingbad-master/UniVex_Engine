@@ -259,12 +259,26 @@ namespace {
                               {"position", ToJsonUVE(key.position)},
                               {"rotation", ToJsonUVE(key.rotation)}});
     }
+    nlohmann::json animationKeys = nlohmann::json::array();
+    for (const CinematicAnimationKeyUVE& key : component.animationKeys) {
+        // The target rides the parallel animTargetLocalIds array (entity reference); the clip is a
+        // plain guid, the same {"clip", value} spelling the sequencer codec uses.
+        animationKeys.push_back({{"timeSeconds", key.timeSeconds}, {"clip", key.clip.value}});
+    }
+    nlohmann::json audioKeys = nlohmann::json::array();
+    for (const CinematicAudioKeyUVE& key : component.audioKeys) {
+        audioKeys.push_back({{"timeSeconds", key.timeSeconds},
+                             {"audioAssetPath", key.audioAssetPath},
+                             {"volume", key.volume}});
+    }
     // Player state (isPlaying, finished, currentTime) is deliberately not written: a loaded
     // cinematic reseeds parked at zero, the same rule as Decal3D and Health.
     return {{"durationSeconds", component.durationSeconds},
             {"events", std::move(events)},
             {"cuts", std::move(cuts)},
             {"cameraKeys", std::move(cameraKeys)},
+            {"animationKeys", std::move(animationKeys)},
+            {"audioKeys", std::move(audioKeys)},
             {"autoplay", component.autoplay},
             {"speed", component.speed},
             {"loopMode", static_cast<std::uint8_t>(component.loopMode)}};
@@ -304,30 +318,60 @@ namespace {
             value.cameraKeys.push_back(std::move(key));
         }
     }
+    if (const auto animKeys = json.find("animationKeys");
+         animKeys != json.end() && animKeys->is_array()) {
+        for (const nlohmann::json& entry : *animKeys) {
+            CinematicAnimationKeyUVE key;
+            key.timeSeconds = entry.value("timeSeconds", 0.0);
+            key.clip = Asset::AssetGuidUVE{entry.value("clip", std::uint64_t{0})};
+            value.animationKeys.push_back(std::move(key));
+        }
+    }
+    if (const auto soundKeys = json.find("audioKeys");
+         soundKeys != json.end() && soundKeys->is_array()) {
+        for (const nlohmann::json& entry : *soundKeys) {
+            CinematicAudioKeyUVE key;
+            key.timeSeconds = entry.value("timeSeconds", 0.0);
+            key.audioAssetPath = entry.value("audioAssetPath", std::string{});
+            key.volume = entry.value("volume", 1.0F);
+            value.audioKeys.push_back(std::move(key));
+        }
+    }
     return value;
 }
 
-/// The load-side half of every cut: the parallel file-local id becomes the camera it names, and a
-/// cut naming nothing in this file (camera outside the saved set, or a document predating the
-/// sidecar) is dropped - a cut to nowhere is invalid, and must not nuke the load.
-[[nodiscard]] CinematicComponentUVE CinematicComponentWithResolvedCutsUVE(
-    const nlohmann::json& json, const std::unordered_map<std::uint32_t, EntityUVE>& localIdToEntity) {
-    CinematicComponentUVE value = CinematicObjectFromJsonUVE(json);
-    const nlohmann::json cameraIds = json.value("cutCameraLocalIds", nlohmann::json::array());
-    std::vector<CinematicCameraCutUVE> resolved;
-    resolved.reserve(value.cuts.size());
-    for (std::size_t index = 0U; index < value.cuts.size(); ++index) {
-        const std::uint32_t localId = (cameraIds.is_array() && index < cameraIds.size())
-                                          ? cameraIds.at(index).get<std::uint32_t>()
+template <typename KeyUVE>
+void ResolveParallelTargetsUVE(std::vector<KeyUVE>& keys, EntityUVE KeyUVE::*member,
+                               const nlohmann::json& json, const char* sidecar,
+                               const std::unordered_map<std::uint32_t, EntityUVE>& localIdToEntity) {
+    const nlohmann::json ids = json.value(sidecar, nlohmann::json::array());
+    std::vector<KeyUVE> resolved;
+    resolved.reserve(keys.size());
+    for (std::size_t index = 0U; index < keys.size(); ++index) {
+        const std::uint32_t localId = (ids.is_array() && index < ids.size())
+                                          ? ids.at(index).get<std::uint32_t>()
                                           : std::numeric_limits<std::uint32_t>::max();
         const auto found = localIdToEntity.find(localId);
         if (found == localIdToEntity.end()) {
             continue;
         }
-        value.cuts[index].camera = found->second;
-        resolved.push_back(value.cuts[index]);
+        keys[index].*member = found->second;
+        resolved.push_back(keys[index]);
     }
-    value.cuts = std::move(resolved);
+    keys = std::move(resolved);
+}
+
+/// The load-side half of every entity reference a cinematic holds: each parallel file-local id
+/// becomes the camera/target it names, and a key naming nothing in this file (reference outside
+/// the saved set, or a document predating the sidecar) is dropped - a cut or cue to nowhere is
+/// invalid, and must not nuke the load.
+[[nodiscard]] CinematicComponentUVE CinematicComponentWithResolvedReferencesUVE(
+    const nlohmann::json& json, const std::unordered_map<std::uint32_t, EntityUVE>& localIdToEntity) {
+    CinematicComponentUVE value = CinematicObjectFromJsonUVE(json);
+    ResolveParallelTargetsUVE(value.cuts, &CinematicCameraCutUVE::camera, json, "cutCameraLocalIds",
+                              localIdToEntity);
+    ResolveParallelTargetsUVE(value.animationKeys, &CinematicAnimationKeyUVE::target, json,
+                              "animTargetLocalIds", localIdToEntity);
     return value;
 }
 
@@ -1797,8 +1841,8 @@ MakeMetadataRegistrationUVE(const std::string& componentName,
         // - Entity references (the registrations never see the file-local id tables, and the
         //   bespoke *LocalId keys have no generic spelling yet): AnimationDriver, BoneAttachment3D,
         //   Hitbox3D, Hurtbox3D, InteractionArea3D, Projectile3D, RayCast3D (plus its exclusions
-        //   list), TwoBoneIK3D, Cinematic (parallel cut-camera local ids; unresolvable cuts drop on
-//   load). Unlock: metadata-driven remap plumbed through Save/Load.
+        //   list), TwoBoneIK3D, Cinematic (parallel cut-camera and animation-target local ids;
+//   unresolvable keys drop on load). Unlock: metadata-driven remap plumbed through Save/Load.
         // - Custom JSON shapes (nested objects, derived counts, dynamic lists): AnimationGraph,
         //   LodGroup3D (prefix-encoded level arrays with a derived levelCount), ObjectMetadata,
         //   Script, Skeleton3D (nested bones array), GameplayAttributes, GameplayTags,
@@ -1937,11 +1981,11 @@ MakeMetadataRegistrationUVE(const std::string& componentName,
                       }, IsStatusEffectsComponentValidUVE));
         table.emplace("CinematicComponentUVE",
                       MakeRegistrationUVE<CinematicComponentUVE>([](const nlohmann::json& json) {
-                          // The load pass resolves cuts against the real id table before this
+                          // The load pass resolves references against the real id table before this
                           // registration ever sees the document; the empty table here degrades to
-                          // authored data minus cameras rather than throwing.
+                          // authored data minus cameras and animation targets rather than throwing.
                           CinematicComponentUVE cinematic =
-                              CinematicComponentWithResolvedCutsUVE(json, {});
+                              CinematicComponentWithResolvedReferencesUVE(json, {});
                           if (!IsCinematicComponentValidUVE(cinematic)) {
                               throw std::runtime_error("Invalid CinematicComponentUVE payload");
                           }
@@ -2506,6 +2550,18 @@ MakeMetadataRegistrationUVE(const std::string& componentName,
                     cutCameraLocalIds.push_back(localId);
                 }
                 componentsJson[*name]["cutCameraLocalIds"] = std::move(cutCameraLocalIds);
+                nlohmann::json animTargetLocalIds = nlohmann::json::array();
+                for (const CinematicAnimationKeyUVE& key : cinematic.animationKeys) {
+                    std::uint32_t localId = std::numeric_limits<std::uint32_t>::max();
+                    if (key.target != kInvalidEntityUVE) {
+                        const auto targetIt = entityToLocalId.find(key.target);
+                        if (targetIt != entityToLocalId.end()) {
+                            localId = targetIt->second;
+                        }
+                    }
+                    animTargetLocalIds.push_back(localId);
+                }
+                componentsJson[*name]["animTargetLocalIds"] = std::move(animTargetLocalIds);
             }
             if (type == std::type_index(typeid(Hitbox3DComponentUVE))) {
                 const Hitbox3DComponentUVE& hitbox = entityManager.GetComponentUVE<Hitbox3DComponentUVE>(entity);
@@ -2828,7 +2884,7 @@ void RollbackRestoredEntitiesUVE(IEntityManagerUVE& entityManager, std::vector<E
                 }
                 if (CanonicalComponentNameUVE(componentName) == "CinematicComponentUVE") {
                     CinematicComponentUVE cinematic =
-                        CinematicComponentWithResolvedCutsUVE(componentJson, localIdToEntity);
+                        CinematicComponentWithResolvedReferencesUVE(componentJson, localIdToEntity);
                     if (!IsCinematicComponentValidUVE(cinematic)) {
                         throw std::runtime_error("Invalid CinematicComponentUVE payload");
                     }
