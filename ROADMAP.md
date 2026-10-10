@@ -515,11 +515,10 @@ script per node; see `Engine/Runtime/UVScript/README.md`.
   (lightweight "on overlap, do X" level logic)
 
 ### 7.3 AI
-- [ ] Navmesh generation from level geometry (the `navigation region`/`navigation agent`
-  scene-node kinds already exist as descriptors; no navmesh baking or pathfinding system
-  backs them yet)
-- [ ] A* / pathfinding over the generated navmesh, with agent avoidance (steering around
-  other agents)
+- [x] Navmesh generation from level geometry (BakeNavmeshUVE bakes NavMeshVolume3D regions to
+  rectangles-and-portals meshes, queried through NavmeshUVE)
+- [x] A* / pathfinding over the generated navmesh, with agent avoidance (FindNavPathUVE +
+  string-pulling; NavAgentUVE steers with separation from neighbours)
 - [ ] A behavior-tree or utility-AI framework for authoring NPC decision-making
 - [ ] A perception system (sight/hearing cones feeding AI decisions)
 - [ ] Crowd simulation for large numbers of agents (long-term)
@@ -736,8 +735,8 @@ this list, and are a reasonable place to resume work first:
    (material editor, sequencer, profiler) is more valuable once panels can be freely
    arranged, and building each new tool against the current fixed-position system means
    redoing layout work later.
-4. Navmesh + pathfinding (section 7.3) — the most commonly needed AI building block, and
-   currently completely absent despite scene-node descriptors already anticipating it.
+4. Navmesh + pathfinding (section 7.3) — DONE and checked above (bake, A*, string-pulling,
+   agents with separation steering, 48 tests green). Behavior trees and perception remain.
 5. A minimal real networking transport + replication slice (section 6) — currently the
    least-built major system in the entire engine, and the one most games eventually need
    in some form.
