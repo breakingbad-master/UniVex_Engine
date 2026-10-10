@@ -60,6 +60,9 @@ constexpr const char* kContentEntityPayloadUVE = "UVE_CONTENT_ENTITY_ASSET";
 /// Any other file or folder dragged out of Content (onto a shelf): its content-relative path,
 /// NUL-terminated.
 constexpr const char* kContentItemPayloadUVE = "UVE_CONTENT_ITEM";
+/// Several files dragged out of Content together (a multi-selection): their content-relative
+/// paths, NUL-joined with a NUL after each. Acceptors that only take one path ignore this shape.
+constexpr const char* kContentItemsPayloadUVE = "UVE_CONTENT_ITEMS";
 constexpr const char* kPanelLabelSceneUVE = "\xEF\xAB\xBA Outliner##scene-panel";
 constexpr std::size_t kMaximumEntityNameBytesUVE = 96U;
 // An object icon is 16 px: its texture is 64 px, so 16 is an exact mip level and draws crisp.

@@ -34,6 +34,7 @@
 #include "uve/editor/animation_clip_editing_uve.h"
 #include "uve/editor/editor_color_uve.h"
 #include "uve/editor/editor_commands_uve.h"
+#include "uve/asset/animation_library_asset_uve.h"
 #include "uve/asset/gltf_skeleton_uve.h"
 #include "uve/editor/editor_content_browser_model_uve.h"
 #include "uve/editor/editor_retarget_plan_uve.h"
@@ -297,6 +298,19 @@ struct RetargetWindowStateUVE final {
     std::vector<std::filesystem::path> changedModels;
 };
 
+/// The Animation Library window's state: one open `.uvanimlib`, saved on every edit.
+struct AnimationLibraryWindowStateUVE final {
+    /// The library file (absolute path).
+    std::filesystem::path assetPath;
+    /// The library as last loaded or saved. Every mutation writes the file at once.
+    Asset::AnimationLibraryAssetUVE library;
+    /// The Add Animation picker's pending choice; invalid until the user picks.
+    Asset::AssetGuidUVE pendingAdd{};
+    /// The last result, one line.
+    std::string status;
+    bool statusIsError = false;
+};
+
 class EditorUVE final {
     friend struct Tests::EditorUVEAccessUVE;
     friend class EditorBridgeUVE;
@@ -551,6 +565,23 @@ public:
     void OpenRetargetWindowUVE(std::vector<std::filesystem::path> animations, std::filesystem::path target = {});
     [[nodiscard]] bool IsRetargetWindowOpenUVE() const noexcept { return m_retargetWindow.has_value(); }
     void CloseRetargetWindowUVE();
+    /// Opens `assetPath` (absolute `.uvanimlib`) in the Animation Library window. Opening another
+    /// library switches to it; a file that does not read as a library returns false and leaves
+    /// whatever is open alone.
+    bool OpenAnimationLibraryUVE(const std::filesystem::path& assetPath);
+    [[nodiscard]] bool IsAnimationLibraryWindowOpenUVE() const noexcept { return m_animationLibraryWindow.has_value(); }
+    void CloseAnimationLibraryWindowUVE();
+    /// Re-reads the open library from `libraryAbsolute` when it is the open file; anything else is
+    /// a no-op. Drops onto the file in Content call this so the window never shows stale entries.
+    void RefreshAnimationLibraryWindowUVE(const std::filesystem::path& libraryAbsolute);
+    /// Accepts one Content drop (a single path or many) inside the caller's drag-drop target and
+    /// returns the content-relative paths. The call sites (a library row, the library window) own
+    /// their own target geometry; this only reads the payloads.
+    std::vector<std::filesystem::path> AcceptAnimationLibraryDropPathsUVE();
+    /// Appends `clipAbsolutePaths` to the library file, writing once: only `.uvanim` files that
+    /// load and whose GUIDs are not already listed join. Returns how many entries were added.
+    std::size_t AppendClipsToAnimationLibraryUVE(const std::filesystem::path& libraryAbsolute,
+                                                 const std::vector<std::filesystem::path>& clipAbsolutePaths);
     /// The open entity's file, or empty.
     [[nodiscard]] std::filesystem::path GetEntityEditorAssetPathUVE() const;
     /// The open entity's root object (the one child of the scene root), or kInvalidEntityUVE.
@@ -1253,6 +1284,7 @@ private:
     /// The Entity Editor's own window, and what the main window shows meanwhile.
     void DrawEntityEditorWindowUVE();
     void DrawRetargetWindowUVE();
+    void DrawAnimationLibraryWindowUVE();
     void FinishRetargetJobUVE(RetargetWindowStateUVE& window, Retarget::RetargetFilesResultUVE result);
     /// Gives every Skeleton3D bound to `modelFile`'s source the bones of the conformed model; the
     /// number changed.
@@ -1352,6 +1384,8 @@ private:
         Save,
         /// Motion without a mesh: a model source that holds only a skeleton and its animation.
         Animation,
+        /// A named, ordered collection of animation clips (`.uvanimlib`) that sequencers load from.
+        AnimationLibrary,
         Script,
         Audio,
         Font,
@@ -2040,6 +2074,7 @@ private:
     Math::Vector2UVE m_playBootSplashImageDimensions{};
     std::optional<EntityEditSessionUVE> m_entityEditSession;
     std::optional<RetargetWindowStateUVE> m_retargetWindow;
+    std::optional<AnimationLibraryWindowStateUVE> m_animationLibraryWindow;
     std::optional<RetargetPreviewUVE> m_retargetPreview;
     // Which workspace tab was active before EnterPlayModeUVE() switched to Game, so StopPlayModeUVE()
     // can restore it - mirrors Unity's own Scene<->Game auto-switch on Play/Stop.

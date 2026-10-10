@@ -12,6 +12,7 @@
 #include "Support/test_scratch_uve.h"
 
 #include "uve/asset/animation_clip_asset_uve.h"
+#include "uve/asset/animation_library_asset_uve.h"
 #include "uve/component/name_component_uve.h"
 #include "uve/objects/3d/skeleton_3d_uve.h"
 #include "uve/component/animation_sequencer_component_uve.h"
@@ -46,7 +47,9 @@ TEST(ContentCatalogueUVETest, EveryItemIsCreatableAndGroupsAreInOrder) {
             ++groupIndex;
         }
         ASSERT_LT(groupIndex, groups.size()) << item.id << " is out of group order";
-        if (item.action == ContentCatalogueActionUVE::Folder) {
+        // Folder and LibraryAsset make a file, not entities, so their items carry no objects.
+        if (item.action == ContentCatalogueActionUVE::Folder ||
+            item.action == ContentCatalogueActionUVE::LibraryAsset) {
             EXPECT_TRUE(item.objects.empty());
             continue;
         }
@@ -216,6 +219,31 @@ TEST(ContentCatalogueEditorUVETest, CharacterAssetPlacesAsItsWholeTreeWithOneUnd
         EXPECT_EQ(editor.PlaceEntityAssetUVE(*created), Scene::kInvalidEntityUVE);
         ASSERT_TRUE(editor.StopPlayModeUVE());
 
+        editor.ShutdownUVE();
+    }
+    engine.Shutdown();
+}
+
+TEST(ContentCatalogueEditorUVETest, LibraryAssetCreatesAnEmptyAnimationLibrary) {
+    const std::filesystem::path root = ::UVE::Tests::MakeTestCaseDirectoryUVE("content_catalogue_library");
+    const std::filesystem::path content = root / "Content";
+    std::filesystem::create_directories(content);
+
+    Core::EngineCoreUVE engine(MakeCatalogueEditorConfigUVE(root));
+    engine.Init();
+    ASSERT_TRUE(engine.Load());
+    {
+        EditorUVE editor(engine.GetServicesUVE(), root / "main.uvscene", 100U, &engine);
+        editor.InitUVE();
+        const auto created = editor.CreateContentCatalogueItemUVE("animation-library", content);
+        ASSERT_TRUE(created.has_value());
+        EXPECT_EQ(*created, content / "Animation Library.uvanimlib");
+        Asset::AnimationLibraryAssetUVE library;
+        EXPECT_TRUE(Asset::LoadAnimationLibraryAssetUVE(*created, library));
+        EXPECT_TRUE(library.entries.empty());
+        const auto second = editor.CreateContentCatalogueItemUVE("animation-library", content);
+        ASSERT_TRUE(second.has_value());
+        EXPECT_EQ(*second, content / "Animation Library 2.uvanimlib");
         editor.ShutdownUVE();
     }
     engine.Shutdown();

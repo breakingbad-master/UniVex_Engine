@@ -1,6 +1,7 @@
 // Copyright (c) 2026 UniVex Studios. All Rights Reserved.
 
 #include "uve/asset/animation_clip_asset_uve.h"
+#include "uve/asset/animation_library_asset_uve.h"
 #include "uve/asset/fbx_mesh_converter_uve.h"
 #include "uve/asset/gltf_metadata_uve.h"
 #include "uve/editor/editor_uve.h"
@@ -884,6 +885,19 @@ std::optional<std::filesystem::path> EditorUVE::CreateContentCatalogueItemUVE(
         DestroyDocumentSubtreeUVE(root);
         InvalidateHierarchyFilterCacheUVE();
         return saved ? std::optional<std::filesystem::path>{path} : std::nullopt;
+    }
+
+    if (item->action == ContentCatalogueActionUVE::LibraryAsset) {
+        const std::filesystem::path path = MakeUniqueContentPathUVE(directory, item->label, ".uvanimlib");
+        Asset::AnimationLibraryAssetUVE library;
+        library.libraryId = path.stem().generic_string();
+        if (library.libraryId.empty()) {
+            library.libraryId = "library";
+        }
+        if (!Asset::SaveAnimationLibraryAssetUVE(library, path)) {
+            return std::nullopt;
+        }
+        return path;
     }
 
     if (item->objects.empty()) {
@@ -4854,6 +4868,10 @@ EditorUVE::ContentBrowserItemTypeUVE EditorUVE::ClassifyContentBrowserEntryUVE(
     if (extension == ".uvanim") {
         return ContentBrowserItemTypeUVE::Animation;
     }
+    // A library of clips: its own browser type so it opens in the Animation Library window.
+    if (extension == ".uvanimlib") {
+        return ContentBrowserItemTypeUVE::AnimationLibrary;
+    }
     // Imported clips and the WAV sources the importer reads them from.
     if (extension == ".uvaudio" || extension == ".wav") {
         return ContentBrowserItemTypeUVE::Audio;
@@ -4890,6 +4908,8 @@ const char* EditorUVE::GetContentBrowserItemTypeLabelUVE(const ContentBrowserIte
             return "Save";
         case ContentBrowserItemTypeUVE::Animation:
             return "Animation";
+        case ContentBrowserItemTypeUVE::AnimationLibrary:
+            return "Animation Library";
         case ContentBrowserItemTypeUVE::Script:
             return "Script";
         case ContentBrowserItemTypeUVE::Audio:

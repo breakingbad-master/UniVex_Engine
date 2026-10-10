@@ -174,6 +174,9 @@ void EditorUVE::RenderOverlayUVE() {
     if (m_retargetWindow.has_value()) {
         DrawRetargetWindowUVE();
     }
+    if (m_animationLibraryWindow.has_value()) {
+        DrawAnimationLibraryWindowUVE();
+    }
     // Last, so it floats over every panel.
     DrawCommandPaletteUVE();
     ImGui::PopStyleColor(tintedColors);
