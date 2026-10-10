@@ -10,14 +10,11 @@
 #include <vector>
 
 #include "uve/entity/i_entity_manager_uve.h"
+#include "uve/math/scalar_uve.h"
 #include "uve/objects/3d/abstract_physics_objects_3d_uve.h"
 
 namespace UVE::Scene {
 namespace {
-
-constexpr float kPiUVE = 3.14159265358979323846F;
-constexpr float kRadiansPerDegreeUVE = kPiUVE / 180.0F;
-constexpr float kDegreesPerRadianUVE = 180.0F / kPiUVE;
 
 /// Below this a vector is too short to say anything about direction.
 constexpr float kMinimumNormalizableLengthUVE = 1.0e-12F;
@@ -210,7 +207,7 @@ struct ResolvedConfigUVE final {
         return CharacterSurfaceKindUVE::Invalid;
     }
     const float alignment = std::clamp(Math::DotUVE(*normal, unitUp), -1.0F, 1.0F);
-    const float angleDegrees = std::acos(alignment) * kDegreesPerRadianUVE;
+    const float angleDegrees = Math::RadToDegUVE(std::acos(alignment));
     outAngleDegrees = angleDegrees;
     if (angleDegrees <= config.floorMaxAngleDegrees) {
         return config.detectFloor ? CharacterSurfaceKindUVE::Floor : CharacterSurfaceKindUVE::Wall;
@@ -926,7 +923,7 @@ float Character3DUVE::SlopeAngleDegreesUVE(const Math::Vector3UVE& normal,
         return 0.0F;
     }
     const float alignment = std::clamp(Math::DotUVE(*unitNormal, *up), -1.0F, 1.0F);
-    return std::acos(alignment) * kDegreesPerRadianUVE;
+    return Math::RadToDegUVE(std::acos(alignment));
 }
 
 Math::Vector3UVE Character3DUVE::SlideMotionUVE(const Math::Vector3UVE& motion,

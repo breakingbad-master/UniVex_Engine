@@ -5,6 +5,7 @@
 // setting appears in the right category with the right control, range, tooltip and reset button.
 
 #include "uve/editor/editor_uve.h"
+#include "uve/math/scalar_uve.h"
 
 #include <algorithm>
 #include <array>
@@ -43,11 +44,10 @@ struct PreferenceRowUVE final {
 
 /// A counter-clockwise arrow, "back to the default".
 void DrawResetGlyphUVE(ImDrawList& drawList, const ImVec2 center, const float size, const ImU32 color) {
-    constexpr float kPi = 3.14159265F;
     const float radius = size * 0.3F;
     const float thickness = std::max(1.0F, size * 0.09F);
-    const float start = (-0.5F * kPi) + 0.6F;
-    drawList.PathArcTo(center, radius, start, start + (1.55F * kPi), 18);
+    const float start = (-0.5F * Math::kPiUVE) + 0.6F;
+    drawList.PathArcTo(center, radius, start, start + (1.55F * Math::kPiUVE), 18);
     drawList.PathStroke(color, 0, thickness);
     // The head sits where the arc starts and points back along it, counter-clockwise.
     const ImVec2 radial{std::cos(start), std::sin(start)};

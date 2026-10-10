@@ -16,6 +16,7 @@
 // one, can be renamed but never duplicated, deleted or dragged).
 
 #include "uve/editor/editor_uve.h"
+#include "uve/math/scalar_uve.h"
 
 #include <algorithm>
 #include <array>
@@ -59,10 +60,9 @@ void DrawEyeGlyphUVE(ImDrawList& drawList, const ImVec2 center, const float size
     const float halfWidth = size * 0.42F;
     const float halfHeight = size * 0.24F;
     constexpr int kSegments = 10;
-    constexpr float kPi = 3.14159265F;
     const float thickness = std::max(1.0F, size * 0.08F);
     const auto lidPoint = [&](const float t, const float lift) {
-        return ImVec2{center.x - halfWidth + (2.0F * halfWidth * t), center.y + (lift * std::sin(t * kPi))};
+        return ImVec2{center.x - halfWidth + (2.0F * halfWidth * t), center.y + (lift * std::sin(t * Math::kPiUVE))};
     };
     if (open) {
         // Two arcs meeting at the corners make the almond outline; a filled pupil sits inside.

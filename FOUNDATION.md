@@ -231,10 +231,13 @@ degenerate quaternion all return `false` and leave the out-parameter untouched.
   `kPiUVE`/`kPiDoubleUVE` from `std::numbers`, `DegToRadUVE`/`RadToDegUVE`, `LerpUVE`,
   `ClampUVE` (via `std::clamp`), `SmoothStepUVE`, `ApproximatelyEqualUVE` with explicit
   epsilon — all `constexpr`, floating-point-constrained except `ClampUVE`. The physics
-  (character controller) and animation (two-bone IK) copies now use it, as does the
-  viewport's engine-linked mesh layer; the viewport-core copies stay on `std::numbers`
-  because that target is host-independent by contract. `Test/Math/scalar_uve_tests.cpp`
-  covers values, boundaries and constexpr-use. Verified: full suite green (1318 core + 1668 integration, 2026-10-09). No scalar copies remain outside the header (physics, animation and the viewport mesh layer all point at it; gizmo clean).
+  (character controller) and animation (two-bone IK) copies used it first; Oct 2026 migrated
+  the rest of the literals engine-wide (player/character/world-env/collider, navmesh,
+  renderer sky, perception, the editor panels, clip editing). What stays outside the header
+  is deliberate: viewport-core (`univex/`) has no `uve_math` linkage and stays on
+  `std::numbers` because that target is host-independent by contract, and the shader-source
+  pi literals are GLSL, not C++. `Test/Math/scalar_uve_tests.cpp` covers values, boundaries
+  and constexpr-use. Verified: full suite green (1508 core + 1713 integration + 14 settings, 2026-10-10).
 - `[ ]` **`SphereUVE` and an OBB type** — both named as deferred inside
   `aabb_uve.h` itself. Their absence is why the physics narrow phase carries
   sphere and oriented-box geometry as loose parameters instead of shapes.
@@ -816,7 +819,7 @@ call sites are already allocating from the wrong place.
 
 | # | Item | Module | Unblocks | Done when |
 |---|---|---|---|---|
-| 0.1 | Scalar utility header — `Pi`, `DegToRad`, `RadToDeg`, `LerpUVE`, `ClampUVE`, `SmoothStepUVE`, `ApproximatelyEqualUVE` | `Core/Math` | removes duplicated copies in gizmo, animation and physics code | the three existing copies are deleted and call sites use the shared header |
+| 0.1 | Scalar utility header — `Pi`, `DegToRad`, `RadToDeg`, `LerpUVE`, `ClampUVE`, `SmoothStepUVE`, `ApproximatelyEqualUVE` | `Core/Math` | removes duplicated copies in gizmo, animation and physics code | the three existing copies are deleted and call sites use the shared header - landed (Oct 2026): player/character/world-env/collider/navmesh/renderer/perception runtime literals plus the editor panel/clip-editing literals migrated; viewport-core stays on `std::numbers` by contract |
 | 0.2 | `FixedArrayUVE<T,N>`, `SmallVectorUVE<T,N>`, `SpanUVE` conventions | `Core/Containers` (new build entry) | every bounded list in the engine | `LightListUVE` and the frame-task graph caps are expressed with it |
 | 0.3 | `StdAllocatorUVE<T>` adaptor | `Core/Memory` | makes the existing allocators reachable from any container | a `std::vector` in a test allocates through `PoolAllocatorUVE` and the tracker sees it |
 | 0.4 | `StringIdUVE` interned name | `Core/Strings` | reflection lookups, name-keyed maps | `TypeMetadataEntryUVE` type ids are ids, not strings |

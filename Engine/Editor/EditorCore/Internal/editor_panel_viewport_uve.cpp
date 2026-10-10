@@ -12,6 +12,7 @@
 // Moved verbatim. Not one line of the three functions differs from what was in editor_uve.cpp.
 
 #include "uve/editor/editor_uve.h"
+#include "uve/math/scalar_uve.h"
 
 #include <algorithm>
 #include <array>
@@ -50,10 +51,9 @@ constexpr const char* kPanelLabelViewportUVE = "\xEE\xA9\x94 Viewport##viewport"
 constexpr float kViewportBubbleIconRadiusUVE = 10.0F;
 
 void DrawRotateIconUVE(ImDrawList& drawList, const ImVec2 center, const float radius, const ImU32 color) {
-    constexpr float kPi = 3.14159265F;
     const float arcRadius = radius * 0.58F;
-    constexpr float kStartAngle = -0.35F * kPi;
-    constexpr float kEndAngle = 1.15F * kPi;
+    constexpr float kStartAngle = -0.35F * Math::kPiUVE;
+    constexpr float kEndAngle = 1.15F * Math::kPiUVE;
     drawList.PathArcTo(center, arcRadius, kStartAngle, kEndAngle, 24);
     drawList.PathStroke(color, ImDrawFlags_None, 1.5F);
     const ImVec2 tip{center.x + std::cos(kEndAngle) * arcRadius, center.y + std::sin(kEndAngle) * arcRadius};

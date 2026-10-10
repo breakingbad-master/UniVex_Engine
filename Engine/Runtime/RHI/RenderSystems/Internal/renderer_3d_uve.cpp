@@ -40,6 +40,7 @@
 #include "uve/math/matrix3x3_uve.h"
 #include "uve/math/matrix4x4_uve.h"
 #include "uve/math/quaternion_uve.h"
+#include "uve/math/scalar_uve.h"
 #include "uve/math/vector3_uve.h"
 #include "uve/objects/3d/all_objects_3d_uve.h"
 #include "uve/render_systems/decal_draw_command_uve.h"
@@ -3141,7 +3142,7 @@ void Renderer3DUVE::RenderFrameUVE(Scene::IEntityManagerUVE& entityManager, Scen
     Math::Matrix4x4UVE viewProjection{};
     Math::Vector3UVE viewPosition{};
     Math::QuaternionUVE viewRotation = normalizedCameraRotation;
-    constexpr float kHalfPiUVE = 3.14159265358979323846F * 0.5F;
+    constexpr float kHalfPiUVE = Math::kPiUVE * 0.5F;
     if (capturingProbe) {
         if (!Math::TryNormalizeUVE(m_impl->probeCaptureRotation, viewRotation)) {
             UVE_ERROR("Renderer3DUVE: probe capture rotation is invalid");
@@ -3167,7 +3168,7 @@ void Renderer3DUVE::RenderFrameUVE(Scene::IEntityManagerUVE& entityManager, Scen
         const float skyFovY = camera.projection == Scene::CameraProjectionModeUVE::Orthographic
                                   ? 60.0F
                                   : Scene::VerticalFieldOfViewDegreesUVE(camera, aspectRatio);
-        m_impl->skyTanHalfFov = std::tan(skyFovY * (3.14159265358979323846F / 360.0F));
+        m_impl->skyTanHalfFov = std::tan(skyFovY * (Math::kPiUVE / 360.0F));
     }
     const bool motionBlurHistoryReady =
         !capturingProbe && m_impl->motionBlurHistoryValid &&

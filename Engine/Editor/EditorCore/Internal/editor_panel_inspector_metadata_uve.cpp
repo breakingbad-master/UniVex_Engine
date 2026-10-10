@@ -19,6 +19,7 @@
 // would be wrong rather than merely plain, and each says so at its exclusion below.
 
 #include "uve/editor/editor_uve.h"
+#include "uve/math/scalar_uve.h"
 
 #include <algorithm>
 #include <array>
@@ -219,11 +220,10 @@ constexpr std::array<std::string_view, 11> kBlockPropertyDrawerIdsUVE{
     const ImU32 color = ImGui::GetColorU32(hovered ? ImGuiCol_Text : ImGuiCol_TextDisabled);
     const ImVec2 center{origin.x + (size * 0.5F), origin.y + (size * 0.5F)};
     const float radius = size * 0.28F;
-    constexpr float kPi = 3.14159265F;
-    drawList.PathArcTo(center, radius, kPi * 0.15F, kPi * 1.75F, 16);
+    drawList.PathArcTo(center, radius, Math::kPiUVE * 0.15F, Math::kPiUVE * 1.75F, 16);
     drawList.PathStroke(color, 0, 1.6F);
     // Arrowhead at the arc's start, pointing along the direction of travel.
-    const ImVec2 tip{center.x + (radius * std::cos(kPi * 0.15F)), center.y + (radius * std::sin(kPi * 0.15F))};
+    const ImVec2 tip{center.x + (radius * std::cos(Math::kPiUVE * 0.15F)), center.y + (radius * std::sin(Math::kPiUVE * 0.15F))};
     const float head = size * 0.18F;
     drawList.AddTriangleFilled(ImVec2{tip.x - head, tip.y - (head * 0.2F)}, ImVec2{tip.x + head, tip.y - (head * 0.2F)},
                                ImVec2{tip.x, tip.y + head}, color);

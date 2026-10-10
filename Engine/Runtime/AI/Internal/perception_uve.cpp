@@ -1,6 +1,7 @@
 // Copyright (c) 2026 UniVex Studios. All Rights Reserved.
 
 #include "uve/ai/perception_uve.h"
+#include "uve/math/scalar_uve.h"
 
 #include <algorithm>
 #include <cmath>
@@ -52,7 +53,7 @@ SightResultUVE SenseSightUVE(const Math::Vector3UVE& sensorPosition, const Math:
     const float cosineHalfAngle =
         sensor.sightFieldOfViewDegrees >= kPerceptionOmnidirectionalDegreesUVE - 1e-4F
             ? -2.0F
-            : std::cos(sensor.sightFieldOfViewDegrees * 0.5F * 3.141592653589793F / 180.0F);
+            : std::cos(Math::DegToRadUVE(sensor.sightFieldOfViewDegrees * 0.5F));
     std::vector<std::pair<float, SightTargetUVE>> inView;
     for (const SightTargetUVE& candidate : candidates) {
         const float distance = DistanceBetweenUVE(sensorPosition, candidate.position);
