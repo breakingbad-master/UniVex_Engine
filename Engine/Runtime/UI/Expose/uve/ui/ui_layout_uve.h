@@ -27,10 +27,11 @@ class UIFontAtlasUVE;
 /// Buttons, images, sliders, progress bars, and checkboxes lay out at their rect size, nested
 /// containers at their own rect size, and text at {measured width, fontSize} - the width comes
 /// from `fontAtlas`'s advance sums, so horizontal stacks and grids pace text exactly as it draws.
-/// (Tooltips position themselves at the pointer and never stack.) A child carrying several
-/// positioned components advances the stack by one extent - button first, image second, container
-/// third, slider fourth, progress fifth, checkbox sixth, text last - but every positioned
-/// component it has moves to the laid-out
+/// (Tooltips position themselves at the pointer and never stack; dropdown popups likewise, while
+/// the dropdown's box stacks.) A child carrying several positioned components advances the stack
+/// by one extent - button first, image second, container third, slider fourth, progress fifth,
+/// checkbox sixth, dropdown seventh, text last - but every positioned component it has moves to
+/// the laid-out
 /// position together, so a container with its own background quad stays in one piece. Children
 /// without any positioned component are ignored, not spaced. Depth walks reuse the canvas ancestry cap, so a hierarchy cycle degrades
 /// to an arbitrary-but-stable container order instead of hanging the frame.

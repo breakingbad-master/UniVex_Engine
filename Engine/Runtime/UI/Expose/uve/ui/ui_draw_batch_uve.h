@@ -41,8 +41,8 @@ struct UIQuadUVE final {
 
 /// The CPU-side output of one UIRuntimeUVE::TickUVE() call - a flat, ordered list of quads ready
 /// to be uploaded and drawn. Paint order: canvas sortOrder (orphans at 0, under a sort-0 canvas),
-/// then images and progress bars, then buttons, sliders, and checkboxes, then text and tooltips
-/// on top inside that canvas.
+/// then images and progress bars, then buttons, sliders, checkboxes, and dropdown boxes, then
+/// text, tooltips, and dropdown popups on top inside that canvas.
 struct UIDrawBatchUVE final {
     std::vector<UIQuadUVE> quads;
 };

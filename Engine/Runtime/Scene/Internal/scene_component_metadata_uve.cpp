@@ -39,6 +39,7 @@
 #include "uve/component/ui_anchor_component_uve.h"
 #include "uve/component/ui_button_component_uve.h"
 #include "uve/component/ui_checkbox_component_uve.h"
+#include "uve/component/ui_dropdown_component_uve.h"
 #include "uve/component/ui_image_component_uve.h"
 #include "uve/component/ui_layout_container_component_uve.h"
 #include "uve/component/ui_progress_bar_component_uve.h"
@@ -2042,6 +2043,47 @@ void DeclareMediaAndUIUVE(std::vector<TypeMetadataEntryUVE>& entries) {
                              "hoverTime", "Hover Time", kPropertyTypeFloatUVE),
                          DeclareRuntimeStateUVE<&UITooltipComponentUVE::visibleThisFrame>(
                              "visibleThisFrame", "Visible This Frame", kPropertyTypeBoolUVE),
+                     }));
+    AddUVE<UIDropdownComponentUVE>(
+        entries,
+        MakeEntryUVE("component.ui_dropdown", "UIDropdownComponentUVE", "UI Dropdown",
+                     kSectionOrderTypeSpecificUVE,
+                     {
+                         DeclareUVE<&UIDropdownComponentUVE::rect>("rect", "Rect", kPropertyTypeRectUVE),
+                         DeclareUVE<&UIDropdownComponentUVE::options>("options", "Options",
+                                                                     kPropertyTypeStringUVE),
+                         DeclareUVE<&UIDropdownComponentUVE::selectedIndex>("selectedIndex", "Selected",
+                                                                           kPropertyTypeInt32UVE),
+                         DeclareUVE<&UIDropdownComponentUVE::placeholder>("placeholder", "Placeholder",
+                                                                         kPropertyTypeStringUVE),
+                         DeclareUVE<&UIDropdownComponentUVE::fontSize>("fontSize", "Font Size",
+                                                                      kPropertyTypeFloatUVE),
+                         DeclareUVE<&UIDropdownComponentUVE::optionHeight>("optionHeight", "Option Height",
+                                                                          kPropertyTypeFloatUVE),
+                         DeclareUVE<&UIDropdownComponentUVE::textPadding>("textPadding", "Text Padding",
+                                                                         kPropertyTypeFloatUVE),
+                         DeclareUVE<&UIDropdownComponentUVE::boxColor>("boxColor", "Box",
+                                                                      kPropertyTypeColorUVE),
+                         DeclareUVE<&UIDropdownComponentUVE::boxHoverColor>("boxHoverColor", "Box Hover",
+                                                                           kPropertyTypeColorUVE),
+                         DeclareUVE<&UIDropdownComponentUVE::popupColor>("popupColor", "Popup",
+                                                                        kPropertyTypeColorUVE),
+                         DeclareUVE<&UIDropdownComponentUVE::optionHoverColor>("optionHoverColor",
+                                                                              "Option Hover",
+                                                                              kPropertyTypeColorUVE),
+                         DeclareUVE<&UIDropdownComponentUVE::selectedColor>("selectedColor", "Selected",
+                                                                           kPropertyTypeColorUVE),
+                         DeclareUVE<&UIDropdownComponentUVE::textColor>("textColor", "Text",
+                                                                       kPropertyTypeColorUVE),
+                         DeclareRuntimeStateUVE<&UIDropdownComponentUVE::open>(
+                             "open", "Open", kPropertyTypeBoolUVE),
+                         DeclareRuntimeStateUVE<&UIDropdownComponentUVE::isHovered>(
+                             "isHovered", "Hovered", kPropertyTypeBoolUVE),
+                         DeclareRuntimeStateUVE<&UIDropdownComponentUVE::hoveredIndex>(
+                             "hoveredIndex", "Hovered Option", kPropertyTypeInt32UVE),
+                         DeclareRuntimeStateUVE<&UIDropdownComponentUVE::wasSelectionChangedThisFrame>(
+                             "wasSelectionChangedThisFrame", "Selection Changed This Frame",
+                             kPropertyTypeBoolUVE),
                      }));
 }
 

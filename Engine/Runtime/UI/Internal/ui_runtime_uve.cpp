@@ -7,10 +7,12 @@
 #include <cstdint>
 #include <optional>
 #include <string>
+#include <string_view>
 #include <vector>
 
 #include "uve/component/ui_button_component_uve.h"
 #include "uve/component/ui_checkbox_component_uve.h"
+#include "uve/component/ui_dropdown_component_uve.h"
 #include "uve/component/ui_image_component_uve.h"
 #include "uve/component/ui_progress_bar_component_uve.h"
 #include "uve/component/ui_slider_component_uve.h"
@@ -139,6 +141,43 @@ void AppendImageQuadsUVE(const Scene::UIImageComponentUVE& image, const float al
         return entityManager.GetComponentUVE<Scene::UIProgressBarComponentUVE>(entity).rect;
     }
     return std::nullopt;
+}
+
+/// Splits a dropdown's newline-separated option blob, skipping empty lines - they are never
+/// options. Views into the blob, so the caller keeps the component alive while drawing.
+[[nodiscard]] std::vector<std::string_view> SplitDropdownOptionsUVE(const std::string_view blob) {
+    std::vector<std::string_view> options;
+    std::size_t start = 0U;
+    while (start <= blob.size()) {
+        const std::size_t end = blob.find('\n', start);
+        const std::string_view line = blob.substr(start, end == std::string_view::npos ? end : end - start);
+        if (!line.empty()) {
+            options.push_back(line);
+        }
+        if (end == std::string_view::npos) {
+            break;
+        }
+        start = end + 1U;
+    }
+    return options;
+}
+
+/// The popup rect for an open dropdown: as wide as the box, one optionHeight row per option.
+/// Opens below the box, flips above when below would leave the viewport and above fits, and
+/// otherwise clamps below into the viewport.
+[[nodiscard]] Math::RectUVE DropdownPopupRectUVE(const Scene::UIDropdownComponentUVE& dropdown,
+                                                 const std::size_t optionCount,
+                                                 const Math::Vector2UVE& viewport) {
+    const float height = static_cast<float>(optionCount) * dropdown.optionHeight;
+    const float below = dropdown.rect.position.y + dropdown.rect.size.y;
+    float y = below;
+    if (below + height > viewport.y && dropdown.rect.position.y - height >= 0.0F) {
+        y = dropdown.rect.position.y - height;
+    } else {
+        y = std::min(below, std::max(0.0F, viewport.y - height));
+    }
+    return Math::RectUVE{Math::Vector2UVE{dropdown.rect.position.x, y},
+                         Math::Vector2UVE{dropdown.rect.size.x, height}};
 }
 
 void RankWidgetUVE(const Scene::EntityUVE entity, const CanvasAncestryUVE& ancestry, const std::uint8_t layer,
@@ -454,6 +493,115 @@ void UIRuntimeUVE::TickUVE(Scene::IEntityManagerUVE& entityManager, const Input:
             }
             RankWidgetUVE(entity, ResolveCanvasAncestryUVE(entityManager, entity), 2, std::move(popupQuads), ranked);
             tooltip.visibleThisFrame = true;
+        });
+
+    entityManager.ForEachUVE<Scene::UIDropdownComponentUVE>(
+        [this, &entityManager, &ranked, &mousePosition, mousePressedThisFrame, &glyphQuads, &localization,
+         &translated](const Scene::EntityUVE entity, Scene::UIDropdownComponentUVE& dropdown) {
+            dropdown.wasSelectionChangedThisFrame = false;
+            dropdown.hoveredIndex = -1;
+            if (!ShouldDrawUiWidgetUVE(entityManager, entity) || !IsUIDropdownComponentValidUVE(dropdown)) {
+                dropdown.isHovered = false;
+                dropdown.open = false;
+                return;
+            }
+            const std::vector<std::string_view> options = SplitDropdownOptionsUVE(dropdown.options);
+            const Math::RectUVE popup = DropdownPopupRectUVE(dropdown, options.size(), m_viewportSize);
+            dropdown.isHovered = Math::ContainsUVE(dropdown.rect, mousePosition);
+            if (dropdown.open && !options.empty()) {
+                const float row = (mousePosition.y - popup.position.y) / dropdown.optionHeight;
+                const std::int32_t index = static_cast<std::int32_t>(row);
+                if (mousePosition.x >= popup.position.x && mousePosition.x < popup.position.x + popup.size.x &&
+                    row >= 0.0F && index < static_cast<std::int32_t>(options.size())) {
+                    dropdown.hoveredIndex = index;
+                }
+            }
+            if (mousePressedThisFrame) {
+                if (dropdown.isHovered) {
+                    dropdown.open = !dropdown.open;
+                } else if (dropdown.open && dropdown.hoveredIndex >= 0) {
+                    dropdown.selectedIndex = dropdown.hoveredIndex;
+                    dropdown.open = false;
+                    dropdown.wasSelectionChangedThisFrame = true;
+                } else if (dropdown.open) {
+                    dropdown.open = false;
+                }
+            }
+            const float alpha = TweenedAlphaUVE(entityManager, entity, 1.0F);
+            const CanvasAncestryUVE ancestry = ResolveCanvasAncestryUVE(entityManager, entity);
+            UIQuadUVE box{};
+            box.rect = dropdown.rect;
+            box.color = dropdown.isHovered ? dropdown.boxHoverColor : dropdown.boxColor;
+            box.alpha = alpha;
+            box.kind = UIDrawItemKindUVE::SolidColor;
+            RankWidgetUVE(entity, ancestry, 1, std::vector<UIQuadUVE>{box}, ranked);
+            std::vector<UIQuadUVE> textQuads;
+            const auto emitLabel = [&](const std::string_view label, const float x, const float baselineY) {
+                glyphQuads.clear();
+                std::string_view shown = label;
+                if (localization.service != nullptr &&
+                    (!localization.isAutoTranslated || localization.isAutoTranslated(entity))) {
+                    translated = localization.service->TranslateUVE(std::string(label));
+                    shown = translated;
+                }
+                float cursorX = x;
+                float cursorY = baselineY;
+                m_fontAtlas.AppendTextQuadsUVE(shown, cursorX, cursorY, dropdown.fontSize, glyphQuads);
+                for (const UIGlyphQuadUVE& glyphQuad : glyphQuads) {
+                    UIQuadUVE quad{};
+                    quad.rect =
+                        Math::RectUVE{Math::Vector2UVE{glyphQuad.x0, glyphQuad.y0},
+                                       Math::Vector2UVE{glyphQuad.x1 - glyphQuad.x0, glyphQuad.y1 - glyphQuad.y0}};
+                    quad.u0 = glyphQuad.u0;
+                    quad.v0 = glyphQuad.v0;
+                    quad.u1 = glyphQuad.u1;
+                    quad.v1 = glyphQuad.v1;
+                    quad.color = dropdown.textColor;
+                    quad.alpha = alpha;
+                    quad.kind = UIDrawItemKindUVE::Glyph;
+                    textQuads.push_back(quad);
+                }
+            };
+            const std::int32_t selectedShown =
+                options.empty() ? -1
+                                : std::min(dropdown.selectedIndex,
+                                           static_cast<std::int32_t>(options.size()) - 1);
+            if (selectedShown >= 0) {
+                emitLabel(options[static_cast<std::size_t>(selectedShown)],
+                          dropdown.rect.position.x + dropdown.textPadding,
+                          dropdown.rect.position.y + dropdown.textPadding + dropdown.fontSize);
+            } else {
+                emitLabel(dropdown.placeholder, dropdown.rect.position.x + dropdown.textPadding,
+                          dropdown.rect.position.y + dropdown.textPadding + dropdown.fontSize);
+            }
+            if (dropdown.open && !options.empty()) {
+                UIQuadUVE background{};
+                background.rect = popup;
+                background.color = dropdown.popupColor;
+                background.alpha = alpha;
+                background.kind = UIDrawItemKindUVE::SolidColor;
+                textQuads.push_back(background);
+                for (std::size_t i = 0U; i < options.size(); ++i) {
+                    const std::int32_t row = static_cast<std::int32_t>(i);
+                    if (row != dropdown.hoveredIndex && row != selectedShown) {
+                        continue;
+                    }
+                    UIQuadUVE highlight{};
+                    highlight.rect = Math::RectUVE{
+                        Math::Vector2UVE{popup.position.x, popup.position.y + static_cast<float>(i) * dropdown.optionHeight},
+                        Math::Vector2UVE{popup.size.x, dropdown.optionHeight}};
+                    highlight.color = row == dropdown.hoveredIndex ? dropdown.optionHoverColor : dropdown.selectedColor;
+                    highlight.alpha = alpha;
+                    highlight.kind = UIDrawItemKindUVE::SolidColor;
+                    textQuads.push_back(highlight);
+                }
+                for (std::size_t i = 0U; i < options.size(); ++i) {
+                    emitLabel(options[i], popup.position.x + dropdown.textPadding,
+                              popup.position.y + static_cast<float>(i) * dropdown.optionHeight +
+                                  dropdown.textPadding + dropdown.fontSize);
+                }
+            }
+            RankWidgetUVE(entity, ancestry, 2, std::move(textQuads), ranked);
         });
 
     std::sort(ranked.begin(), ranked.end(), [](const RankedWidgetUVE& lhs, const RankedWidgetUVE& rhs) {
