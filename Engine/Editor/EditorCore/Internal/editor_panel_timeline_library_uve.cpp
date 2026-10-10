@@ -56,6 +56,27 @@ namespace {
     return stem.substr(first, stem.find_last_not_of(' ') - first + 1U);
 }
 
+/// The picker's start folder for `clip`: the folder holding the clip file, or Content/Animations
+/// when it is unknown (Content itself when even that is missing). Found through the snapshot's
+/// registered GUIDs, never by guessing path spellings.
+[[nodiscard]] std::filesystem::path PickerStartDirectoryUVE(const Asset::ProjectFileSnapshotUVE& project,
+                                                            Asset::AssetGuidUVE clip) {
+    if (clip != Asset::AssetGuidUVE{}) {
+        for (const Asset::ProjectFileEntryUVE& entry : project.entries) {
+            if (entry.registeredAssetGuid.has_value() && *entry.registeredAssetGuid == clip) {
+                return entry.relativePath.parent_path();
+            }
+        }
+    }
+    const std::filesystem::path fallback{"Animations"};
+    for (const Asset::ProjectFileEntryUVE& entry : project.entries) {
+        if (entry.kind == Asset::ProjectFileEntryKindUVE::Directory && entry.relativePath == fallback) {
+            return fallback;
+        }
+    }
+    return std::filesystem::path{};
+}
+
 /// The library entry name for `guid`: the clip file's stem, or "(missing)" when the database no
 /// longer resolves it. Cut to what the file format holds.
 [[nodiscard]] std::string SequencerLibraryEntryNameUVE(Asset::IAssetDatabaseUVE& assetDatabase,
@@ -555,54 +576,16 @@ void EditorUVE::DrawAnimationPickerUVE(const Scene::EntityUVE player, const Scen
             }
             ImGui::EndMenu();
         }
-        // Every library in the project: importing one appends the clips the player lacks.
-        std::optional<std::filesystem::path> importPath;
-        if (ImGui::BeginMenu("+  Import Library...")) {
-            int shown = 0;
-            for (const Asset::ProjectFileEntryUVE& entry : project.entries) {
-                if (entry.kind != Asset::ProjectFileEntryKindUVE::File ||
-                    entry.relativePath.extension() != ".uvanimlib") {
-                    continue;
-                }
-                if (!matches(entry.relativePath.stem().string())) {
-                    continue;
-                }
-                ++shown;
-                const std::string folder = entry.relativePath.parent_path().string();
-                if (ImGui::MenuItem(entry.relativePath.stem().string().c_str(),
-                                    folder.empty() ? "Content" : folder.c_str())) {
-                    importPath = project.contentRoot / entry.relativePath;
-                }
-            }
-            if (shown == 0) {
-                ImGui::TextDisabled("No animation libraries in the project yet.");
-            }
-            ImGui::EndMenu();
+        // A library from anywhere in Content: importing one appends the clips the player lacks.
+        bool importLibrary = false;
+        if (ImGui::Selectable("+  Import Library...")) {
+            importLibrary = true;
         }
-        std::optional<std::filesystem::path> linkPath;
+        bool linkLibrary = false;
         bool unlinkRequested = false;
         if (component.libraryRef == Asset::AssetGuidUVE{}) {
-            if (ImGui::BeginMenu("Link Library...")) {
-                int shown = 0;
-                for (const Asset::ProjectFileEntryUVE& entry : project.entries) {
-                    if (entry.kind != Asset::ProjectFileEntryKindUVE::File ||
-                        entry.relativePath.extension() != ".uvanimlib") {
-                        continue;
-                    }
-                    if (!matches(entry.relativePath.stem().string())) {
-                        continue;
-                    }
-                    ++shown;
-                    const std::string folder = entry.relativePath.parent_path().string();
-                    if (ImGui::MenuItem(entry.relativePath.stem().string().c_str(),
-                                        folder.empty() ? "Content" : folder.c_str())) {
-                        linkPath = project.contentRoot / entry.relativePath;
-                    }
-                }
-                if (shown == 0) {
-                    ImGui::TextDisabled("No animation libraries in the project yet.");
-                }
-                ImGui::EndMenu();
+            if (ImGui::Selectable("Link Library...")) {
+                linkLibrary = true;
             }
         } else {
             const std::filesystem::path linkedPath = assetDatabase.ResolveUVE(component.libraryRef);
@@ -633,11 +616,27 @@ void EditorUVE::DrawAnimationPickerUVE(const Scene::EntityUVE player, const Scen
         if (addPath.has_value()) {
             static_cast<void>(AddClipToAnimationSequencerUVE(player, *addPath));
         }
-        if (importPath.has_value()) {
-            static_cast<void>(ImportAnimationLibraryIntoSequencerUVE(player, *importPath));
+        if (importLibrary) {
+            FilePickerRequestUVE request;
+            request.mode = FilePickerModeUVE::Open;
+            request.title = "Import Library";
+            request.extension = ".uvanimlib";
+            request.startDirectory = PickerStartDirectoryUVE(project, component.clip);
+            request.onPick = [this, player](const std::filesystem::path& path) {
+                static_cast<void>(ImportAnimationLibraryIntoSequencerUVE(player, path));
+            };
+            OpenFilePickerUVE(std::move(request));
         }
-        if (linkPath.has_value()) {
-            static_cast<void>(LinkAnimationLibraryToSequencerUVE(player, *linkPath));
+        if (linkLibrary) {
+            FilePickerRequestUVE request;
+            request.mode = FilePickerModeUVE::Open;
+            request.title = "Link Library";
+            request.extension = ".uvanimlib";
+            request.startDirectory = PickerStartDirectoryUVE(project, component.clip);
+            request.onPick = [this, player](const std::filesystem::path& path) {
+                static_cast<void>(LinkAnimationLibraryToSequencerUVE(player, path));
+            };
+            OpenFilePickerUVE(std::move(request));
         }
         if (unlinkRequested) {
             static_cast<void>(UnlinkAnimationLibraryFromSequencerUVE(player));
@@ -646,8 +645,16 @@ void EditorUVE::DrawAnimationPickerUVE(const Scene::EntityUVE player, const Scen
             const std::string owner = entityManager.HasComponentUVE<Scene::NameComponentUVE>(player)
                                           ? entityManager.GetComponentUVE<Scene::NameComponentUVE>(player).name
                                           : std::string{"Animation"};
-            m_timeline.exportLibraryRequested = true;
-            m_timeline.exportLibraryName = SafeLibraryStemUVE(owner) + " Library";
+            FilePickerRequestUVE request;
+            request.mode = FilePickerModeUVE::Save;
+            request.title = "Export Library";
+            request.extension = ".uvanimlib";
+            request.startDirectory = PickerStartDirectoryUVE(project, component.clip);
+            request.saveName = SafeLibraryStemUVE(owner) + " Library";
+            request.onPick = [this, player](const std::filesystem::path& path) {
+                static_cast<void>(ExportAnimationSequencerToLibraryUVE(player, path));
+            };
+            OpenFilePickerUVE(std::move(request));
         }
         if (removeGuid.has_value()) {
             const Asset::AssetGuidUVE guid = *removeGuid;
@@ -762,50 +769,6 @@ void EditorUVE::DrawAnimationPickerUVE(const Scene::EntityUVE player, const Scen
                     m_timeline.clipCards.erase(m_timeline.clipGuid.value);
                     m_timeline.status = "Renamed to " + renamedPath->filename().string();
                 }
-            }
-            ImGui::CloseCurrentPopup();
-        }
-        ImGui::EndPopup();
-    }
-
-    // Exporting the player's list: a name, checked on Enter, saved beside the current clip (or in
-    // Content/Animations when the player has none yet).
-    if (m_timeline.exportLibraryRequested) {
-        m_timeline.exportLibraryRequested = false;
-        ImGui::OpenPopup("##tl-export-library");
-    }
-    if (ImGui::BeginPopup("##tl-export-library")) {
-        ImGui::TextDisabled("Library name");
-        char buffer[129];
-        std::snprintf(buffer, sizeof(buffer), "%s", m_timeline.exportLibraryName.c_str());
-        if (ImGui::IsWindowAppearing()) {
-            ImGui::SetKeyboardFocusHere();
-        }
-        ImGui::SetNextItemWidth(240.0F);
-        const bool entered = ImGui::InputText("##tl-export-library-field", buffer, sizeof(buffer),
-                                              ImGuiInputTextFlags_EnterReturnsTrue | ImGuiInputTextFlags_AutoSelectAll);
-        m_timeline.exportLibraryName = buffer;
-        std::filesystem::path directory = project.contentRoot / "Animations";
-        if (component.clip != Asset::AssetGuidUVE{}) {
-            const std::filesystem::path currentPath = assetDatabase.ResolveUVE(component.clip);
-            if (!currentPath.empty()) {
-                directory = currentPath.parent_path();
-            }
-        }
-        const std::string stem =
-            m_timeline.exportLibraryName.empty() ? std::string{"New Library"} : m_timeline.exportLibraryName;
-        const std::filesystem::path preview = MakeUniqueContentPathUVE(directory, stem, ".uvanimlib");
-        const std::string previewName = preview.filename().string();
-        ImGui::TextDisabled("Saves to %s", previewName.c_str());
-        if (entered) {
-            const std::string& name = m_timeline.exportLibraryName;
-            if (name.empty() || name.find('/') != std::string::npos || name.find('\\') != std::string::npos) {
-                m_timeline.status = "Give the library a file name (no slashes).";
-            } else {
-                std::error_code error;
-                std::filesystem::create_directories(directory, error);
-                static_cast<void>(
-                    ExportAnimationSequencerToLibraryUVE(player, MakeUniqueContentPathUVE(directory, name, ".uvanimlib")));
             }
             ImGui::CloseCurrentPopup();
         }

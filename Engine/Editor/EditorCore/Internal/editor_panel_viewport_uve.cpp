@@ -177,6 +177,9 @@ void EditorUVE::RenderOverlayUVE() {
     if (m_animationLibraryWindow.has_value()) {
         DrawAnimationLibraryWindowUVE();
     }
+    if (m_filePicker.has_value()) {
+        DrawFilePickerUVE();
+    }
     // Last, so it floats over every panel.
     DrawCommandPaletteUVE();
     ImGui::PopStyleColor(tintedColors);

@@ -498,6 +498,7 @@ add_executable(uve_editor_tests
     Editor/animation_clip_editing_uve_tests.cpp
     Editor/animation_graph_editing_uve_tests.cpp
     Editor/scene_component_authoring_uve_tests.cpp
+    Editor/file_picker_uve_tests.cpp
     Editor/scene_object_editor_uve_tests.cpp
 )
 target_link_libraries(uve_editor_tests PRIVATE

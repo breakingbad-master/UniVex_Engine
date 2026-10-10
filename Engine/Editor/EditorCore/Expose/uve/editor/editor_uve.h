@@ -314,6 +314,44 @@ struct AnimationLibraryWindowStateUVE final {
     std::string entryName;
 };
 
+/// Open an existing file, or name a new one.
+enum class FilePickerModeUVE {
+    Open,
+    Save,
+};
+
+/// One floating file pick: what it picks and where the choice goes. `extension` is the dotted
+/// kind (".uvanimlib"); `startDirectory` is content-relative (empty is Content itself); `onPick`
+/// fires once with the absolute choice, or never when the pick is cancelled.
+struct FilePickerRequestUVE final {
+    FilePickerModeUVE mode = FilePickerModeUVE::Open;
+    std::string title;
+    std::string extension;
+    std::filesystem::path startDirectory;
+    std::string saveName;
+    std::function<void(const std::filesystem::path&)> onPick;
+};
+
+/// The picker's live state: the request plus its navigation.
+struct FilePickerStateUVE final {
+    FilePickerRequestUVE request;
+    /// Content-relative; empty is Content itself.
+    std::filesystem::path directory;
+    /// The chosen file, content-relative.
+    std::optional<std::filesystem::path> selectedFile;
+    std::string search;
+    std::string saveName;
+    /// The last result, one line.
+    std::string status;
+    bool statusIsError = false;
+};
+
+/// The picker's listing for one folder: content-relative subfolders and matching files, sorted.
+struct FilePickerListingUVE final {
+    std::vector<std::filesystem::path> folders;
+    std::vector<std::filesystem::path> files;
+};
+
 class EditorUVE final {
     friend struct Tests::EditorUVEAccessUVE;
     friend class EditorBridgeUVE;
@@ -561,6 +599,17 @@ public:
     static std::vector<Asset::AssetGuidUVE> MergeSequencerClipListsUVE(const std::vector<Asset::AssetGuidUVE>& owned,
                                                                        Asset::AssetGuidUVE clip,
                                                                        const std::vector<Asset::AssetGuidUVE>& linked);
+    /// Opens the floating file picker for `request`. One picker at a time: opening another
+    /// replaces the pending one, and the replaced `onPick` never fires.
+    void OpenFilePickerUVE(FilePickerRequestUVE request);
+    [[nodiscard]] bool IsFilePickerOpenUVE() const noexcept { return m_filePicker.has_value(); }
+    void CloseFilePickerUVE();
+    void DrawFilePickerUVE();
+    /// The picker's listing for `directory` (content-relative, empty is Content): its subfolders
+    /// plus its files with `extension` whose stems contain `search` (case-insensitive). Sorted.
+    static FilePickerListingUVE BuildFilePickerListingUVE(const std::vector<Asset::ProjectFileEntryUVE>& entries,
+                                                           const std::filesystem::path& directory,
+                                                           std::string_view extension, std::string_view search);
 
     /// Brings a model source (an FBX, glTF or OBJ in Content, by its content-relative path) into the
     /// scene as one undo step and returns its root. A file with bones becomes
@@ -2097,6 +2146,7 @@ private:
     std::optional<EntityEditSessionUVE> m_entityEditSession;
     std::optional<RetargetWindowStateUVE> m_retargetWindow;
     std::optional<AnimationLibraryWindowStateUVE> m_animationLibraryWindow;
+    std::optional<FilePickerStateUVE> m_filePicker;
     std::optional<RetargetPreviewUVE> m_retargetPreview;
     // Which workspace tab was active before EnterPlayModeUVE() switched to Game, so StopPlayModeUVE()
     // can restore it - mirrors Unity's own Scene<->Game auto-switch on Play/Stop.
@@ -2261,9 +2311,6 @@ private:
         std::string pickerSearch;
         bool renameClipRequested = false;
         std::string clipName;
-        /// A request to export the player's list, and the library name the popup edits.
-        bool exportLibraryRequested = false;
-        std::string exportLibraryName;
         /// The linked `.uvanimlib`'s cache: the link this was read for, the file's stem, its clip
         /// GUIDs in file order, and whether a set link is unreadable. Refreshed when the picker
         /// opens and whenever the link changes, so the section always shows the file as it is.
