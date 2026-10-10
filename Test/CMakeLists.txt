@@ -388,6 +388,7 @@ add_executable(uve_integration_tests
     UI/ui_checkbox_tooltip_uve_tests.cpp
     UI/ui_dropdown_uve_tests.cpp
     UI/ui_text_input_uve_tests.cpp
+    UI/ui_scroll_uve_tests.cpp
 )
 if(UVE_HAS_DESKTOP_GL)
     target_sources(uve_integration_tests PRIVATE

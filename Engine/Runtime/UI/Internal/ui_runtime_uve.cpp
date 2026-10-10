@@ -10,11 +10,13 @@
 #include <string_view>
 #include <vector>
 
+#include "uve/component/hierarchy_component_uve.h"
 #include "uve/component/ui_button_component_uve.h"
 #include "uve/component/ui_checkbox_component_uve.h"
 #include "uve/component/ui_dropdown_component_uve.h"
 #include "uve/component/ui_image_component_uve.h"
 #include "uve/component/ui_progress_bar_component_uve.h"
+#include "uve/component/ui_scroll_container_component_uve.h"
 #include "uve/component/ui_slider_component_uve.h"
 #include "uve/component/ui_text_component_uve.h"
 #include "uve/component/ui_text_input_component_uve.h"
@@ -24,6 +26,7 @@
 #include "uve/ui/canvas_ancestry_uve.h"
 #include "uve/ui/ui_anchors_uve.h"
 #include "uve/ui/ui_layout_uve.h"
+#include "uve/ui/ui_scroll_uve.h"
 #include "uve/ui/ui_tween_uve.h"
 
 namespace UVE::UI {
@@ -125,6 +128,69 @@ void AppendImageQuadsUVE(const Scene::UIImageComponentUVE& image, const float al
 
 /// The rect a tooltip watches: the entity's first rect widget in button/slider/checkbox/image/
 /// progress priority. Text-only entities hover nothing - a tooltip needs a rect to watch.
+[[nodiscard]] std::optional<Math::RectUVE> ScrollClipOfUVE(Scene::IEntityManagerUVE& entityManager,
+                                                           const Scene::EntityUVE entity) {
+    std::optional<Math::RectUVE> clip;
+    Scene::EntityUVE current = entity;
+    for (std::size_t depth = 0U; depth < kMaximumCanvasAncestorWalkUVE; ++depth) {
+        if (!entityManager.IsAliveUVE(current) ||
+            !entityManager.HasComponentUVE<Scene::HierarchyComponentUVE>(current)) {
+            break;
+        }
+        const Scene::EntityUVE parent =
+            entityManager.GetComponentUVE<Scene::HierarchyComponentUVE>(current).parent;
+        if (parent == Scene::kInvalidEntityUVE || !entityManager.IsAliveUVE(parent) || parent == current) {
+            break;
+        }
+        if (entityManager.HasComponentUVE<Scene::UIScrollContainerComponentUVE>(parent)) {
+            const Scene::UIScrollContainerComponentUVE& scroll =
+                entityManager.GetComponentUVE<Scene::UIScrollContainerComponentUVE>(parent);
+            if (IsUIScrollContainerComponentValidUVE(scroll)) {
+                clip = clip.has_value() ? Math::IntersectionUVE(*clip, scroll.rect) : scroll.rect;
+            }
+        }
+        current = parent;
+    }
+    return clip;
+}
+
+[[nodiscard]] bool ClipQuadUVE(UIQuadUVE& quad, const Math::RectUVE& clip) {
+    if (!(quad.rect.size.x > 0.0F) || !(quad.rect.size.y > 0.0F)) {
+        return false;
+    }
+    const Math::RectUVE surviving = Math::IntersectionUVE(quad.rect, clip);
+    if (!(surviving.size.x > 0.0F) || !(surviving.size.y > 0.0F)) {
+        return false;
+    }
+    if (quad.kind != UIDrawItemKindUVE::SolidColor) {
+        const float oldU0 = quad.u0;
+        const float oldV0 = quad.v0;
+        const float uSpan = quad.u1 - oldU0;
+        const float vSpan = quad.v1 - oldV0;
+        quad.u0 = oldU0 + (surviving.position.x - quad.rect.position.x) / quad.rect.size.x * uSpan;
+        quad.u1 = oldU0 + (surviving.position.x + surviving.size.x - quad.rect.position.x) / quad.rect.size.x *
+                              uSpan;
+        quad.v0 = oldV0 + (surviving.position.y - quad.rect.position.y) / quad.rect.size.y * vSpan;
+        quad.v1 = oldV0 + (surviving.position.y + surviving.size.y - quad.rect.position.y) / quad.rect.size.y *
+                              vSpan;
+    }
+    quad.rect = surviving;
+    return true;
+}
+
+[[nodiscard]] bool MouseInScrollAncestorsUVE(Scene::IEntityManagerUVE& entityManager,
+                                             const Scene::EntityUVE entity,
+                                             const Math::Vector2UVE& mousePosition) {
+    const std::optional<Math::RectUVE> clip = ScrollClipOfUVE(entityManager, entity);
+    return !clip.has_value() || Math::ContainsUVE(*clip, mousePosition);
+}
+
+[[nodiscard]] bool ContainsClippedUVE(Scene::IEntityManagerUVE& entityManager, const Scene::EntityUVE entity,
+                                      const Math::RectUVE& rect, const Math::Vector2UVE& mousePosition) {
+    return Math::ContainsUVE(rect, mousePosition) &&
+           MouseInScrollAncestorsUVE(entityManager, entity, mousePosition);
+}
+
 [[nodiscard]] std::optional<Math::RectUVE> TooltipAnchorRectUVE(Scene::IEntityManagerUVE& entityManager,
                                                                const Scene::EntityUVE entity) {
     if (entityManager.HasComponentUVE<Scene::UIButtonComponentUVE>(entity)) {
@@ -258,6 +324,7 @@ void UIRuntimeUVE::TickUVE(Scene::IEntityManagerUVE& entityManager, const Input:
     // widget is within the same tick.
     ResolveUIAnchorsUVE(entityManager, m_viewportSize);
     LayoutUIContainersUVE(entityManager, m_fontAtlas);
+    LayoutUIScrollContainersUVE(entityManager, inputSystem, m_fontAtlas);
     TickUITweensUVE(entityManager, m_deltaTime);
     m_drawBatch.quads.clear();
     std::vector<RankedWidgetUVE> ranked;
@@ -316,7 +383,7 @@ void UIRuntimeUVE::TickUVE(Scene::IEntityManagerUVE& entityManager, const Input:
                 button.wasClickedThisFrame = false;
                 return;
             }
-            button.isHovered = Math::ContainsUVE(button.rect, mousePosition);
+            button.isHovered = ContainsClippedUVE(entityManager, entity, button.rect, mousePosition);
             button.wasClickedThisFrame = button.isHovered && mousePressedThisFrame;
 
             UIQuadUVE quad{};
@@ -336,7 +403,7 @@ void UIRuntimeUVE::TickUVE(Scene::IEntityManagerUVE& entityManager, const Input:
                 slider.wasChangedThisFrame = false;
                 return;
             }
-            slider.isHovered = Math::ContainsUVE(slider.rect, mousePosition);
+            slider.isHovered = ContainsClippedUVE(entityManager, entity, slider.rect, mousePosition);
             slider.wasChangedThisFrame = false;
             if (slider.isDragging && !mouseDown) {
                 slider.isDragging = false;
@@ -401,7 +468,7 @@ void UIRuntimeUVE::TickUVE(Scene::IEntityManagerUVE& entityManager, const Input:
                 checkbox.wasToggledThisFrame = false;
                 return;
             }
-            checkbox.isHovered = Math::ContainsUVE(checkbox.rect, mousePosition);
+            checkbox.isHovered = ContainsClippedUVE(entityManager, entity, checkbox.rect, mousePosition);
             checkbox.wasToggledThisFrame = checkbox.isHovered && mousePressedThisFrame;
             if (checkbox.wasToggledThisFrame) {
                 checkbox.checked = !checkbox.checked;
@@ -472,7 +539,7 @@ void UIRuntimeUVE::TickUVE(Scene::IEntityManagerUVE& entityManager, const Input:
                 return;
             }
             const std::optional<Math::RectUVE> anchor = TooltipAnchorRectUVE(entityManager, entity);
-            if (!anchor.has_value() || !Math::ContainsUVE(*anchor, mousePosition)) {
+            if (!anchor.has_value() || !ContainsClippedUVE(entityManager, entity, *anchor, mousePosition)) {
                 tooltip.hoverTime = 0.0F;
                 return;
             }
@@ -534,12 +601,13 @@ void UIRuntimeUVE::TickUVE(Scene::IEntityManagerUVE& entityManager, const Input:
             }
             const std::vector<std::string_view> options = SplitDropdownOptionsUVE(dropdown.options);
             const Math::RectUVE popup = DropdownPopupRectUVE(dropdown, options.size(), m_viewportSize);
-            dropdown.isHovered = Math::ContainsUVE(dropdown.rect, mousePosition);
+            dropdown.isHovered = ContainsClippedUVE(entityManager, entity, dropdown.rect, mousePosition);
             if (dropdown.open && !options.empty()) {
                 const float row = (mousePosition.y - popup.position.y) / dropdown.optionHeight;
                 const std::int32_t index = static_cast<std::int32_t>(row);
                 if (mousePosition.x >= popup.position.x && mousePosition.x < popup.position.x + popup.size.x &&
-                    row >= 0.0F && index < static_cast<std::int32_t>(options.size())) {
+                    row >= 0.0F && index < static_cast<std::int32_t>(options.size()) &&
+                    MouseInScrollAncestorsUVE(entityManager, entity, mousePosition)) {
                     dropdown.hoveredIndex = index;
                 }
             }
@@ -642,7 +710,7 @@ void UIRuntimeUVE::TickUVE(Scene::IEntityManagerUVE& entityManager, const Input:
                 return;
             }
             if (mousePressedThisFrame) {
-                const bool hovered = Math::ContainsUVE(field.rect, mousePosition);
+                const bool hovered = ContainsClippedUVE(entityManager, entity, field.rect, mousePosition);
                 if (hovered != field.focused) {
                     field.blinkTime = 0.0F;
                 }
@@ -777,6 +845,16 @@ void UIRuntimeUVE::TickUVE(Scene::IEntityManagerUVE& entityManager, const Input:
         }
         return lhs.entityGeneration < rhs.entityGeneration;
     });
+    for (RankedWidgetUVE& widget : ranked) {
+        const Scene::EntityUVE entity{widget.entityIndex, widget.entityGeneration};
+        const std::optional<Math::RectUVE> clip = ScrollClipOfUVE(entityManager, entity);
+        if (!clip.has_value()) {
+            continue;
+        }
+        widget.quads.erase(std::remove_if(widget.quads.begin(), widget.quads.end(),
+                                          [&clip](UIQuadUVE& quad) { return !ClipQuadUVE(quad, *clip); }),
+                           widget.quads.end());
+    }
     for (const RankedWidgetUVE& widget : ranked) {
         m_drawBatch.quads.insert(m_drawBatch.quads.end(), widget.quads.begin(), widget.quads.end());
     }

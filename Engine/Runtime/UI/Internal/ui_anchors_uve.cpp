@@ -13,6 +13,7 @@
 #include "uve/component/ui_checkbox_component_uve.h"
 #include "uve/component/ui_dropdown_component_uve.h"
 #include "uve/component/ui_image_component_uve.h"
+#include "uve/component/ui_scroll_container_component_uve.h"
 #include "uve/component/ui_text_input_component_uve.h"
 #include "uve/component/ui_layout_container_component_uve.h"
 #include "uve/component/ui_progress_bar_component_uve.h"
@@ -69,6 +70,9 @@ struct AnchoredWidgetUVE final {
     if (entityManager.HasComponentUVE<Scene::UITextInputComponentUVE>(parent)) {
         return entityManager.GetComponentUVE<Scene::UITextInputComponentUVE>(parent).rect;
     }
+    if (entityManager.HasComponentUVE<Scene::UIScrollContainerComponentUVE>(parent)) {
+        return entityManager.GetComponentUVE<Scene::UIScrollContainerComponentUVE>(parent).rect;
+    }
     return viewport;
 }
 
@@ -109,9 +113,11 @@ void ResolveUIAnchorsUVE(Scene::IEntityManagerUVE& entityManager,
         const bool isCheckbox = entityManager.HasComponentUVE<Scene::UICheckboxComponentUVE>(widget.entity);
         const bool isDropdown = entityManager.HasComponentUVE<Scene::UIDropdownComponentUVE>(widget.entity);
         const bool isTextInput = entityManager.HasComponentUVE<Scene::UITextInputComponentUVE>(widget.entity);
+        const bool isScrollContainer =
+            entityManager.HasComponentUVE<Scene::UIScrollContainerComponentUVE>(widget.entity);
         const bool isText = entityManager.HasComponentUVE<Scene::UITextComponentUVE>(widget.entity);
         if (!isButton && !isImage && !isContainer && !isSlider && !isProgress && !isCheckbox && !isDropdown &&
-            !isTextInput && !isText) {
+            !isTextInput && !isScrollContainer && !isText) {
             continue;
         }
         const Math::RectUVE parent = AnchorParentRectUVE(entityManager, widget.entity, viewportSize);
@@ -155,6 +161,10 @@ void ResolveUIAnchorsUVE(Scene::IEntityManagerUVE& entityManager,
         if (isTextInput) {
             entityManager.GetComponentUVE<Scene::UITextInputComponentUVE>(widget.entity).rect = {resolvedMin,
                                                                                                  resolvedSize};
+        }
+        if (isScrollContainer) {
+            entityManager.GetComponentUVE<Scene::UIScrollContainerComponentUVE>(widget.entity).rect = {resolvedMin,
+                                                                                                       resolvedSize};
         }
         if (isText) {
             entityManager.GetComponentUVE<Scene::UITextComponentUVE>(widget.entity).positionPixels = resolvedMin;

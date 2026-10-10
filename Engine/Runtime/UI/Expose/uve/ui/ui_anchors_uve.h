@@ -19,9 +19,10 @@ namespace UVE::UI {
 /// degrade to a stable order via the shared ancestry cap instead of hanging.
 ///
 /// A parent qualifies by carrying a container, button, image, slider, progress-bar, checkbox,
-/// dropdown, or text-input rect, in that priority - anything else anchors against the viewport.
-/// Buttons, images, containers, sliders, progress bars, checkboxes, dropdowns, and text inputs
-/// take the full resolved rect; texts take the resolved minimum as positionPixels. (Tooltips
+/// dropdown, text-input, or scroll-container rect, in that priority - anything else anchors
+/// against the viewport. Buttons, images, containers, sliders, progress bars, checkboxes,
+/// dropdowns, text inputs, and scroll containers take the full resolved rect; texts take the
+/// resolved minimum as positionPixels. (Tooltips
 /// position themselves and never anchor; dropdown popups likewise, while the dropdown's box
 /// anchors.) Anchored entities without
 /// any positioned component are skipped, and an invalid anchor component is skipped fail-closed.

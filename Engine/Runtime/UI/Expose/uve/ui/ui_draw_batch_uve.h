@@ -43,7 +43,9 @@ struct UIQuadUVE final {
 /// to be uploaded and drawn. Paint order: canvas sortOrder (orphans at 0, under a sort-0 canvas),
 /// then images and progress bars, then buttons, sliders, checkboxes, dropdown boxes, and
 /// text-input boxes, then text (including text-input glyphs and carets), tooltips, and dropdown
-/// popups on top inside that canvas.
+/// popups on top inside that canvas. Scroll containers clip their descendants in software
+/// after sorting: quads are intersected against ancestor scroll boxes (texture coordinates
+/// remapped), fully-outside quads dropped.
 struct UIDrawBatchUVE final {
     std::vector<UIQuadUVE> quads;
 };

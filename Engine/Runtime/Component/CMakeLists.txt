@@ -32,6 +32,7 @@ add_library(uve_component STATIC
     Internal/ui_progress_bar_component_uve.cpp
     Internal/ui_dropdown_component_uve.cpp
     Internal/ui_text_input_component_uve.cpp
+    Internal/ui_scroll_container_component_uve.cpp
     Internal/ui_checkbox_component_uve.cpp
     Internal/ui_tooltip_component_uve.cpp
     Internal/ui_tween_component_uve.cpp

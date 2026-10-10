@@ -43,6 +43,7 @@
 #include "uve/component/ui_image_component_uve.h"
 #include "uve/component/ui_layout_container_component_uve.h"
 #include "uve/component/ui_progress_bar_component_uve.h"
+#include "uve/component/ui_scroll_container_component_uve.h"
 #include "uve/component/ui_slider_component_uve.h"
 #include "uve/component/ui_text_component_uve.h"
 #include "uve/component/ui_text_input_component_uve.h"
@@ -2122,6 +2123,22 @@ void DeclareMediaAndUIUVE(std::vector<TypeMetadataEntryUVE>& entries) {
                              "blinkTime", "Blink Time", kPropertyTypeFloatUVE),
                          DeclareRuntimeStateUVE<&UITextInputComponentUVE::scrollOffset>(
                              "scrollOffset", "Scroll", kPropertyTypeFloatUVE),
+                     }));
+    AddUVE<UIScrollContainerComponentUVE>(
+        entries,
+        MakeEntryUVE("component.ui_scroll_container", "UIScrollContainerComponentUVE", "UI Scroll Container",
+                     kSectionOrderTypeSpecificUVE,
+                     {
+                         DeclareUVE<&UIScrollContainerComponentUVE::rect>("rect", "Rect", kPropertyTypeRectUVE),
+                         DeclareUVE<&UIScrollContainerComponentUVE::padding>("padding", "Padding",
+                                                                            kPropertyTypeFloatUVE),
+                         DeclareUVE<&UIScrollContainerComponentUVE::gap>("gap", "Gap", kPropertyTypeFloatUVE),
+                         DeclareUVE<&UIScrollContainerComponentUVE::wheelStep>("wheelStep", "Wheel Step",
+                                                                              kPropertyTypeFloatUVE),
+                         DeclareUVE<&UIScrollContainerComponentUVE::scrollOffset>("scrollOffset", "Scroll",
+                                                                                 kPropertyTypeVector2UVE),
+                         DeclareRuntimeStateUVE<&UIScrollContainerComponentUVE::contentSize>(
+                             "contentSize", "Content Size", kPropertyTypeVector2UVE),
                      }));
 }
 

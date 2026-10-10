@@ -30,7 +30,8 @@ class UIFontAtlasUVE;
 /// (Tooltips position themselves at the pointer and never stack; dropdown popups likewise, while
 /// the dropdown's box stacks.) A child carrying several positioned components advances the stack
 /// by one extent - button first, image second, container third, slider fourth, progress fifth,
-/// checkbox sixth, dropdown seventh, text input eighth, text last - but every positioned component it has moves to
+/// checkbox sixth, dropdown seventh, text input eighth, scroll container ninth, text last -
+/// but every positioned component it has moves to
 /// the laid-out
 /// position together, so a container with its own background quad stays in one piece. Children
 /// without any positioned component are ignored, not spaced. Depth walks reuse the canvas ancestry cap, so a hierarchy cycle degrades
