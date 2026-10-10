@@ -13,6 +13,11 @@ namespace UVE::Scene {
 class IEntityManagerUVE;
 } // namespace UVE::Scene
 
+namespace UVE::Audio {
+class IAudioSourceSystemUVE;
+class IAudioSystemUVE;
+} // namespace Audio
+
 namespace UVE::Core {
 
 /// What a `.uvs` script can reach on the object it is attached to. The object's components decide:
@@ -28,7 +33,12 @@ namespace UVE::Core {
 class UVScriptObjectHostUVE final : public UVScript::UVScriptHostUVE {
 public:
     /// `input` may be null (no input system): input calls then read as not pressed.
-    UVScriptObjectHostUVE(Scene::IEntityManagerUVE& entityManager, const Input::IInputSystemUVE* input, Scene::EntityUVE entity) noexcept;
+    /// `audioSources`/`audio` may be null (no audio): audio calls then fail closed as false. Both
+    /// default to null so check-only hosts (editor diagnostics, tests that never touch audio) stay
+    /// three-argument constructions.
+    UVScriptObjectHostUVE(Scene::IEntityManagerUVE& entityManager, const Input::IInputSystemUVE* input,
+                          Scene::EntityUVE entity, Audio::IAudioSourceSystemUVE* audioSources = nullptr,
+                          Audio::IAudioSystemUVE* audio = nullptr) noexcept;
 
     [[nodiscard]] std::optional<UVScript::HostPropertyUVE> DescribePropertyUVE(std::string_view name) const override;
     [[nodiscard]] std::optional<UVScript::HostFunctionUVE> DescribeFunctionUVE(std::string_view name) const override;
@@ -44,6 +54,8 @@ private:
     Scene::IEntityManagerUVE& m_entityManager;
     const Input::IInputSystemUVE* m_input = nullptr;
     Scene::EntityUVE m_entity = Scene::kInvalidEntityUVE;
+    Audio::IAudioSourceSystemUVE* m_audioSources = nullptr;
+    Audio::IAudioSystemUVE* m_audio = nullptr;
 };
 
 } // namespace UVE::Core

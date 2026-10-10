@@ -2,8 +2,12 @@
 
 #include "uve/core/uvscript_object_host_uve.h"
 
+#include <cmath>
 #include <string>
 
+#include "uve/audio/i_audio_source_system_uve.h"
+#include "uve/audio/i_audio_system_uve.h"
+#include "uve/component/audio_source_component_uve.h"
 #include "uve/component/character_controller_component_uve.h"
 #include "uve/component/name_component_uve.h"
 #include "uve/component/rigid_3d_component_uve.h"
@@ -35,8 +39,11 @@ using UVScript::Vec3ValueUVE;
 } // namespace
 
 UVScriptObjectHostUVE::UVScriptObjectHostUVE(Scene::IEntityManagerUVE& entityManager, const Input::IInputSystemUVE* const input,
-                                         const Scene::EntityUVE entity) noexcept
-    : m_entityManager(entityManager), m_input(input), m_entity(entity) {}
+                                         const Scene::EntityUVE entity,
+                                         Audio::IAudioSourceSystemUVE* const audioSources,
+                                         Audio::IAudioSystemUVE* const audio) noexcept
+    : m_entityManager(entityManager), m_input(input), m_entity(entity), m_audioSources(audioSources),
+      m_audio(audio) {}
 
 std::optional<HostPropertyUVE> UVScriptObjectHostUVE::DescribePropertyUVE(const std::string_view name) const {
     if (name == "name") {
@@ -49,6 +56,10 @@ std::optional<HostPropertyUVE> UVScriptObjectHostUVE::DescribePropertyUVE(const 
         (m_entityManager.HasComponentUVE<Scene::CharacterControllerComponentUVE>(m_entity) ||
          m_entityManager.HasComponentUVE<Scene::Rigid3DComponentUVE>(m_entity))) {
         return HostPropertyUVE{TypeUVE::Vec3UVE(), true};
+    }
+    if ((name == "volume" || name == "pitch") &&
+        m_entityManager.HasComponentUVE<Scene::AudioSourceComponentUVE>(m_entity)) {
+        return HostPropertyUVE{TypeUVE::FloatUVE(), true};
     }
     if (m_entityManager.HasComponentUVE<Scene::CharacterControllerComponentUVE>(m_entity)) {
         // "grounded", matching the other properties here: name, position, scale, velocity - a plain
@@ -66,6 +77,10 @@ std::optional<HostFunctionUVE> UVScriptObjectHostUVE::DescribeFunctionUVE(const 
     if (m_entityManager.HasComponentUVE<Scene::Rigid3DComponentUVE>(m_entity) &&
         (name == "physics.apply_force" || name == "physics.apply_impulse" || name == "physics.apply_torque")) {
         return HostFunctionUVE{{TypeUVE::Vec3UVE()}, TypeUVE::BoolUVE()};
+    }
+    if (m_entityManager.HasComponentUVE<Scene::AudioSourceComponentUVE>(m_entity) &&
+        (name == "audio.play" || name == "audio.stop" || name == "audio.is_playing")) {
+        return HostFunctionUVE{{}, TypeUVE::BoolUVE()};
     }
     if (name == "input.pressed" || name == "input.held" || name == "input.released") {
         return HostFunctionUVE{{TypeUVE::StrUVE()}, TypeUVE::BoolUVE()};
@@ -109,6 +124,11 @@ ValueUVE UVScriptObjectHostUVE::GetPropertyUVE(const std::string_view name) {
         }
         return ToScriptUVE(m_entityManager.GetComponentUVE<Scene::Rigid3DComponentUVE>(m_entity).velocity);
     }
+    if (name == "volume" || name == "pitch") {
+        const Scene::AudioSourceComponentUVE& source =
+            m_entityManager.GetComponentUVE<Scene::AudioSourceComponentUVE>(m_entity);
+        return static_cast<double>(name == "volume" ? source.volume : source.pitch);
+    }
     return m_entityManager.GetComponentUVE<Scene::CharacterControllerComponentUVE>(m_entity).grounded;
 }
 
@@ -128,6 +148,17 @@ void UVScriptObjectHostUVE::SetPropertyUVE(const std::string_view name, const Va
         } else {
             m_entityManager.GetComponentUVE<Scene::Rigid3DComponentUVE>(m_entity).velocity = ToEngineUVE(value);
         }
+    } else if (name == "volume" || name == "pitch") {
+        const float updated = static_cast<float>(std::get<double>(value));
+        Scene::AudioSourceComponentUVE& source =
+            m_entityManager.GetComponentUVE<Scene::AudioSourceComponentUVE>(m_entity);
+        // Unlike velocity's blind store, an invalid write is ignored: a NaN volume would make
+        // AudioSourceSystemUVE skip the source on every Sync, so the component stays valid.
+        const bool accepted = name == "volume" ? (std::isfinite(updated) && updated >= 0.0F)
+                                               : (std::isfinite(updated) && updated > 0.0F);
+        if (accepted) {
+            (name == "volume" ? source.volume : source.pitch) = updated;
+        }
     }
 }
 
@@ -141,6 +172,19 @@ ValueUVE UVScriptObjectHostUVE::CallFunctionUVE(const std::string_view name, con
     }
     if (name == "physics.apply_torque") {
         return Scene::Rigid3DUVE::ApplyTorqueUVE(m_entityManager, m_entity, ToEngineUVE(args[0]));
+    }
+    // Audio needs no input system, so it routes before the null-input early-out below.
+    if (name == "audio.play" || name == "audio.stop" || name == "audio.is_playing") {
+        if (m_audioSources == nullptr || m_audio == nullptr) {
+            return ValueUVE{false};
+        }
+        if (name == "audio.play") {
+            return m_audioSources->PlayEntityUVE(m_entity, m_entityManager, *m_audio);
+        }
+        if (name == "audio.stop") {
+            return m_audioSources->StopEntityUVE(m_entity, *m_audio);
+        }
+        return m_audioSources->IsEntityPlayingUVE(m_entity, *m_audio);
     }
     if (m_input == nullptr) {
         return name == "input.axis" ? ValueUVE{0.0} : ValueUVE{false};

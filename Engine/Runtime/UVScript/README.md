@@ -120,7 +120,8 @@ primary     := NUMBER UNIT? | STRING | 'true' | 'false' | 'none' | IDENT | '(' e
      rest of the simulation;
    - the host gives `name`, `position`, `scale`, and on a character body `velocity` and
      `grounded`, plus `input.pressed/held/released/axis`; a rigid body adds its own
-     `velocity` and `physics.apply_force/apply_impulse/apply_torque(vec3)`.
+     `velocity` and `physics.apply_force/apply_impulse/apply_torque(vec3)`; an audio source
+     adds `volume`/`pitch` and `audio.play()/audio.stop()/audio.is_playing()`.
    - a saved edit restarts the script within half a second, and fixing a broken file is enough
      for it to be retried.
 4. **Editor.** The Inspector's script slot has **New UVScript**: it writes `scripts/<node>.uvs`

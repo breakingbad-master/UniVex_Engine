@@ -1380,7 +1380,9 @@ void EngineCoreUVE::SyncUVScriptsUVE(const bool simulationPaused) {
                 return;
             }
             const std::string source(reinterpret_cast<const char*>(bytes->data()), bytes->size());
-            auto host = std::make_unique<UVScriptObjectHostUVE>(*m_entityManager, m_inputSystem.get(), entity);
+            auto host = std::make_unique<UVScriptObjectHostUVE>(*m_entityManager, m_inputSystem.get(), entity,
+                                                              m_audioSourceSystem.get(),
+                                                              m_audioSystem.get());
             const UVScript::CompileResultUVE compiled = UVScript::CompileUVScriptSourceUVE(source, *host);
             if (!compiled.IsSuccessUVE()) {
                 for (const UVScript::DiagnosticUVE& diagnostic : compiled.diagnostics) {

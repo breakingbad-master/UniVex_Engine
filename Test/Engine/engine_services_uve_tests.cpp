@@ -920,6 +920,14 @@ public:
 class FakeAudioSourceSystemUVE final : public Audio::IAudioSourceSystemUVE {
 public:
     void SyncUVE(Scene::IEntityManagerUVE&, Audio::IAudioSystemUVE&) override { ++syncCallCount; }
+    [[nodiscard]] bool PlayEntityUVE(Scene::EntityUVE, Scene::IEntityManagerUVE&,
+                                     Audio::IAudioSystemUVE&) override {
+        return false;
+    }
+    [[nodiscard]] bool StopEntityUVE(Scene::EntityUVE, Audio::IAudioSystemUVE&) override { return false; }
+    [[nodiscard]] bool IsEntityPlayingUVE(Scene::EntityUVE, const Audio::IAudioSystemUVE&) const override {
+        return false;
+    }
 
     int syncCallCount = 0;
 };
