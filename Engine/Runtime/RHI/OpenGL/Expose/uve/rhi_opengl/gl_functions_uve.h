@@ -94,6 +94,12 @@ struct GlFunctionsUVE {
     // Optional GL 1.3 / GLES 2 compressed upload path. It is not required to keep an otherwise
     // usable context alive; compressed SupportsTextureFormatUVE() returns false when absent.
     PFNGLCOMPRESSEDTEXIMAGE2DPROC glCompressedTexImage2D = nullptr;
+    // Tier 2.3: 2D-array uploads (GL 1.2 / GLES 3.0 core) plus layered FBO attach (GL 3.2 /
+    // GLES 3.0 core). Optional like glCompressedTexImage2D above — creation/attach fail
+    // closed when getProcAddress cannot supply them — and IsCompleteUVE() ignores them.
+    PFNGLTEXIMAGE3DPROC glTexImage3D = nullptr;
+    PFNGLCOMPRESSEDTEXIMAGE3DPROC glCompressedTexImage3D = nullptr;
+    PFNGLFRAMEBUFFERTEXTURELAYERPROC glFramebufferTextureLayer = nullptr;
 
     // Uniform-related (Increment 21: ShaderManagerUVE's reflection + ICommandBufferUVE's
     // SetUniform*UVE calls) and program-binary-cache (Increment 21's on-disk shader cache).

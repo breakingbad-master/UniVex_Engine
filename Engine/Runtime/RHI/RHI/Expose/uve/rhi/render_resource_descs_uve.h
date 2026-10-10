@@ -165,6 +165,22 @@ struct TextureFormatBlockInfoUVE {
 /// Describes a GPU texture to create via IRenderDeviceUVE::CreateTextureUVE(). `mipLevels` is
 /// the total number of levels including level 0; it must not exceed the complete chain for the
 /// base dimensions. Color assets may provide tightly concatenated texel or block bytes for every level.
+/// Texture dimensionality (Tier 2.3). `Texture2D` is the only pre-2.3 shape; arrays stack
+/// `arrayLayers` same-sized 2D slices (shadow cascades, texture atlases), and cubemaps are the
+/// 6-face sampling shape (reflection probes, sky). Cube faces upload and attach in
+/// `CubemapFaceUVE` order (+X,-X,+Y,-Y,+Z,-Z), which matches the GL/VK hardware face order.
+enum class TextureTypeUVE : std::uint8_t { Texture2D, Texture2DArray, Cubemap };
+
+[[nodiscard]] constexpr bool IsTextureTypeValidUVE(const TextureTypeUVE type) noexcept {
+    switch (type) {
+        case TextureTypeUVE::Texture2D:
+        case TextureTypeUVE::Texture2DArray:
+        case TextureTypeUVE::Cubemap:
+            return true;
+    }
+    return false;
+}
+
 struct TextureDescUVE {
     std::uint32_t width = 0;
     std::uint32_t height = 0;
@@ -172,6 +188,9 @@ struct TextureDescUVE {
     std::uint32_t mipLevels = 1;
     // Appended after existing members to preserve aggregate initialization of legacy descriptors.
     TextureColorSpaceUVE colorSpace = TextureColorSpaceUVE::Linear;
+    // Tier 2.3: dimensionality. Defaults describe the only pre-2.3 shape (one 2D slice).
+    TextureTypeUVE type = TextureTypeUVE::Texture2D;
+    std::uint32_t arrayLayers = 1;
 };
 
 /// How a sampler reads within one mip level. Shared by magnification and minification: GL and
@@ -308,6 +327,28 @@ struct TextureMipExtentUVE {
         (desc.format == TextureFormatUVE::Depth32Float && desc.mipLevels > 1U)) {
         return false;
     }
+    // Tier 2.3 dimensionality rules. Layer-count CAPS are device properties, so backends
+    // enforce them at creation; these shape rules hold on every device. (Cube arrays — 6N
+    // layers with cube sampling — are a follow-up; v1 cubes are exactly one cube.)
+    switch (desc.type) {
+        case TextureTypeUVE::Texture2D:
+            if (desc.arrayLayers != 1U) {
+                return false;
+            }
+            break;
+        case TextureTypeUVE::Texture2DArray:
+            if (desc.arrayLayers == 0U) {
+                return false;
+            }
+            break;
+        case TextureTypeUVE::Cubemap:
+            if (desc.width != desc.height || desc.arrayLayers != 6U) {
+                return false;
+            }
+            break;
+        default:
+            return false;
+    }
 
     std::uint64_t totalBytes = 0U;
     TextureMipExtentUVE extent{desc.width, desc.height};
@@ -321,6 +362,12 @@ struct TextureMipExtentUVE {
         extent.width = extent.width > 1U ? extent.width / 2U : 1U;
         extent.height = extent.height > 1U ? extent.height / 2U : 1U;
     }
+    // Every layer carries the full mip chain (level-major upload: all layers of L0, then L1…).
+    if (desc.arrayLayers > 0U &&
+        totalBytes > std::numeric_limits<std::uint64_t>::max() / desc.arrayLayers) {
+        return false;
+    }
+    totalBytes *= desc.arrayLayers;
     if (totalBytes > std::numeric_limits<std::size_t>::max()) {
         return false;
     }
@@ -649,6 +696,12 @@ struct RenderPassDescUVE {
     /// rejected the same way as any other malformed pass descriptor, rather than silently
     /// clamped. See Math::ContainsUVE for the exact fit-check the backends apply.
     std::optional<ViewportRectUVE> viewportOverride;
+    // Tier 2.3: which layer of an array/cube attachment this pass renders into (cube faces are
+    // layers 0-5 in CubemapFaceUVE order). Must be 0 for Texture2D attachments and below
+    // `arrayLayers` otherwise; backends reject out-of-range layers like any other malformed
+    // pass descriptor. Defaults preserve the only pre-2.3 behavior (layer 0 of a 2D target).
+    std::uint32_t colorLayer = 0;
+    std::uint32_t depthLayer = 0;
 };
 
 } // namespace UVE::Render

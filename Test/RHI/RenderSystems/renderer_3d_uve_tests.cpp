@@ -315,7 +315,7 @@ protected:
     }
 };
 
-TEST_F(Renderer3DUVETest, ReflectionProbeResolutionControlsFaceTargetsAndRecapturesOnTierChange) {
+TEST_F(Renderer3DUVETest, ReflectionProbeResolutionControlsCubeTargetAndRecapturesOnTierChange) {
     const Scene::EntityUVE camera = MakeCameraEntityUVE();
     const Scene::EntityUVE probeEntity = entityManager.CreateEntityUVE();
     sceneGraph.AttachTransformUVE(entityManager, probeEntity, Scene::TransformComponentUVE{});
@@ -335,14 +335,16 @@ TEST_F(Renderer3DUVETest, ReflectionProbeResolutionControlsFaceTargetsAndRecaptu
 
     renderer3D->RenderFrameUVE(entityManager, camera);
     std::vector<TextureDescUVE> liveTextureDescs = renderDevice.GetLiveTextureDescsUVE();
-    const auto countSquareRgbaAt = [&liveTextureDescs](const std::uint32_t resolution) {
+    // Tier 2.3: each probe owns one six-layer cubemap (not six per-face 2D textures).
+    const auto countProbeCubesAt = [&liveTextureDescs](const std::uint32_t resolution) {
         return std::count_if(liveTextureDescs.cbegin(), liveTextureDescs.cend(), [resolution](const auto& desc) {
             return desc.width == resolution && desc.height == resolution &&
-                   desc.format == TextureFormatUVE::RGBA8Unorm;
+                   desc.format == TextureFormatUVE::RGBA8Unorm &&
+                   desc.type == TextureTypeUVE::Cubemap && desc.arrayLayers == 6U;
         });
     };
-    EXPECT_GE(countSquareRgbaAt(256U), 6) << "a reflection cubemap owns six per-face color textures";
-    EXPECT_GE(countSquareRgbaAt(128U), 6) << "probes in one frame retain their own resolution tier";
+    EXPECT_EQ(countProbeCubesAt(256U), 1) << "a reflection probe owns one six-layer cubemap";
+    EXPECT_EQ(countProbeCubesAt(128U), 1) << "probes in one frame retain their own resolution tier";
     EXPECT_GE(std::count_if(liveTextureDescs.cbegin(), liveTextureDescs.cend(), [](const auto& desc) {
                   return desc.width == 128U && desc.height == 128U &&
                          desc.format == TextureFormatUVE::Depth32Float;
@@ -353,12 +355,12 @@ TEST_F(Renderer3DUVETest, ReflectionProbeResolutionControlsFaceTargetsAndRecaptu
     })) << "the capture depth target must match the selected face resolution";
 
     // The capture generation is intentionally unchanged: changing only the authored tier must
-    // invalidate/reallocate the six face textures and capture depth, then render the new size.
+    // invalidate/reallocate the probe cubemap and capture depth, then render the new size.
     entityManager.GetComponentUVE<Scene::ReflectionProbe3DComponentUVE>(probeEntity).resolution =
         Scene::ReflectionProbeResolutionUVE::Ultra;
     renderer3D->RenderFrameUVE(entityManager, camera);
     liveTextureDescs = renderDevice.GetLiveTextureDescsUVE();
-    EXPECT_GE(countSquareRgbaAt(512U), 6) << "resolution edits recapture instead of leaving stale probe data";
+    EXPECT_EQ(countProbeCubesAt(512U), 1) << "resolution edits recapture instead of leaving stale probe data";
     EXPECT_TRUE(std::any_of(liveTextureDescs.cbegin(), liveTextureDescs.cend(), [](const auto& desc) {
         return desc.width == 512U && desc.height == 512U && desc.format == TextureFormatUVE::Depth32Float;
     }));

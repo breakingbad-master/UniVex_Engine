@@ -72,10 +72,11 @@ public:
 
     /// Creates a GPU texture per `desc`, optionally uploading `initialData`. A non-empty upload
     /// is tightly packed in mip-level order (level 0 first, then levels 1..N) and must contain
-    /// exactly the bytes required by every declared level. Empty data is legal only for a
-    /// one-level render target. The backend must reject invalid descriptors or partial uploads
-    /// through `ValidateTextureUploadUVE` before allocating a resource; valid creation never
-    /// returns kInvalidTextureHandleUVE.
+    /// exactly the bytes required by every declared level. Array/cubemap uploads pack every
+    /// level's layers 0..N-1 contiguously (cube faces in `CubemapFaceUVE` order) before the
+    /// next level starts. Empty data is legal only for a one-level render target. The backend
+    /// must reject invalid descriptors or partial uploads through `ValidateTextureUploadUVE`
+    /// before allocating a resource; valid creation never returns kInvalidTextureHandleUVE.
     [[nodiscard]] virtual TextureHandleUVE CreateTextureUVE(const TextureDescUVE& desc,
                                                              std::span<const std::byte> initialData = {}) = 0;
 

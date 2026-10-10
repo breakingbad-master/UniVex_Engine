@@ -1110,6 +1110,173 @@ TEST(NullRenderDeviceUVETest, DestroySamplerUVE_UnknownHandle_IsSafeNoOp) {
     EXPECT_EQ(device.GetLiveResourceCountUVE(), 0U);
 }
 
+
+// Tier 2.3: array layers + cubemaps. The Null backend shares the RHI validators with every
+// backend, so these pin the dimensional contract (defaults, byte math, upload sizes, handle
+// retention, pass-layer recording) without needing a GPU.
+TEST(NullRenderDeviceUVETest, TextureTypeUVE_DefaultsTo2DWithOneLayer) {
+    const TextureDescUVE desc;
+    EXPECT_EQ(desc.type, TextureTypeUVE::Texture2D);
+    EXPECT_EQ(desc.arrayLayers, 1U);
+    EXPECT_TRUE(IsTextureTypeValidUVE(TextureTypeUVE::Texture2D));
+    EXPECT_TRUE(IsTextureTypeValidUVE(TextureTypeUVE::Texture2DArray));
+    EXPECT_TRUE(IsTextureTypeValidUVE(TextureTypeUVE::Cubemap));
+    EXPECT_FALSE(IsTextureTypeValidUVE(static_cast<TextureTypeUVE>(99U)));
+}
+
+TEST(NullRenderDeviceUVETest, CalculateTextureUploadByteCountUVE_MultipliesByLayerCount) {
+    // 2x2 RGBA8, two levels: 16 + 4 = 20 bytes per layer; x4 layers = 80.
+    const TextureDescUVE arrayDesc{2U, 2U, TextureFormatUVE::RGBA8Unorm, 2U,
+                                   TextureColorSpaceUVE::Linear, TextureTypeUVE::Texture2DArray, 4U};
+    std::uint64_t expectedBytes = 0U;
+    ASSERT_TRUE(CalculateTextureUploadByteCountUVE(arrayDesc, expectedBytes));
+    EXPECT_EQ(expectedBytes, 80U);
+
+    // 4x4 RGBA8 cube, one level: 64 bytes per face; x6 faces = 384.
+    const TextureDescUVE cubeDesc{4U, 4U, TextureFormatUVE::RGBA8Unorm, 1U,
+                                  TextureColorSpaceUVE::Linear, TextureTypeUVE::Cubemap, 6U};
+    ASSERT_TRUE(CalculateTextureUploadByteCountUVE(cubeDesc, expectedBytes));
+    EXPECT_EQ(expectedBytes, 384U);
+}
+
+TEST(NullRenderDeviceUVETest, CalculateTextureUploadByteCountUVE_RejectsBadDimensionality) {
+    std::uint64_t expectedBytes = 0U;
+    // 2D textures carry exactly one layer.
+    EXPECT_FALSE(CalculateTextureUploadByteCountUVE(
+        TextureDescUVE{4U, 4U, TextureFormatUVE::RGBA8Unorm, 1U, TextureColorSpaceUVE::Linear,
+                       TextureTypeUVE::Texture2D, 2U},
+        expectedBytes));
+    EXPECT_FALSE(CalculateTextureUploadByteCountUVE(
+        TextureDescUVE{4U, 4U, TextureFormatUVE::RGBA8Unorm, 1U, TextureColorSpaceUVE::Linear,
+                       TextureTypeUVE::Texture2D, 0U},
+        expectedBytes));
+    // Cubes are square with exactly six layers.
+    EXPECT_FALSE(CalculateTextureUploadByteCountUVE(
+        TextureDescUVE{4U, 8U, TextureFormatUVE::RGBA8Unorm, 1U, TextureColorSpaceUVE::Linear,
+                       TextureTypeUVE::Cubemap, 6U},
+        expectedBytes));
+    EXPECT_FALSE(CalculateTextureUploadByteCountUVE(
+        TextureDescUVE{4U, 4U, TextureFormatUVE::RGBA8Unorm, 1U, TextureColorSpaceUVE::Linear,
+                       TextureTypeUVE::Cubemap, 5U},
+        expectedBytes));
+    // Arrays need at least one layer.
+    EXPECT_FALSE(CalculateTextureUploadByteCountUVE(
+        TextureDescUVE{4U, 4U, TextureFormatUVE::RGBA8Unorm, 1U, TextureColorSpaceUVE::Linear,
+                       TextureTypeUVE::Texture2DArray, 0U},
+        expectedBytes));
+    // Unknown dimensionality never computes a size.
+    EXPECT_FALSE(CalculateTextureUploadByteCountUVE(
+        TextureDescUVE{4U, 4U, TextureFormatUVE::RGBA8Unorm, 1U, TextureColorSpaceUVE::Linear,
+                       static_cast<TextureTypeUVE>(99U), 1U},
+        expectedBytes));
+}
+
+TEST(NullRenderDeviceUVETest, ValidateTextureUploadUVE_ArrayRequiresEveryLayer) {
+    const TextureDescUVE arrayDesc{4U, 4U, TextureFormatUVE::RGBA8Unorm, 1U,
+                                   TextureColorSpaceUVE::Linear, TextureTypeUVE::Texture2DArray, 3U};
+    std::array<std::byte, 192U> allLayers{}; // 64 bytes x 3 layers, level-major
+    EXPECT_TRUE(ValidateTextureUploadUVE(arrayDesc, allLayers));
+    EXPECT_FALSE(ValidateTextureUploadUVE(
+        arrayDesc, std::span<const std::byte>(allLayers.data(), 64U))) << "one layer is short";
+    EXPECT_FALSE(ValidateTextureUploadUVE(
+        arrayDesc, std::span<const std::byte>(allLayers.data(), 128U))) << "two layers are short";
+    // Render-target arrays (single-level, uncompressed) still allow a data-free creation.
+    EXPECT_TRUE(ValidateTextureUploadUVE(arrayDesc, {}));
+
+    const TextureDescUVE cubeDesc{4U, 4U, TextureFormatUVE::RGBA8Unorm, 1U,
+                                  TextureColorSpaceUVE::Linear, TextureTypeUVE::Cubemap, 6U};
+    std::array<std::byte, 384U> allFaces{};
+    EXPECT_TRUE(ValidateTextureUploadUVE(cubeDesc, allFaces));
+    EXPECT_FALSE(ValidateTextureUploadUVE(
+        cubeDesc, std::span<const std::byte>(allFaces.data(), 320U))) << "five faces are short";
+    EXPECT_TRUE(ValidateTextureUploadUVE(cubeDesc, {}));
+}
+
+TEST(NullRenderDeviceUVETest, CreateTextureUVE_ArrayAndCube_RoundTripThroughLiveDescs) {
+    NullRenderDeviceUVE device;
+    const TextureDescUVE arrayDesc{4U, 4U, TextureFormatUVE::RGBA8Unorm, 1U,
+                                   TextureColorSpaceUVE::Linear, TextureTypeUVE::Texture2DArray, 3U};
+    const TextureHandleUVE array = device.CreateTextureUVE(arrayDesc);
+    ASSERT_NE(array, kInvalidTextureHandleUVE);
+    const TextureDescUVE cubeDesc{4U, 4U, TextureFormatUVE::RGBA8Unorm, 1U,
+                                  TextureColorSpaceUVE::Linear, TextureTypeUVE::Cubemap, 6U};
+    const TextureHandleUVE cube = device.CreateTextureUVE(cubeDesc);
+    ASSERT_NE(cube, kInvalidTextureHandleUVE);
+
+    const std::vector<TextureDescUVE> liveDescs = device.GetLiveTextureDescsUVE();
+    ASSERT_EQ(liveDescs.size(), 2U);
+    // Live-desc order follows the device's unordered handle map, so match by type.
+    const TextureDescUVE* arrayLive = nullptr;
+    const TextureDescUVE* cubeLive = nullptr;
+    for (const TextureDescUVE& live : liveDescs) {
+        if (live.type == TextureTypeUVE::Texture2DArray) {
+            arrayLive = &live;
+        } else if (live.type == TextureTypeUVE::Cubemap) {
+            cubeLive = &live;
+        }
+    }
+    ASSERT_NE(arrayLive, nullptr);
+    ASSERT_NE(cubeLive, nullptr);
+    EXPECT_EQ(arrayLive->arrayLayers, 3U);
+    EXPECT_EQ(cubeLive->arrayLayers, 6U);
+
+    device.DestroyTextureUVE(array);
+    device.DestroyTextureUVE(cube);
+    EXPECT_TRUE(device.GetLiveTextureDescsUVE().empty());
+}
+
+TEST(NullRenderDeviceUVETest, CreateTextureUVE_RejectsBadDimensionality) {
+    NullRenderDeviceUVE device;
+    EXPECT_EQ(device.CreateTextureUVE(TextureDescUVE{4U, 4U, TextureFormatUVE::RGBA8Unorm, 1U,
+                                                     TextureColorSpaceUVE::Linear,
+                                                     TextureTypeUVE::Texture2D, 2U}),
+              kInvalidTextureHandleUVE);
+    EXPECT_EQ(device.CreateTextureUVE(TextureDescUVE{4U, 4U, TextureFormatUVE::RGBA8Unorm, 1U,
+                                                     TextureColorSpaceUVE::Linear,
+                                                     TextureTypeUVE::Cubemap, 5U}),
+              kInvalidTextureHandleUVE);
+    EXPECT_EQ(device.CreateTextureUVE(TextureDescUVE{4U, 8U, TextureFormatUVE::RGBA8Unorm, 1U,
+                                                     TextureColorSpaceUVE::Linear,
+                                                     TextureTypeUVE::Cubemap, 6U}),
+              kInvalidTextureHandleUVE);
+    EXPECT_TRUE(device.GetLiveTextureDescsUVE().empty());
+}
+
+TEST(NullRenderDeviceUVETest, RenderPassDescUVE_LayersDefaultToZero) {
+    const RenderPassDescUVE desc;
+    EXPECT_EQ(desc.colorLayer, 0U);
+    EXPECT_EQ(desc.depthLayer, 0U);
+}
+
+TEST(NullRenderDeviceUVETest, BeginRenderPassUVE_RecordsSelectedLayers) {
+    NullRenderDeviceUVE device;
+    const TextureHandleUVE color = device.CreateTextureUVE(
+        TextureDescUVE{4U, 4U, TextureFormatUVE::RGBA8Unorm, 1U, TextureColorSpaceUVE::Linear,
+                       TextureTypeUVE::Texture2DArray, 4U});
+    ASSERT_NE(color, kInvalidTextureHandleUVE);
+    const TextureHandleUVE depth = device.CreateTextureUVE(
+        TextureDescUVE{4U, 4U, TextureFormatUVE::Depth32Float, 1U});
+    ASSERT_NE(depth, kInvalidTextureHandleUVE);
+
+    auto commandBuffer = device.CreateCommandBufferUVE();
+    RenderPassDescUVE passDesc;
+    passDesc.colorAttachment = color;
+    passDesc.depthAttachment = depth;
+    passDesc.colorLayer = 2U;
+    commandBuffer->BeginRenderPassUVE(passDesc);
+    commandBuffer->EndRenderPassUVE();
+    device.SubmitUVE(std::move(commandBuffer));
+
+    const std::vector<RecordedCommandUVE>& recorded = device.GetLastSubmittedCommandsUVE();
+    ASSERT_EQ(recorded.size(), 2U);
+    ASSERT_TRUE(std::holds_alternative<BeginRenderPassCommandUVE>(recorded[0]));
+    EXPECT_EQ(std::get<BeginRenderPassCommandUVE>(recorded[0]).desc.colorLayer, 2U);
+    EXPECT_EQ(std::get<BeginRenderPassCommandUVE>(recorded[0]).desc.depthLayer, 0U);
+
+    device.DestroyTextureUVE(color);
+    device.DestroyTextureUVE(depth);
+}
+
 #if UVE_DEBUG
 TEST(NullRenderDeviceUVEDeathTest, CommandBuffer_DispatchInsideRenderPass_Asserts) {
     NullRenderDeviceUVE device;

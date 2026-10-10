@@ -269,6 +269,9 @@ struct VulkanRenderDeviceUVE::ImplUVE {
     // (queried once at init); samplerAnisotropyEnabled mirrors the optional device feature.
     float maxSamplerAnisotropy = 1.0F;
     bool samplerAnisotropyEnabled = false;
+    // Tier 2.3: array/cubemap caps, queried once at init; CreateTextureUVE rejects above them.
+    std::uint32_t maxTextureArrayLayers = 1U;
+    std::uint32_t maxCubemapSize = 0U;
     bool textureCompressionETC2Enabled = false;
     bool textureCompressionASTCLdrEnabled = false;
 
@@ -311,6 +314,8 @@ struct VulkanRenderDeviceUVE::ImplUVE {
         // REOPEN the same pass with Load semantics — the record pointer is what makes the
         // reopen possible from inside the flush (the VkImage handle alone cannot).
         TextureRecordUVE* openOffscreenColorRecord = nullptr;
+        std::uint32_t openColorLayer = 0U; // Tier 2.3: layer the open offscreen pass renders
+        std::uint32_t openDepthLayer = 0U; // (replayed by the storage-transition reopen below)
         // M2e: the caller depth attached to the open offscreen pass (nullptr for scratch depth
         // — scratch content is never kept, so no tracked restore is needed). Restored to
         // SHADER_READ_ONLY at CloseCurrentPassDynamicUVE() alongside the color image so the
@@ -618,6 +623,10 @@ struct VulkanRenderDeviceUVE::ImplUVE {
         // the transition, and CloseCurrentPassDynamicUVE restores pinned textures to GENERAL
         // instead of SHADER_READ_ONLY so tracked-layout barriers stay truthful.
         bool pinnedGeneral = false;
+        // Tier 2.3: lazily-created per-layer 2D attachment views for array/cube textures
+        // (layers >= 1 only — layer 0 attaches through `attachmentView`). Created on first
+        // attach of that layer, destroyed with the texture.
+        std::map<std::uint32_t, VkImageView> layerAttachmentViews;
     };
     std::unordered_map<std::uint32_t, TextureRecordUVE> textures;
     std::uint32_t fallbackTextureValue = 0U; // 1x1 opaque-white; used for unbound/destroyed slots
@@ -646,11 +655,17 @@ struct VulkanRenderDeviceUVE::ImplUVE {
                                                     const std::array<float, 4>& clearColor,
                                                     float clearDepth,
                                                     LoadOpUVE colorLoadOp,
-                                                    LoadOpUVE depthLoadOp);
+                                                    LoadOpUVE depthLoadOp,
+                                                    std::uint32_t colorLayer,
+                                                    std::uint32_t depthLayer);
     // Closes whichever rendering instance is open (if any) and restores offscreen layouts.
     void CloseCurrentPassDynamicUVE();
     // Scratch depth lookup-or-allocate for one extent. Null on failure (logged once).
     [[nodiscard]] DepthScratchUVE* GetDepthScratchUVE(std::uint32_t width, std::uint32_t height);
+    // Tier 2.3: layer-N 2D attachment view for `record` (layer 0 returns attachmentView).
+    // Lazily created and cached in the record; null on failure (logged once).
+    [[nodiscard]] VkImageView GetOrCreateLayerAttachmentViewUVE(TextureRecordUVE& record,
+                                                                std::uint32_t layer);
 
     std::unordered_map<std::uint32_t, BufferRecordUVE> buffers;
     std::unordered_map<std::uint32_t, ShaderRecordUVE> shaders;
@@ -699,6 +714,7 @@ struct VulkanRenderDeviceUVE::ImplUVE {
     static constexpr std::uint32_t kWarnedUnknownSamplerUVE = 1U << 25U; // Tier 2.2
     static constexpr std::uint32_t kWarnedSamplerSlotOobUVE = 1U << 26U; // Tier 2.2
     static constexpr std::uint32_t kWarnedSamplerAnisoClampedUVE = 1U << 27U; // Tier 2.2
+    static constexpr std::uint32_t kWarnedStorageImageLayeredUVE = 1U << 28U; // Tier 2.3
     std::uint32_t replayWarningsEmitted = 0U;
 
     // Replay-local pipeline binding state (valid only inside PresentUVE()'s record window).
@@ -864,10 +880,41 @@ VulkanRenderDeviceUVE::ImplUVE::GetDepthScratchUVE(const std::uint32_t width, co
     return &inserted->second;
 }
 
+VkImageView VulkanRenderDeviceUVE::ImplUVE::GetOrCreateLayerAttachmentViewUVE(
+    TextureRecordUVE& record, const std::uint32_t layer) {
+    if (layer == 0U || record.desc.arrayLayers <= 1U) {
+        return record.attachmentView;
+    }
+    const auto cached = record.layerAttachmentViews.find(layer);
+    if (cached != record.layerAttachmentViews.end()) {
+        return cached->second;
+    }
+    VkImageViewCreateInfo layerViewInfo{};
+    layerViewInfo.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
+    layerViewInfo.image = record.image;
+    layerViewInfo.viewType = VK_IMAGE_VIEW_TYPE_2D;
+    layerViewInfo.format = record.vkFormat; // image-native, matching attachmentView
+    layerViewInfo.subresourceRange = {record.desc.format == TextureFormatUVE::Depth32Float
+                                          ? VK_IMAGE_ASPECT_DEPTH_BIT
+                                          : VK_IMAGE_ASPECT_COLOR_BIT,
+                                      0U, 1U, layer, 1U};
+    VkImageView layerView = VK_NULL_HANDLE;
+    if (vk.vkCreateImageView(device, &layerViewInfo, nullptr, &layerView) != VK_SUCCESS ||
+        layerView == VK_NULL_HANDLE) {
+        WarnOnceUVE(VulkanRenderDeviceUVE::ImplUVE::kWarnedOffscreenUnsupportedUVE,
+                    "BeginRenderPassUVE: a layer attachment view failed to create; "
+                    "the submission's draws are skipped");
+        return VK_NULL_HANDLE;
+    }
+    record.layerAttachmentViews.emplace(layer, layerView);
+    return layerView;
+}
+
 bool VulkanRenderDeviceUVE::ImplUVE::BeginOffscreenPassDynamicUVE(
     TextureRecordUVE& color, TextureRecordUVE* depth, const VkExtent2D extent,
     const std::array<float, 4>& clearColor, const float clearDepth,
-    const LoadOpUVE colorLoadOp, const LoadOpUVE depthLoadOp) {
+    const LoadOpUVE colorLoadOp, const LoadOpUVE depthLoadOp,
+    const std::uint32_t colorLayer, const std::uint32_t depthLayer) {
     FramePassStateUVE& state = framePassState;
     DepthScratchUVE* scratch = nullptr;
     if (depth == nullptr) {
@@ -890,7 +937,9 @@ bool VulkanRenderDeviceUVE::ImplUVE::BeginOffscreenPassDynamicUVE(
     entryBarriers[0].oldLayout = color.currentLayout; // SHADER_READ_ONLY by M2c invariant
     entryBarriers[0].newLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
     entryBarriers[0].image = color.image;
-    entryBarriers[0].subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0U, 1U, 0U, 1U};
+    // Tier 2.3: only the rendered layer enters the attachment layout (untouched layers keep
+    // the record's tracked rest layout, so the next pass's oldLayout stays truthful).
+    entryBarriers[0].subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0U, 1U, colorLayer, 1U};
     entryBarriers[1].srcAccessMask = 0U;
     entryBarriers[1].dstAccessMask = VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT;
     if (depth != nullptr) {
@@ -900,7 +949,8 @@ bool VulkanRenderDeviceUVE::ImplUVE::BeginOffscreenPassDynamicUVE(
     }
     entryBarriers[1].newLayout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
     entryBarriers[1].image = depth != nullptr ? depth->image : scratch->image;
-    entryBarriers[1].subresourceRange = {VK_IMAGE_ASPECT_DEPTH_BIT, 0U, 1U, 0U, 1U};
+    entryBarriers[1].subresourceRange = {VK_IMAGE_ASPECT_DEPTH_BIT, 0U, 1U,
+                                          depth != nullptr ? depthLayer : 0U, 1U};
     vk.vkCmdPipelineBarrier(commandBuffer, VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
                             VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT |
                                 VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT,
@@ -913,7 +963,12 @@ bool VulkanRenderDeviceUVE::ImplUVE::BeginOffscreenPassDynamicUVE(
     // driver's discard prerogative.
     VkRenderingAttachmentInfo colorAttachmentInfo{};
     colorAttachmentInfo.sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO;
-    colorAttachmentInfo.imageView = color.attachmentView;
+    framePassState.openColorLayer = colorLayer;
+    framePassState.openDepthLayer = depthLayer;
+    colorAttachmentInfo.imageView = GetOrCreateLayerAttachmentViewUVE(color, colorLayer);
+    if (colorAttachmentInfo.imageView == VK_NULL_HANDLE) {
+        return false;
+    }
     colorAttachmentInfo.imageLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
     colorAttachmentInfo.loadOp = ToVkLoadOpUVE(colorLoadOp);
     colorAttachmentInfo.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
@@ -923,7 +978,11 @@ bool VulkanRenderDeviceUVE::ImplUVE::BeginOffscreenPassDynamicUVE(
     colorAttachmentInfo.clearValue.color.float32[3] = clearColor[3];
     VkRenderingAttachmentInfo depthAttachmentInfo{};
     depthAttachmentInfo.sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO;
-    depthAttachmentInfo.imageView = depth != nullptr ? depth->attachmentView : scratch->view;
+    depthAttachmentInfo.imageView =
+        depth != nullptr ? GetOrCreateLayerAttachmentViewUVE(*depth, depthLayer) : scratch->view;
+    if (depth != nullptr && depthAttachmentInfo.imageView == VK_NULL_HANDLE) {
+        return false;
+    }
     depthAttachmentInfo.imageLayout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
     depthAttachmentInfo.loadOp = ToVkLoadOpUVE(depthLoadOp);
     depthAttachmentInfo.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
@@ -982,7 +1041,8 @@ void VulkanRenderDeviceUVE::ImplUVE::CloseCurrentPassDynamicUVE() {
         backToSample.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
         backToSample.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
         backToSample.image = state.openOffscreenColorImage;
-        backToSample.subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0U, 1U, 0U, 1U};
+        backToSample.subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0U, 1U, state.openColorLayer,
+                                          1U};
         vk.vkCmdPipelineBarrier(commandBuffer, VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
                                 VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT, 0U, 0U, nullptr, 0U,
                                 nullptr, 1U, &backToSample);
@@ -1001,7 +1061,8 @@ void VulkanRenderDeviceUVE::ImplUVE::CloseCurrentPassDynamicUVE() {
         depthToSample.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
         depthToSample.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
         depthToSample.image = state.openOffscreenDepthRecord->image;
-        depthToSample.subresourceRange = {VK_IMAGE_ASPECT_DEPTH_BIT, 0U, 1U, 0U, 1U};
+        depthToSample.subresourceRange = {VK_IMAGE_ASPECT_DEPTH_BIT, 0U, 1U, state.openDepthLayer,
+                                           1U};
         vk.vkCmdPipelineBarrier(commandBuffer,
                                 VK_PIPELINE_STAGE_LATE_FRAGMENT_TESTS_BIT,
                                 VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT, 0U, 0U, nullptr, 0U,
@@ -1513,6 +1574,8 @@ bool VulkanRenderDeviceUVE::ImplUVE::InitializeUVE() {
     textureCompressionASTCLdrEnabled = enabledFeatures.textureCompressionASTC_LDR == VK_TRUE;
     samplerAnisotropyEnabled = enabledFeatures.samplerAnisotropy == VK_TRUE;
     maxSamplerAnisotropy = deviceProperties.limits.maxSamplerAnisotropy;
+    maxTextureArrayLayers = deviceProperties.limits.maxImageArrayLayers;
+    maxCubemapSize = deviceProperties.limits.maxImageDimensionCube;
 
     // M2d probe: is core dynamic rendering available on this physical device+instance?
     // (Instance apiVersion was already clamped at 1.3 above; the feature query needs the
@@ -2015,6 +2078,10 @@ void VulkanRenderDeviceUVE::ImplUVE::DestroyAllResourcesUVE() {
         }
         if (record.attachmentView != VK_NULL_HANDLE) {
             vk.vkDestroyImageView(device, record.attachmentView, nullptr);
+        }
+        for (const auto& [layer, layerView] : record.layerAttachmentViews) {
+            (void)layer;
+            vk.vkDestroyImageView(device, layerView, nullptr);
         }
         if (record.storageView != VK_NULL_HANDLE) {
             vk.vkDestroyImageView(device, record.storageView, nullptr);
@@ -2619,6 +2686,12 @@ TextureHandleUVE VulkanRenderDeviceUVE::CreateTextureUVE(const TextureDescUVE& d
     }
 
     std::array<VkDeviceSize, 32U> mipUploadOffsets{};
+    std::array<VkDeviceSize, 32U> mipLevelBytes{}; // Tier 2.3: per-level, per-layer bytes
+    // Tier 2.3: one copy region per (level, layer). Reserved here — before image acquisition
+    // — so the fill below cannot throw after acquire (preserves the old stack array's
+    // guarantee for the levels x layers region count, which no longer fits on the stack).
+    std::vector<VkBufferImageCopy> copyRegions;
+    copyRegions.reserve(static_cast<std::size_t>(desc.mipLevels) * desc.arrayLayers);
     TextureMipExtentUVE uploadExtent{desc.width, desc.height};
     VkDeviceSize uploadOffset = 0U;
     for (std::uint32_t level = 0U; level < desc.mipLevels; ++level) {
@@ -2627,19 +2700,32 @@ TextureHandleUVE VulkanRenderDeviceUVE::CreateTextureUVE(const TextureDescUVE& d
             return fail("could not calculate block-aware mip upload size");
         }
         mipUploadOffsets[level] = uploadOffset;
-        uploadOffset += static_cast<VkDeviceSize>(levelBytes);
+        mipLevelBytes[level] = static_cast<VkDeviceSize>(levelBytes);
+        // Level-major: all layers of L0, then all of L1, … (the shared upload validator
+        // already bounded this total).
+        uploadOffset += static_cast<VkDeviceSize>(levelBytes) * desc.arrayLayers;
         uploadExtent.width = uploadExtent.width > 1U ? uploadExtent.width / 2U : 1U;
         uploadExtent.height = uploadExtent.height > 1U ? uploadExtent.height / 2U : 1U;
     }
 
+    // Tier 2.3: array/cubemap caps — 2D textures always pass (arrayLayers == 1, and the
+    // cubemap check only applies to cubes).
+    if (desc.arrayLayers > impl.maxTextureArrayLayers) {
+        return fail("array layer count exceeds the device's maxImageArrayLayers limit");
+    }
+    if (desc.type == TextureTypeUVE::Cubemap && desc.width > impl.maxCubemapSize) {
+        return fail("cubemap face size exceeds the device's maxImageDimensionCube limit");
+    }
     VkImageCreateInfo imageInfo{};
     imageInfo.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
-    imageInfo.flags = imageFlags;
+    imageInfo.flags = imageFlags |
+                      (desc.type == TextureTypeUVE::Cubemap ? VK_IMAGE_CREATE_CUBE_COMPATIBLE_BIT
+                                                            : 0U);
     imageInfo.imageType = VK_IMAGE_TYPE_2D;
     imageInfo.format = format;
     imageInfo.extent = {desc.width, desc.height, 1U};
     imageInfo.mipLevels = desc.mipLevels;
-    imageInfo.arrayLayers = 1U;
+    imageInfo.arrayLayers = desc.arrayLayers; // Tier 2.3: 1 for 2D, N for arrays, 6 for cubes
     imageInfo.samples = VK_SAMPLE_COUNT_1_BIT;
     imageInfo.tiling = VK_IMAGE_TILING_OPTIMAL;
     imageInfo.usage = usage;
@@ -2790,31 +2876,35 @@ TextureHandleUVE VulkanRenderDeviceUVE::CreateTextureUVE(const TextureDescUVE& d
     toTransferDst.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
     toTransferDst.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
     toTransferDst.image = image;
-    toTransferDst.subresourceRange = {aspect, 0U, desc.mipLevels, 0U, 1U};
+    toTransferDst.subresourceRange = {aspect, 0U, desc.mipLevels, 0U, desc.arrayLayers};
     if (uploadBytes != 0U) {
         impl.vk.vkCmdPipelineBarrier(transferCommands, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
                                      VK_PIPELINE_STAGE_TRANSFER_BIT, 0U, 0U, nullptr, 0U, nullptr,
                                      1U, &toTransferDst);
-        // A 32-bit dimension needs at most 32 mip levels, and the RHI validator guarantees
-        // that bound before allocation. Keep the regions on the stack so upload cannot throw
-        // after image/staging resources have been acquired. Offsets are block-aware for BC,
-        // ETC2, and ASTC uploads as well as texel-based formats.
-        std::array<VkBufferImageCopy, 32U> copyRegions{};
+        // Tier 2.3: one region per (level, layer) — level-major, matching the upload contract
+        // (all layers of L0, then all of L1…). Cube faces upload in CubemapFaceUVE order.
+        // The vector was reserved before image acquisition, so push_back cannot throw after
+        // acquire (preserving the old stack array's guarantee). Offsets are block-aware for
+        // BC, ETC2, and ASTC uploads as well as texel-based formats.
         TextureMipExtentUVE mipExtent{desc.width, desc.height};
         for (std::uint32_t level = 0U; level < desc.mipLevels; ++level) {
-            VkBufferImageCopy& copyRegion = copyRegions[level];
-            copyRegion.bufferOffset = mipUploadOffsets[level];
-            copyRegion.bufferRowLength = 0U;   // tightly packed, matching the upload contract
-            copyRegion.bufferImageHeight = 0U; // zero means use the extent/block geometry
-            copyRegion.imageSubresource = {aspect, level, 0U, 1U};
-            copyRegion.imageOffset = {0, 0, 0};
-            copyRegion.imageExtent = {mipExtent.width, mipExtent.height, 1U};
+            for (std::uint32_t layer = 0U; layer < desc.arrayLayers; ++layer) {
+                VkBufferImageCopy copyRegion{};
+                copyRegion.bufferOffset = mipUploadOffsets[level] + mipLevelBytes[level] * layer;
+                copyRegion.bufferRowLength = 0U; // tightly packed, matching the upload contract
+                copyRegion.bufferImageHeight = 0U; // zero means use the extent/block geometry
+                copyRegion.imageSubresource = {aspect, level, layer, 1U};
+                copyRegion.imageOffset = {0, 0, 0};
+                copyRegion.imageExtent = {mipExtent.width, mipExtent.height, 1U};
+                copyRegions.push_back(copyRegion);
+            }
             mipExtent.width = mipExtent.width > 1U ? mipExtent.width / 2U : 1U;
             mipExtent.height = mipExtent.height > 1U ? mipExtent.height / 2U : 1U;
         }
         impl.vk.vkCmdCopyBufferToImage(transferCommands, stagingBuffer, image,
                                        VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
-                                       desc.mipLevels, copyRegions.data());
+                                       static_cast<std::uint32_t>(copyRegions.size()),
+                                       copyRegions.data());
     }
     VkImageMemoryBarrier toFinal{};
     toFinal.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
@@ -2830,7 +2920,7 @@ TextureHandleUVE VulkanRenderDeviceUVE::CreateTextureUVE(const TextureDescUVE& d
     toFinal.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
     toFinal.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
     toFinal.image = image;
-    toFinal.subresourceRange = {aspect, 0U, desc.mipLevels, 0U, 1U};
+    toFinal.subresourceRange = {aspect, 0U, desc.mipLevels, 0U, desc.arrayLayers};
     const VkPipelineStageFlags finalStage =
         finalLayout == VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL
             ? VK_PIPELINE_STAGE_ALL_COMMANDS_BIT
@@ -2862,9 +2952,12 @@ TextureHandleUVE VulkanRenderDeviceUVE::CreateTextureUVE(const TextureDescUVE& d
     VkImageViewCreateInfo viewInfo{};
     viewInfo.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
     viewInfo.image = image;
-    viewInfo.viewType = VK_IMAGE_VIEW_TYPE_2D;
+    // Tier 2.3: cubes sample through a CUBE view, arrays through 2D_ARRAY, 2D unchanged.
+    viewInfo.viewType = desc.type == TextureTypeUVE::Cubemap          ? VK_IMAGE_VIEW_TYPE_CUBE
+                        : desc.type == TextureTypeUVE::Texture2DArray ? VK_IMAGE_VIEW_TYPE_2D_ARRAY
+                                                                      : VK_IMAGE_VIEW_TYPE_2D;
     viewInfo.format = sampledFormat;
-    viewInfo.subresourceRange = {aspect, 0U, desc.mipLevels, 0U, 1U};
+    viewInfo.subresourceRange = {aspect, 0U, desc.mipLevels, 0U, desc.arrayLayers};
     VkImageView view = VK_NULL_HANDLE;
     if (impl.vk.vkCreateImageView(impl.device, &viewInfo, nullptr, &view) != VK_SUCCESS ||
         view == VK_NULL_HANDLE) {
@@ -2875,6 +2968,8 @@ TextureHandleUVE VulkanRenderDeviceUVE::CreateTextureUVE(const TextureDescUVE& d
     if (!IsTextureFormatCompressedUVE(desc.format)) {
         viewInfo.format = format; // image-native: this is the view dynamic rendering attaches
         viewInfo.subresourceRange.levelCount = 1U; // render-target attachment is always level 0
+        viewInfo.subresourceRange.layerCount = 1U; // …and always layer 0 (deeper layers attach
+                                                   // via the Tier 2.3 layer cache)
         if (impl.vk.vkCreateImageView(impl.device, &viewInfo, nullptr, &attachmentView) != VK_SUCCESS ||
             attachmentView == VK_NULL_HANDLE) {
             impl.vk.vkDestroyImageView(impl.device, view, nullptr);
@@ -2896,6 +2991,9 @@ TextureHandleUVE VulkanRenderDeviceUVE::CreateTextureUVE(const TextureDescUVE& d
                               ? VK_FORMAT_R8G8B8A8_UNORM
                               : format;
         viewInfo.subresourceRange.levelCount = 1U;
+        // Storage views stay single-layer 2D (layered storage images are out of Tier 2.3
+        // scope — the bind-time fallback below keeps them out of storage slots entirely).
+        viewInfo.subresourceRange.layerCount = 1U;
         if (impl.vk.vkCreateImageView(impl.device, &viewInfo, nullptr, &storageView) != VK_SUCCESS ||
             storageView == VK_NULL_HANDLE) {
             if (attachmentView != VK_NULL_HANDLE) {
@@ -3138,6 +3236,10 @@ void VulkanRenderDeviceUVE::DestroyTextureUVE(const TextureHandleUVE texture) {
     }
     if (found->second.attachmentView != VK_NULL_HANDLE) {
         impl.vk.vkDestroyImageView(impl.device, found->second.attachmentView, nullptr);
+    }
+    for (const auto& [layer, layerView] : found->second.layerAttachmentViews) {
+        (void)layer;
+        impl.vk.vkDestroyImageView(impl.device, layerView, nullptr);
     }
     impl.vk.vkDestroyImageView(impl.device, found->second.view, nullptr);
     impl.vk.vkDestroyImage(impl.device, found->second.image, nullptr);
@@ -4279,8 +4381,10 @@ void VulkanRenderDeviceUVE::ReplayRecordedCommandsUVE(const std::vector<Recorded
         toGeneral.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
         toGeneral.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
         toGeneral.image = textureRecord.image;
-        toGeneral.subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0U,
-                                       textureRecord.desc.mipLevels, 0U, 1U};
+        // Tier 2.3: whole image — pinnedGeneral/currentLayout track per-image, so a partial
+        // transition would leave the other layers contradicting the tracked layout.
+        toGeneral.subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0U, textureRecord.desc.mipLevels,
+                                       0U, textureRecord.desc.arrayLayers};
         impl.vk.vkCmdPipelineBarrier(impl.commandBuffer,
                                      VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT |
                                          VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
@@ -4299,7 +4403,9 @@ void VulkanRenderDeviceUVE::ReplayRecordedCommandsUVE(const std::vector<Recorded
                        impl.BeginOffscreenPassDynamicUVE(
                            *colorRecord, depthRecord,
                            VkExtent2D{colorRecord->desc.width, colorRecord->desc.height},
-                           {0.0F, 0.0F, 0.0F, 0.0F}, 1.0F, LoadOpUVE::Load, LoadOpUVE::Load));
+                           {0.0F, 0.0F, 0.0F, 0.0F}, 1.0F, LoadOpUVE::Load, LoadOpUVE::Load,
+                           impl.framePassState.openColorLayer,
+                           impl.framePassState.openDepthLayer));
             if (!reopened) {
                 impl.WarnOnceUVE(VulkanRenderDeviceUVE::ImplUVE::kWarnedStorageImageTransitionUVE,
                     "replay: reopening the rendering instance after a storage-image layout "
@@ -4379,6 +4485,15 @@ void VulkanRenderDeviceUVE::ReplayRecordedCommandsUVE(const std::vector<Recorded
                         "BindTextureUVE: a block-compressed texture was bound to a storage-image "
                         "slot; compressed formats are sampled-only — the 1x1 black storage sink "
                         "receives the writes instead");
+                    value = impl.fallbackStorageImageValue;
+                } else if (storageImageSlot && slotRecord.desc.arrayLayers > 1U) {
+                    // Tier 2.3: layered storage images are a follow-up (storage views are
+                    // single-layer 2D) — writes deterministically go to the black sink.
+                    impl.WarnOnceUVE(
+                        VulkanRenderDeviceUVE::ImplUVE::kWarnedStorageImageLayeredUVE,
+                        "BindTextureUVE: an array/cubemap texture was bound to a storage-image "
+                        "slot; layered storage images are not supported in Tier 2.3, so the 1x1 "
+                        "black storage sink receives the writes instead");
                     value = impl.fallbackStorageImageValue;
                 } else if (slotRecord.desc.format == TextureFormatUVE::Depth32Float &&
                            (storageImageSlot || !impl.useDynamicRendering)) {
@@ -4798,6 +4913,14 @@ void VulkanRenderDeviceUVE::ReplayRecordedCommandsUVE(const std::vector<Recorded
                                     "skipped)");
                                 skipPass = true;
                             }
+                            if (!skipPass &&
+                                op.desc.colorLayer >= foundColor->second.desc.arrayLayers) {
+                                impl.WarnOnceUVE(
+                                    VulkanRenderDeviceUVE::ImplUVE::kWarnedOffscreenUnsupportedUVE,
+                                    "BeginRenderPassUVE: colorLayer exceeds the color attachment's "
+                                    "layer count; the submission's draws are skipped");
+                                skipPass = true;
+                            }
                             if (!skipPass && op.desc.depthAttachment != kInvalidTextureHandleUVE) {
                                 const auto foundDepth =
                                     impl.textures.find(op.desc.depthAttachment.value);
@@ -4821,6 +4944,15 @@ void VulkanRenderDeviceUVE::ReplayRecordedCommandsUVE(const std::vector<Recorded
                                 } else {
                                     depthRecord = &foundDepth->second;
                                 }
+                                if (!skipPass && depthRecord != nullptr &&
+                                    op.desc.depthLayer >= depthRecord->desc.arrayLayers) {
+                                    impl.WarnOnceUVE(
+                                        VulkanRenderDeviceUVE::ImplUVE::kWarnedOffscreenUnsupportedUVE,
+                                        "BeginRenderPassUVE: depthLayer exceeds the depth "
+                                        "attachment's layer count; the submission's draws are "
+                                        "skipped");
+                                    skipPass = true;
+                                }
                             }
                             if (!skipPass) {
                                 const ImplUVE::TextureRecordUVE& color = foundColor->second;
@@ -4834,7 +4966,8 @@ void VulkanRenderDeviceUVE::ReplayRecordedCommandsUVE(const std::vector<Recorded
                                         degradeToScratchDepth ? nullptr : depthRecord,
                                         VkExtent2D{color.desc.width, color.desc.height},
                                         op.desc.clearColor, op.desc.clearDepth,
-                                        op.desc.colorLoadOp, op.desc.depthLoadOp)) {
+                                        op.desc.colorLoadOp, op.desc.depthLoadOp,
+                                        op.desc.colorLayer, op.desc.depthLayer)) {
                                     passActiveForThisList = true;
                                     if (op.desc.viewportOverride.has_value()) {
                                         applyViewportOverrideUVE(*op.desc.viewportOverride,

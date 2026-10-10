@@ -139,7 +139,7 @@ uniform vec3 uReflectionProbeAxisX;
 uniform vec3 uReflectionProbeAxisY;
 uniform vec3 uReflectionProbeAxisZ;
 uniform vec3 uReflectionProbeHalfExtents;
-uniform sampler2D uReflectionProbeFaces[6];
+uniform samplerCube uReflectionProbeCube;
 
 const float kPiUVE = 3.14159265359;
 const float kBrdfEpsilonUVE = 0.0001;
@@ -212,73 +212,12 @@ vec3 AmbientFromSourceUVE(vec3 normal) {
     return HemisphereAmbientUVE(normal);
 }
 
-int SelectCubemapFaceUVE(vec3 direction) {
-    vec3 a = abs(direction);
-    if (a.x >= a.y && a.x >= a.z) {
-        return direction.x >= 0.0 ? 0 : 1;
-    }
-    if (a.y >= a.z) {
-        return direction.y >= 0.0 ? 2 : 3;
-    }
-    return direction.z >= 0.0 ? 4 : 5;
-}
-
-vec3 CubemapFaceForwardUVE(int face) {
-    if (face == 0) {
-        return vec3(1.0, 0.0, 0.0);
-    }
-    if (face == 1) {
-        return vec3(-1.0, 0.0, 0.0);
-    }
-    if (face == 2) {
-        return vec3(0.0, 1.0, 0.0);
-    }
-    if (face == 3) {
-        return vec3(0.0, -1.0, 0.0);
-    }
-    if (face == 4) {
-        return vec3(0.0, 0.0, 1.0);
-    }
-    return vec3(0.0, 0.0, -1.0);
-}
-
-vec3 CubemapFaceUpUVE(int face) {
-    if (face == 2) {
-        return vec3(0.0, 0.0, -1.0);
-    }
-    if (face == 3) {
-        return vec3(0.0, 0.0, 1.0);
-    }
-    return vec3(0.0, 1.0, 0.0);
-}
-
-vec3 SampleReflectionProbeFaceUVE(int face, vec2 uv) {
-    if (face == 0) {
-        return texture(uReflectionProbeFaces[0], uv).rgb;
-    }
-    if (face == 1) {
-        return texture(uReflectionProbeFaces[1], uv).rgb;
-    }
-    if (face == 2) {
-        return texture(uReflectionProbeFaces[2], uv).rgb;
-    }
-    if (face == 3) {
-        return texture(uReflectionProbeFaces[3], uv).rgb;
-    }
-    if (face == 4) {
-        return texture(uReflectionProbeFaces[4], uv).rgb;
-    }
-    return texture(uReflectionProbeFaces[5], uv).rgb;
-}
-
+// Tier 2.3: the probe is a real cubemap now — one sampler, one texture() call. The face-select
+// if-chain, planar projection, and per-face samplers it replaces are gone (see git history);
+// GPU-side face selection also filters seamlessly across face edges, where the manual math
+// clamped to each face's edge texels (final-look parity passes with the 2D viewport).
 vec3 SampleReflectionProbeUVE(vec3 direction) {
-    int face = SelectCubemapFaceUVE(direction);
-    vec3 forward = CubemapFaceForwardUVE(face);
-    vec3 right = SafeNormalizeUVE(cross(forward, CubemapFaceUpUVE(face)));
-    vec3 cameraUp = cross(-forward, right);
-    float denom = max(dot(direction, forward), kBrdfEpsilonUVE);
-    vec2 uv = vec2(dot(direction, right), dot(direction, cameraUp)) / denom * 0.5 + 0.5;
-    return SampleReflectionProbeFaceUVE(face, uv);
+    return texture(uReflectionProbeCube, direction).rgb;
 }
 
 float ReflectionProbeInfluenceUVE(vec3 worldPoint) {

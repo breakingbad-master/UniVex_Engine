@@ -586,43 +586,124 @@ TextureHandleUVE GlRenderDeviceUVE::CreateTextureUVE(const TextureDescUVE& desc,
     // Texture creation temporarily binds the object on the current active unit. Preserve both
     // pieces of caller/command-buffer state so a live GlCommandBufferUVE texture cache cannot
     // falsely skip a later rebind after a resource is created between draws.
+    // Tier 2.3: dimensional targets. Cubes upload face-by-face in CubemapFaceUVE order
+    // (POSITIVE_X + face); arrays upload whole levels, all layers contiguous.
+    const bool isCube = desc.type == TextureTypeUVE::Cubemap;
+    const bool isArray = desc.type == TextureTypeUVE::Texture2DArray;
+    const GLenum textureTarget = isCube ? GL_TEXTURE_CUBE_MAP
+                                 : isArray ? GL_TEXTURE_2D_ARRAY
+                                           : GL_TEXTURE_2D;
+    const GLenum bindingQuery = isCube ? GL_TEXTURE_BINDING_CUBE_MAP
+                                 : isArray ? GL_TEXTURE_BINDING_2D_ARRAY
+                                           : GL_TEXTURE_BINDING_2D;
+    if (isArray || isCube) {
+        GLint maxLayers = 0;
+        glGetIntegerv(GL_MAX_ARRAY_TEXTURE_LAYERS, &maxLayers);
+        GLint maxCubeSize = 0;
+        glGetIntegerv(GL_MAX_CUBE_MAP_TEXTURE_SIZE, &maxCubeSize);
+        if ((isArray && desc.arrayLayers > static_cast<std::uint32_t>(maxLayers)) ||
+            (isCube && desc.width > static_cast<std::uint32_t>(maxCubeSize))) {
+            UVE_ERROR("GlRenderDeviceUVE: CreateTextureUVE array/cubemap exceeds GL limits");
+            return kInvalidTextureHandleUVE;
+        }
+        if (isArray && m_impl->state.gl.glTexImage3D == nullptr &&
+            !IsTextureFormatCompressedUVE(desc.format)) {
+            UVE_ERROR("GlRenderDeviceUVE: CreateTextureUVE needs glTexImage3D for arrays");
+            return kInvalidTextureHandleUVE;
+        }
+        if (isArray && m_impl->state.gl.glCompressedTexImage3D == nullptr &&
+            IsTextureFormatCompressedUVE(desc.format)) {
+            UVE_ERROR("GlRenderDeviceUVE: CreateTextureUVE needs glCompressedTexImage3D");
+            return kInvalidTextureHandleUVE;
+        }
+    }
+
     GLint previousActiveTexture = GL_TEXTURE0;
     GLint previousTextureBinding = 0;
     glGetIntegerv(GL_ACTIVE_TEXTURE, &previousActiveTexture);
-    glGetIntegerv(GL_TEXTURE_BINDING_2D, &previousTextureBinding);
+    glGetIntegerv(bindingQuery, &previousTextureBinding);
 
     GLuint glTexture = 0;
     glGenTextures(1, &glTexture);
-    glBindTexture(GL_TEXTURE_2D, glTexture);
+    glBindTexture(textureTarget, glTexture);
     std::size_t dataOffset = 0U;
     std::uint32_t levelWidth = desc.width;
     std::uint32_t levelHeight = desc.height;
     for (std::uint32_t level = 0U; level < desc.mipLevels; ++level) {
-        const std::byte* const levelData = initialData.empty() ? nullptr : initialData.data() + dataOffset;
-        if (IsTextureFormatCompressedUVE(desc.format)) {
-            m_impl->state.gl.glCompressedTexImage2D(
-                GL_TEXTURE_2D, static_cast<GLint>(level), static_cast<GLenum>(glFormat.internalFormat),
-                static_cast<GLsizei>(levelWidth), static_cast<GLsizei>(levelHeight), 0,
-                mipImageSizes[level], levelData);
+        const std::byte* const levelData =
+            initialData.empty() ? nullptr : initialData.data() + dataOffset;
+        if (isCube) {
+            // Cube faces upload consecutively per level in CubemapFaceUVE order.
+            for (std::uint32_t face = 0U; face < 6U; ++face) {
+                const std::byte* faceData = nullptr;
+                if (levelData != nullptr) {
+                    faceData =
+                        levelData + static_cast<std::size_t>(mipImageSizes[level]) * face;
+                }
+                const GLenum faceTarget =
+                    static_cast<GLenum>(GL_TEXTURE_CUBE_MAP_POSITIVE_X + face);
+                if (IsTextureFormatCompressedUVE(desc.format)) {
+                    m_impl->state.gl.glCompressedTexImage2D(
+                        faceTarget, static_cast<GLint>(level),
+                        static_cast<GLenum>(glFormat.internalFormat),
+                        static_cast<GLsizei>(levelWidth), static_cast<GLsizei>(levelHeight), 0,
+                        mipImageSizes[level], faceData);
+                } else {
+                    glTexImage2D(faceTarget, static_cast<GLint>(level), glFormat.internalFormat,
+                                 static_cast<GLsizei>(levelWidth), static_cast<GLsizei>(levelHeight),
+                                 0, glFormat.format, glFormat.type, faceData);
+                }
+            }
+            dataOffset += static_cast<std::size_t>(mipImageSizes[level]) * 6U;
+        } else if (isArray) {
+            // Whole-level upload: all layers contiguous (level-major, per the RHI contract).
+            // The size_t intermediate keeps huge levels out of signed-overflow UB; the driver
+            // reports oversized allocations through the standard GL error path below.
+            const GLsizei levelBytesAllLayers = static_cast<GLsizei>(
+                static_cast<std::size_t>(mipImageSizes[level]) * desc.arrayLayers);
+            if (IsTextureFormatCompressedUVE(desc.format)) {
+                m_impl->state.gl.glCompressedTexImage3D(
+                    GL_TEXTURE_2D_ARRAY, static_cast<GLint>(level),
+                    static_cast<GLenum>(glFormat.internalFormat), static_cast<GLsizei>(levelWidth),
+                    static_cast<GLsizei>(levelHeight), static_cast<GLsizei>(desc.arrayLayers), 0,
+                    levelBytesAllLayers, levelData);
+            } else {
+                m_impl->state.gl.glTexImage3D(
+                    GL_TEXTURE_2D_ARRAY, static_cast<GLint>(level), glFormat.internalFormat,
+                    static_cast<GLsizei>(levelWidth), static_cast<GLsizei>(levelHeight),
+                    static_cast<GLsizei>(desc.arrayLayers), 0, glFormat.format, glFormat.type,
+                    levelData);
+            }
+            dataOffset += static_cast<std::size_t>(mipImageSizes[level]) * desc.arrayLayers;
         } else {
-            glTexImage2D(GL_TEXTURE_2D, static_cast<GLint>(level), glFormat.internalFormat,
-                         static_cast<GLsizei>(levelWidth), static_cast<GLsizei>(levelHeight), 0,
-                         glFormat.format, glFormat.type, levelData);
+            if (IsTextureFormatCompressedUVE(desc.format)) {
+                m_impl->state.gl.glCompressedTexImage2D(
+                    GL_TEXTURE_2D, static_cast<GLint>(level),
+                    static_cast<GLenum>(glFormat.internalFormat), static_cast<GLsizei>(levelWidth),
+                    static_cast<GLsizei>(levelHeight), 0, mipImageSizes[level], levelData);
+            } else {
+                glTexImage2D(GL_TEXTURE_2D, static_cast<GLint>(level), glFormat.internalFormat,
+                             static_cast<GLsizei>(levelWidth), static_cast<GLsizei>(levelHeight), 0,
+                             glFormat.format, glFormat.type, levelData);
+            }
+            dataOffset += static_cast<std::size_t>(mipImageSizes[level]);
         }
-        dataOffset += static_cast<std::size_t>(mipImageSizes[level]);
         levelWidth = levelWidth > 1U ? levelWidth / 2U : 1U;
         levelHeight = levelHeight > 1U ? levelHeight / 2U : 1U;
     }
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER,
+    glTexParameteri(textureTarget, GL_TEXTURE_MIN_FILTER,
                     desc.mipLevels > 1U ? GL_LINEAR_MIPMAP_LINEAR : GL_LINEAR);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAX_LEVEL, static_cast<GLint>(desc.mipLevels - 1U));
+    glTexParameteri(textureTarget, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+    glTexParameteri(textureTarget, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+    glTexParameteri(textureTarget, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+    if (isArray) {
+        glTexParameteri(textureTarget, GL_TEXTURE_WRAP_R, GL_CLAMP_TO_EDGE);
+    }
+    glTexParameteri(textureTarget, GL_TEXTURE_MAX_LEVEL, static_cast<GLint>(desc.mipLevels - 1U));
     UVE_GL_CHECK_ERROR_UVE("CreateTextureUVE mip allocation/upload and sampler state");
 
     m_impl->state.gl.glActiveTexture(static_cast<GLenum>(previousActiveTexture));
-    glBindTexture(GL_TEXTURE_2D, static_cast<GLuint>(previousTextureBinding));
+    glBindTexture(textureTarget, static_cast<GLuint>(previousTextureBinding));
 
     const std::uint32_t handleValue = m_impl->state.nextTextureHandle++;
     m_impl->state.textures.emplace(handleValue, Detail::GlDeviceStateUVE::TextureRecordUVE{glTexture, desc});
@@ -667,8 +748,8 @@ void GlRenderDeviceUVE::DestroyTextureUVE(TextureHandleUVE texture) {
     glDeleteTextures(1, &it->second.glTexture);
     for (auto framebufferIt = m_impl->state.framebufferCache.begin();
          framebufferIt != m_impl->state.framebufferCache.end();) {
-        const std::uint32_t colorHandle = static_cast<std::uint32_t>(framebufferIt->first >> 32U);
-        const std::uint32_t depthHandle = static_cast<std::uint32_t>(framebufferIt->first & 0xFFFF'FFFFULL);
+        const std::uint32_t colorHandle = framebufferIt->first.color;
+        const std::uint32_t depthHandle = framebufferIt->first.depth;
         if (colorHandle == texture.value || depthHandle == texture.value) {
             m_impl->state.gl.glDeleteFramebuffers(1, &framebufferIt->second);
             framebufferIt = m_impl->state.framebufferCache.erase(framebufferIt);

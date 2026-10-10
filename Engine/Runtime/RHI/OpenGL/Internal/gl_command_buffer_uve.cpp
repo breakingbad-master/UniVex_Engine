@@ -187,10 +187,22 @@ void GlCommandBufferUVE::BeginRenderPassUVE(const RenderPassDescUVE& renderPassD
             UVE_ERROR("GlCommandBufferUVE: colorAttachment and depthAttachment dimensions must match");
             return;
         }
+        // Tier 2.3: layer selection must sit inside the attachment's layer count (2D textures
+        // carry exactly one layer, so any nonzero layer on them fails here too).
+        if (colorIt != m_state->textures.end() &&
+            renderPassDesc.colorLayer >= colorIt->second.desc.arrayLayers) {
+            UVE_ERROR("GlCommandBufferUVE: colorLayer exceeds the color attachment's layer count");
+            return;
+        }
+        if (depthIt != m_state->textures.end() &&
+            renderPassDesc.depthLayer >= depthIt->second.desc.arrayLayers) {
+            UVE_ERROR("GlCommandBufferUVE: depthLayer exceeds the depth attachment's layer count");
+            return;
+        }
 
-        const std::uint64_t framebufferKey =
-            (static_cast<std::uint64_t>(renderPassDesc.colorAttachment.value) << 32U) |
-            static_cast<std::uint64_t>(renderPassDesc.depthAttachment.value);
+        const Detail::GlDeviceStateUVE::FramebufferKeyUVE framebufferKey{
+            renderPassDesc.colorAttachment.value, renderPassDesc.depthAttachment.value,
+            renderPassDesc.colorLayer, renderPassDesc.depthLayer};
         GLuint framebuffer = 0;
         const auto cachedFramebufferIt = m_state->framebufferCache.find(framebufferKey);
         const bool framebufferCreated = cachedFramebufferIt == m_state->framebufferCache.end();
@@ -219,8 +231,22 @@ void GlCommandBufferUVE::BeginRenderPassUVE(const RenderPassDescUVE& renderPassD
 
         if (framebufferCreated) {
             if (colorIt != m_state->textures.end()) {
-                m_state->gl.glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D,
-                                                    colorIt->second.glTexture, 0);
+                // Tier 2.3: arrays/cubes attach one layer (cube faces ARE layers 0..5).
+                const bool colorIsLayered =
+                    colorIt->second.desc.type != TextureTypeUVE::Texture2D;
+                if (colorIsLayered && m_state->gl.glFramebufferTextureLayer == nullptr) {
+                    // No layered attach on this context (pre-3.2): skip the attachment so the
+                    // status check below tears the FBO down through the standard path.
+                    UVE_ERROR("GlCommandBufferUVE: layered render targets need "
+                              "glFramebufferTextureLayer (GL 3.2+)");
+                } else if (colorIsLayered) {
+                    m_state->gl.glFramebufferTextureLayer(
+                        GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, colorIt->second.glTexture, 0,
+                        static_cast<GLint>(renderPassDesc.colorLayer));
+                } else {
+                    m_state->gl.glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0,
+                                                       GL_TEXTURE_2D, colorIt->second.glTexture, 0);
+                }
             } else {
                 // Depth-only pass (e.g. a shadow map's depth pre-pass, Increment 26): a core-profile
                 // FBO with no color attachment must explicitly declare it has none, or
@@ -234,8 +260,19 @@ void GlCommandBufferUVE::BeginRenderPassUVE(const RenderPassDescUVE& renderPassD
 #endif
             }
             if (depthIt != m_state->textures.end()) {
-                m_state->gl.glFramebufferTexture2D(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, GL_TEXTURE_2D,
-                                                    depthIt->second.glTexture, 0);
+                const bool depthIsLayered =
+                    depthIt->second.desc.type != TextureTypeUVE::Texture2D;
+                if (depthIsLayered && m_state->gl.glFramebufferTextureLayer == nullptr) {
+                    UVE_ERROR("GlCommandBufferUVE: layered render targets need "
+                              "glFramebufferTextureLayer (GL 3.2+)");
+                } else if (depthIsLayered) {
+                    m_state->gl.glFramebufferTextureLayer(
+                        GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, depthIt->second.glTexture, 0,
+                        static_cast<GLint>(renderPassDesc.depthLayer));
+                } else {
+                    m_state->gl.glFramebufferTexture2D(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT,
+                                                       GL_TEXTURE_2D, depthIt->second.glTexture, 0);
+                }
             }
             const GLenum framebufferStatus = m_state->gl.glCheckFramebufferStatus(GL_FRAMEBUFFER);
             if (framebufferStatus != GL_FRAMEBUFFER_COMPLETE) {
@@ -500,7 +537,14 @@ void GlCommandBufferUVE::BindTextureUVE(TextureHandleUVE texture, std::uint32_t 
         boundTextureIt != m_boundTextures.end() && boundTextureIt->second == texture;
     if (!alreadyBoundToSlot) {
         m_state->gl.glActiveTexture(static_cast<GLenum>(GL_TEXTURE0 + slot));
-        glBindTexture(GL_TEXTURE_2D, textureIt->second.glTexture);
+        // Tier 2.3: bind under the texture's own target (targets coexist per unit in GL, so
+        // a cube bound after a 2D on the same slot cannot disturb the earlier binding).
+        const GLenum bindTarget = textureIt->second.desc.type == TextureTypeUVE::Cubemap
+                                      ? GL_TEXTURE_CUBE_MAP
+                                  : textureIt->second.desc.type == TextureTypeUVE::Texture2DArray
+                                      ? GL_TEXTURE_2D_ARRAY
+                                      : GL_TEXTURE_2D;
+        glBindTexture(bindTarget, textureIt->second.glTexture);
         m_boundTextures[slot] = texture;
     }
 
@@ -544,14 +588,19 @@ void GlCommandBufferUVE::BindTextureUVE(TextureHandleUVE texture, std::uint32_t 
                         imageFormat = 0;
                         break;
                 }
-                if (imageFormat != 0) {
+                // Tier 2.3: layered storage images are out of scope — arrays/cubes stay
+                // sampler-only, matching the Vulkan backend's black-sink fallback.
+                if (imageFormat != 0 && textureIt->second.desc.arrayLayers <= 1U) {
                     m_state->gl.glBindImageTexture(slot, textureIt->second.glTexture, 0, GL_FALSE,
                                                    0, GL_READ_WRITE, imageFormat);
                 } else {
                     // Do not leave a prior command's image binding live when the new sampled
                     // texture cannot legally serve as a storage image.
                     m_state->gl.glBindImageTexture(slot, 0U, 0, GL_FALSE, 0, GL_READ_WRITE, GL_RGBA8);
-                    if (IsTextureFormatCompressedUVE(textureIt->second.desc.format)) {
+                    if (textureIt->second.desc.arrayLayers > 1U) {
+                        UVE_ERROR("GlCommandBufferUVE: array/cubemap textures cannot be bound as "
+                                  "storage images in Tier 2.3; the image unit is left unbound");
+                    } else if (IsTextureFormatCompressedUVE(textureIt->second.desc.format)) {
                         UVE_ERROR("GlCommandBufferUVE: block-compressed textures cannot be bound as storage "
                                   "images; the image unit is left unbound");
                     } else if (textureIt->second.desc.colorSpace == TextureColorSpaceUVE::Srgb) {

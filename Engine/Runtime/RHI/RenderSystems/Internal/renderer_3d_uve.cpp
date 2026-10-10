@@ -403,7 +403,8 @@ struct RendererUniformNamesUVE {
     std::array<std::string, kShadowCascadeCountUVE> shadowCascadeSplits{};
     std::array<std::string, kShadowCascadeCountUVE> shadowMapTextures{};
     std::array<std::string, kShadowCascadeCountUVE> shadowPasses{};
-    std::array<std::string, Scene::kReflectionProbeCubemapFaceCountUVE> reflectionProbeFaces{};
+    // Tier 2.3: one cube uniform (slots 7..11, once the other five faces, are now unused).
+    std::string reflectionProbeCube;
 
     RendererUniformNamesUVE() : legacyLightSpaceMatrix("uLightSpaceMatrix") {
         for (std::size_t lightIndex = 0; lightIndex < kMaxLightsUVE; ++lightIndex) {
@@ -427,9 +428,7 @@ struct RendererUniformNamesUVE {
             shadowMapTextures[cascadeIndex] = "uShadowMapTextures[" + index + "]";
             shadowPasses[cascadeIndex] = "DirectionalShadowCascade" + index;
         }
-        for (std::size_t faceIndex = 0; faceIndex < Scene::kReflectionProbeCubemapFaceCountUVE; ++faceIndex) {
-            reflectionProbeFaces[faceIndex] = "uReflectionProbeFaces[" + std::to_string(faceIndex) + "]";
-        }
+        reflectionProbeCube = "uReflectionProbeCube";
     }
 };
 
@@ -880,7 +879,8 @@ struct Renderer3DUVE::ImplUVE {
     std::size_t fogVolumeCount = 0;
 
     struct ReflectionProbeGpuCacheUVE {
-        std::array<TextureHandleUVE, Scene::kReflectionProbeCubemapFaceCountUVE> faces{};
+        // Tier 2.3: one cubemap — capture renders each face into its layer (face == layer).
+        TextureHandleUVE cube = kInvalidTextureHandleUVE;
         std::uint32_t captureGeneration = 0;
         std::uint32_t captureResolution = 0U;
         bool ready = false;
@@ -901,38 +901,34 @@ struct Renderer3DUVE::ImplUVE {
     Math::Vector3UVE reflectionProbeAxisY{0.0F, 1.0F, 0.0F};
     Math::Vector3UVE reflectionProbeAxisZ{0.0F, 0.0F, 1.0F};
     Math::Vector3UVE reflectionProbeHalfExtents{};
-    std::array<TextureHandleUVE, Scene::kReflectionProbeCubemapFaceCountUVE> reflectionProbeFaces{};
+    TextureHandleUVE reflectionProbeCube = kInvalidTextureHandleUVE;
 
     void DestroyReflectionProbeGpuCacheUVE(ReflectionProbeGpuCacheUVE& cache) {
-        for (TextureHandleUVE& face : cache.faces) {
-            DestroyTextureIfValidUVE(renderDevice, face);
-            face = kInvalidTextureHandleUVE;
-        }
+        DestroyTextureIfValidUVE(renderDevice, cache.cube);
+        cache.cube = kInvalidTextureHandleUVE;
         cache.captureGeneration = 0U;
         cache.captureResolution = 0U;
         cache.ready = false;
     }
 
-    [[nodiscard]] bool EnsureReflectionProbeFacesUVE(ReflectionProbeGpuCacheUVE& cache,
-                                                     const std::uint32_t resolution) {
+    [[nodiscard]] bool EnsureReflectionProbeCubeUVE(ReflectionProbeGpuCacheUVE& cache,
+                                                    const std::uint32_t resolution) {
         if (cache.captureResolution != resolution) {
             DestroyReflectionProbeGpuCacheUVE(cache);
             cache.captureResolution = resolution;
         }
-        bool ok = true;
-        for (TextureHandleUVE& face : cache.faces) {
-            if (face == kInvalidTextureHandleUVE) {
-                face = renderDevice.CreateTextureUVE(
-                    TextureDescUVE{resolution, resolution, TextureFormatUVE::RGBA8Unorm, 1});
-            }
-            if (face == kInvalidTextureHandleUVE) {
-                ok = false;
-            }
+        if (cache.cube == kInvalidTextureHandleUVE) {
+            TextureDescUVE cubeDesc{resolution, resolution, TextureFormatUVE::RGBA8Unorm, 1};
+            cubeDesc.type = TextureTypeUVE::Cubemap;
+            cubeDesc.arrayLayers =
+                static_cast<std::uint32_t>(Scene::kReflectionProbeCubemapFaceCountUVE);
+            cache.cube = renderDevice.CreateTextureUVE(cubeDesc);
         }
-        if (!ok) {
+        if (cache.cube == kInvalidTextureHandleUVE) {
             DestroyReflectionProbeGpuCacheUVE(cache);
+            return false;
         }
-        return ok;
+        return true;
     }
 
     [[nodiscard]] TextureHandleUVE EnsureReflectionProbeCaptureDepthUVE(const std::uint32_t resolution) {
@@ -955,7 +951,7 @@ struct Renderer3DUVE::ImplUVE {
         reflectionProbeAxisY = Math::Vector3UVE{0.0F, 1.0F, 0.0F};
         reflectionProbeAxisZ = Math::Vector3UVE{0.0F, 0.0F, 1.0F};
         reflectionProbeHalfExtents = {};
-        reflectionProbeFaces.fill(kInvalidTextureHandleUVE);
+        reflectionProbeCube = kInvalidTextureHandleUVE;
     }
 
     void EvictDeadReflectionProbeCapturesUVE(Scene::IEntityManagerUVE& entityManager) {
@@ -990,7 +986,7 @@ struct Renderer3DUVE::ImplUVE {
             reflectionProbeAxisY = frame.axisY;
             reflectionProbeAxisZ = frame.axisZ;
             reflectionProbeHalfExtents = frame.halfExtents;
-            reflectionProbeFaces = cacheIt->second.faces;
+            reflectionProbeCube = cacheIt->second.cube;
             break;
         }
     }
@@ -1058,6 +1054,10 @@ struct Renderer3DUVE::ImplUVE {
     /// `texture(uAlbedoTexture, uv) * uAlbedoColor == uAlbedoColor` and
     /// `texture(uAOTexture, uv).r == 1.0` (no occlusion), with no shader-side branching needed.
     TextureHandleUVE fallbackWhiteTexture;
+    /// Tier 2.3: a 1x1-white CUBEMAP fallback — bound wherever a samplerCube uniform (the
+    /// reflection probe) has no captured cube yet. Never destroyed explicitly, exactly like its
+    /// 2D siblings above (device teardown reaps renderer-owned textures).
+    TextureHandleUVE fallbackWhiteCubeTexture;
 
     /// A 1x1 flat tangent-space "up" normal texture ({0.5,0.5,1.0} encoded as {128,128,255}),
     /// used whenever a material leaves normalTexture unset. Bound/sampled for
@@ -1154,6 +1154,11 @@ struct Renderer3DUVE::ImplUVE {
     /// full-frame RenderFrameUVE() call (this field left nullopt) still targets the presentation
     /// surface exactly as before.
     std::optional<std::pair<TextureHandleUVE, TextureHandleUVE>> destinationTextureOverride;
+    /// Tier 2.3: layers of the override pair the current RenderFrameToTargetUVE() call renders
+    /// (probe capture aims faces at cube layers). Read only when destinationTextureOverride is
+    /// set; plain zeros (not optionals) so the pass builders below stay branch-symmetric.
+    std::uint32_t destinationColorLayerOverride = 0U;
+    std::uint32_t destinationDepthLayerOverride = 0U;
 
     /// Set only alongside destinationTextureOverride, from RenderFrameToTargetUVE()'s own
     /// width/height parameters - TextureHandleUVE has no queryable size on IRenderDeviceUVE, so the
@@ -2256,11 +2261,8 @@ struct Renderer3DUVE::ImplUVE {
         program.SetVector3UVE("uReflectionProbeAxisY", reflectionProbeAxisY);
         program.SetVector3UVE("uReflectionProbeAxisZ", reflectionProbeAxisZ);
         program.SetVector3UVE("uReflectionProbeHalfExtents", reflectionProbeHalfExtents);
-        for (std::size_t faceIndex = 0; faceIndex < Scene::kReflectionProbeCubemapFaceCountUVE; ++faceIndex) {
-            program.SetIntUVE(uniformNames.reflectionProbeFaces[faceIndex],
-                              static_cast<std::int32_t>(kReflectionProbeFirstTextureSlotUVE +
-                                                        static_cast<std::uint32_t>(faceIndex)));
-        }
+        program.SetIntUVE(uniformNames.reflectionProbeCube,
+                          static_cast<std::int32_t>(kReflectionProbeFirstTextureSlotUVE));
     }
 
     /// Binds shadow cascades, material/probe textures, and the world ambient map for every lit draw.
@@ -2290,13 +2292,12 @@ struct Renderer3DUVE::ImplUVE {
                                      kMetallicRoughnessTextureSlotUVE);
         commandBuffer.BindTextureUVE(materialResources.emissiveTexture, kEmissiveTextureSlotUVE);
         if (reflectionProbeEnabled != 0) {
-            for (std::size_t faceIndex = 0; faceIndex < Scene::kReflectionProbeCubemapFaceCountUVE; ++faceIndex) {
-                const TextureHandleUVE face = reflectionProbeFaces[faceIndex] != kInvalidTextureHandleUVE
-                                                  ? reflectionProbeFaces[faceIndex]
-                                                  : fallbackWhiteTexture;
-                commandBuffer.BindTextureUVE(face, kReflectionProbeFirstTextureSlotUVE +
-                                                       static_cast<std::uint32_t>(faceIndex));
-            }
+            // The fallback must be a cube too (a 2D texture under a samplerCube uniform is
+            // incomplete on GL and a view-type violation on Vulkan).
+            const TextureHandleUVE probeCube = reflectionProbeCube != kInvalidTextureHandleUVE
+                                                   ? reflectionProbeCube
+                                                   : fallbackWhiteCubeTexture;
+            commandBuffer.BindTextureUVE(probeCube, kReflectionProbeFirstTextureSlotUVE);
         }
         // The built-in lit shaders declare this sampler statically, so bind a valid fallback even
         // when the mode disables sampling; Vulkan still requires every active sampler descriptor.
@@ -2731,6 +2732,14 @@ Renderer3DUVE::Renderer3DUVE(IRenderDeviceUVE& renderDevice, IRenderSystemUVE& r
     }
     m_impl->fallbackWhiteTexture = renderDevice.CreateTextureUVE(
         TextureDescUVE{1, 1, TextureFormatUVE::RGBA8Unorm, 1}, std::as_bytes(std::span(kWhitePixelUVE)));
+    // Tier 2.3: the probe sampler's cube fallback (six white faces, level-major).
+    std::array<std::uint8_t, 24U> whiteCubePixels{};
+    whiteCubePixels.fill(0xFF);
+    TextureDescUVE whiteCubeDesc{1, 1, TextureFormatUVE::RGBA8Unorm, 1};
+    whiteCubeDesc.type = TextureTypeUVE::Cubemap;
+    whiteCubeDesc.arrayLayers = 6U;
+    m_impl->fallbackWhiteCubeTexture = renderDevice.CreateTextureUVE(
+        whiteCubeDesc, std::as_bytes(std::span(whiteCubePixels)));
     m_impl->fallbackNormalTexture = renderDevice.CreateTextureUVE(
         TextureDescUVE{1, 1, TextureFormatUVE::RGBA8Unorm, 1}, std::as_bytes(std::span(kFlatNormalPixelUVE)));
     for (TextureHandleUVE& shadowMapTarget : m_impl->shadowMapTargets) {
@@ -3023,7 +3032,7 @@ void Renderer3DUVE::CaptureDueReflectionProbesUVE(Scene::IEntityManagerUVE& enti
             continue;
         }
         ImplUVE::ReflectionProbeGpuCacheUVE& cache = m_impl->reflectionProbeCaptures[candidate.entity];
-        if (!m_impl->EnsureReflectionProbeFacesUVE(cache, resolution)) {
+        if (!m_impl->EnsureReflectionProbeCubeUVE(cache, resolution)) {
             m_impl->reflectionProbeCaptures.erase(candidate.entity);
             continue;
         }
@@ -3044,8 +3053,8 @@ void Renderer3DUVE::CaptureDueReflectionProbesUVE(Scene::IEntityManagerUVE& enti
                 break;
             }
             m_impl->probeCaptureRotation = rotation;
-            RenderFrameToTargetUVE(entityManager, cameraEntity, cache.faces[faceIndex], captureDepth,
-                                   resolution, resolution);
+            RenderFrameToTargetUVE(entityManager, cameraEntity, cache.cube, captureDepth, resolution,
+                                   resolution, static_cast<std::uint32_t>(faceIndex));
         }
         if (facesOk) {
             cache.captureGeneration = candidate.generation;
@@ -3844,6 +3853,14 @@ void Renderer3DUVE::RenderFrameUVE(Scene::IEntityManagerUVE& entityManager, Scen
             passDesc.depthAttachment = m_impl->destinationTextureOverride.has_value()
                                            ? m_impl->destinationTextureOverride->second
                                            : kInvalidTextureHandleUVE;
+            // Tier 2.3: the override target's rendered layers (explicit zeros when unset, so a
+            // full-frame call keeps targeting layer 0 even if this desc object is ever reused).
+            passDesc.colorLayer = m_impl->destinationTextureOverride.has_value()
+                                      ? m_impl->destinationColorLayerOverride
+                                      : 0U;
+            passDesc.depthLayer = m_impl->destinationTextureOverride.has_value()
+                                      ? m_impl->destinationDepthLayerOverride
+                                      : 0U;
             // A caller-supplied destination texture is generally not the size of the presentation
             // surface, and a render pass that names no viewport inherits the surface's. Without
             // this the fullscreen tone-mapping triangle would be rasterised at surface size while
@@ -4027,6 +4044,14 @@ void Renderer3DUVE::RenderFrameUVE(Scene::IEntityManagerUVE& entityManager, Scen
                     passDesc.depthAttachment = m_impl->destinationTextureOverride.has_value()
                                                     ? m_impl->destinationTextureOverride->second
                                                     : kInvalidTextureHandleUVE;
+                    // Tier 2.3: same layers as ToneMapping above — this pass overdraws that pass's
+                    // target, so a probe face's UI (when enabled) lands on the face's own layer.
+                    passDesc.colorLayer = m_impl->destinationTextureOverride.has_value()
+                                                  ? m_impl->destinationColorLayerOverride
+                                                  : 0U;
+                    passDesc.depthLayer = m_impl->destinationTextureOverride.has_value()
+                                                  ? m_impl->destinationDepthLayerOverride
+                                                  : 0U;
                     passDesc.colorLoadOp = LoadOpUVE::Load;
                     // Must preserve MainColor's real depth values (RenderPassDescUVE's own default
                     // is Clear->1.0) - this pass now writes its own 0.0 depth for visible UI pixels
@@ -4096,7 +4121,9 @@ void Renderer3DUVE::RenderFrameToRegionUVE(Scene::IEntityManagerUVE& entityManag
 
 void Renderer3DUVE::RenderFrameToTargetUVE(Scene::IEntityManagerUVE& entityManager, Scene::EntityUVE cameraEntity,
                                             const TextureHandleUVE colorTarget, const TextureHandleUVE depthTarget,
-                                            const std::uint32_t width, const std::uint32_t height) {
+                                            const std::uint32_t width, const std::uint32_t height,
+                                            const std::uint32_t colorLayer,
+                                            const std::uint32_t depthLayer) {
     const std::optional<std::pair<TextureHandleUVE, TextureHandleUVE>> previousOverride =
         m_impl->destinationTextureOverride;
     m_impl->destinationTextureOverride = std::make_pair(colorTarget, depthTarget);
@@ -4115,6 +4142,22 @@ void Renderer3DUVE::RenderFrameToTargetUVE(Scene::IEntityManagerUVE& entityManag
         std::optional<std::pair<std::uint32_t, std::uint32_t>> previous;
         ~TargetSizeScopeUVE() { slot = previous; }
     } targetSizeScope{m_impl->destinationTextureSizeOverride, previousSizeOverride};
+
+    const std::uint32_t previousColorLayer = m_impl->destinationColorLayerOverride;
+    const std::uint32_t previousDepthLayer = m_impl->destinationDepthLayerOverride;
+    m_impl->destinationColorLayerOverride = colorLayer;
+    m_impl->destinationDepthLayerOverride = depthLayer;
+    struct TargetLayerScopeUVE final {
+        std::uint32_t& colorSlot;
+        std::uint32_t& depthSlot;
+        std::uint32_t previousColor;
+        std::uint32_t previousDepth;
+        ~TargetLayerScopeUVE() {
+            colorSlot = previousColor;
+            depthSlot = previousDepth;
+        }
+    } targetLayerScope{m_impl->destinationColorLayerOverride, m_impl->destinationDepthLayerOverride,
+                       previousColorLayer, previousDepthLayer};
 
     RenderFrameUVE(entityManager, cameraEntity);
 }
