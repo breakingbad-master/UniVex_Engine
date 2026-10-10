@@ -381,6 +381,7 @@ add_executable(uve_integration_tests
     UI/ui_anchors_uve_tests.cpp
     UI/ui_value_widgets_uve_tests.cpp
     UI/ui_tween_uve_tests.cpp
+    UI/ui_nine_slice_uve_tests.cpp
 )
 if(UVE_HAS_DESKTOP_GL)
     target_sources(uve_integration_tests PRIVATE

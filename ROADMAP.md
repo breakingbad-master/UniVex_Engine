@@ -577,7 +577,9 @@ script per node; see `Engine/Runtime/UVScript/README.md`.
   participation; checkboxes, dropdowns, text input, scroll views, and tooltips remain
 - [ ] Rich text (multiple fonts/sizes/styles/colors within one text block, not just one
   baked font per label)
-- [ ] 9-slice/scalable image borders for resolution-independent UI art
+- [x] 9-slice/scalable image borders for resolution-independent UI art — textured images
+  slice into up to 9 quads with authored pixel margins and texture-fraction borders,
+  hollow-frame and proportional-shrink fallbacks included
 - [x] UI animation/tweening (transitions, easing) as a first-class authoring feature —
   UITweenComponentUVE drives rect/alpha with 9 easings, delay, and once/loop/ping-pong
   modes, ticked on the real frame clock after layout so active tweens override the

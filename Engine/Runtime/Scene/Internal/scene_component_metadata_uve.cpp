@@ -1854,6 +1854,18 @@ void DeclareMediaAndUIUVE(std::vector<TypeMetadataEntryUVE>& entries) {
                          WithRangeUVE(DeclareUVE<&UIImageComponentUVE::alpha>("alpha", "Alpha",
                                                                               kPropertyTypeFloatUVE),
                                       0.0, 1.0, 0.01),
+                         DeclareUVE<&UIImageComponentUVE::nineSliceEnabled>("nineSliceEnabled", "Nine Slice",
+                                                                            kPropertyTypeBoolUVE),
+                         DeclareUVE<&UIImageComponentUVE::sliceFillCenter>("sliceFillCenter", "Slice Fill Center",
+                                                                          kPropertyTypeBoolUVE),
+                         DeclareUVE<&UIImageComponentUVE::sliceMarginMin>("sliceMarginMin", "Slice Margin Min",
+                                                                         kPropertyTypeVector2UVE),
+                         DeclareUVE<&UIImageComponentUVE::sliceMarginMax>("sliceMarginMax", "Slice Margin Max",
+                                                                         kPropertyTypeVector2UVE),
+                         DeclareUVE<&UIImageComponentUVE::sliceUVMin>("sliceUVMin", "Slice UV Min",
+                                                                     kPropertyTypeVector2UVE),
+                         DeclareUVE<&UIImageComponentUVE::sliceUVMax>("sliceUVMax", "Slice UV Max",
+                                                                     kPropertyTypeVector2UVE),
                      }));
 
     AddUVE<UIButtonComponentUVE>(

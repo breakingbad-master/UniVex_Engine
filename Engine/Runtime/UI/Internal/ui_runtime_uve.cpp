@@ -34,6 +34,88 @@ struct RankedWidgetUVE final {
     std::vector<UIQuadUVE> quads;
 };
 
+void AppendImageQuadsUVE(const Scene::UIImageComponentUVE& image, const float alpha,
+                         std::vector<UIQuadUVE>& quads) {
+    const UIDrawItemKindUVE kind = image.textureAssetGuid.value == 0U ? UIDrawItemKindUVE::SolidColor
+                                                                      : UIDrawItemKindUVE::Image;
+    UIQuadUVE base{};
+    base.rect = image.rect;
+    base.color = image.tintColor;
+    base.alpha = alpha;
+    base.kind = kind;
+    base.imageAssetGuid = image.textureAssetGuid;
+    // Flat fills slice invisibly (one color everywhere), so they always stay one quad; anything
+    // non-finite falls back to the plain stretched quad rather than emitting garbage.
+    const bool marginsSane =
+        std::isfinite(image.sliceMarginMin.x) && std::isfinite(image.sliceMarginMin.y) &&
+        std::isfinite(image.sliceMarginMax.x) && std::isfinite(image.sliceMarginMax.y) &&
+        std::isfinite(image.sliceUVMin.x) && std::isfinite(image.sliceUVMin.y) &&
+        std::isfinite(image.sliceUVMax.x) && std::isfinite(image.sliceUVMax.y);
+    if (!image.nineSliceEnabled || kind != UIDrawItemKindUVE::Image || !marginsSane) {
+        quads.push_back(base);
+        return;
+    }
+    float marginLeft = std::max(0.0F, image.sliceMarginMin.x);
+    float marginTop = std::max(0.0F, image.sliceMarginMin.y);
+    float marginRight = std::max(0.0F, image.sliceMarginMax.x);
+    float marginBottom = std::max(0.0F, image.sliceMarginMax.y);
+    float uvLeft = std::clamp(image.sliceUVMin.x, 0.0F, 1.0F);
+    float uvTop = std::clamp(image.sliceUVMin.y, 0.0F, 1.0F);
+    float uvRight = std::clamp(image.sliceUVMax.x, 0.0F, 1.0F);
+    float uvBottom = std::clamp(image.sliceUVMax.y, 0.0F, 1.0F);
+    // Over-wide borders shrink proportionally instead of overlapping: a 120px border pair on a
+    // 100px panel becomes 50/50, and the swallowed middle column drops out below.
+    const float drawnWide = marginLeft + marginRight;
+    if (drawnWide > image.rect.size.x && drawnWide > 0.0F) {
+        const float scale = image.rect.size.x / drawnWide;
+        marginLeft *= scale;
+        marginRight *= scale;
+    }
+    const float drawnTall = marginTop + marginBottom;
+    if (drawnTall > image.rect.size.y && drawnTall > 0.0F) {
+        const float scale = image.rect.size.y / drawnTall;
+        marginTop *= scale;
+        marginBottom *= scale;
+    }
+    const float uvWide = uvLeft + uvRight;
+    if (uvWide > 1.0F) {
+        uvLeft /= uvWide;
+        uvRight /= uvWide;
+    }
+    const float uvTall = uvTop + uvBottom;
+    if (uvTall > 1.0F) {
+        uvTop /= uvTall;
+        uvBottom /= uvTall;
+    }
+    const float x0 = image.rect.position.x;
+    const float y0 = image.rect.position.y;
+    const float x1 = x0 + image.rect.size.x;
+    const float y1 = y0 + image.rect.size.y;
+    const float xs[4] = {x0, x0 + marginLeft, x1 - marginRight, x1};
+    const float ys[4] = {y0, y0 + marginTop, y1 - marginBottom, y1};
+    const float us[4] = {0.0F, uvLeft, 1.0F - uvRight, 1.0F};
+    const float vs[4] = {0.0F, uvTop, 1.0F - uvBottom, 1.0F};
+    for (int j = 0; j < 3; ++j) {
+        for (int i = 0; i < 3; ++i) {
+            if (!image.sliceFillCenter && i == 1 && j == 1) {
+                continue;
+            }
+            const float width = xs[i + 1] - xs[i];
+            const float height = ys[j + 1] - ys[j];
+            if (width <= 0.0F || height <= 0.0F) {
+                continue;
+            }
+            UIQuadUVE cell = base;
+            cell.rect = Math::RectUVE{Math::Vector2UVE{xs[i], ys[j]}, Math::Vector2UVE{width, height}};
+            cell.u0 = us[i];
+            cell.v0 = vs[j];
+            cell.u1 = us[i + 1];
+            cell.v1 = vs[j + 1];
+            quads.push_back(cell);
+        }
+    }
+}
+
 void RankWidgetUVE(const Scene::EntityUVE entity, const CanvasAncestryUVE& ancestry, const std::uint8_t layer,
                    std::vector<UIQuadUVE> quads, std::vector<RankedWidgetUVE>& ranked) {
     RankedWidgetUVE rankedWidget;
@@ -94,13 +176,9 @@ void UIRuntimeUVE::TickUVE(Scene::IEntityManagerUVE& entityManager, const Input:
             if (!ShouldDrawUiWidgetUVE(entityManager, entity)) {
                 return;
             }
-            UIQuadUVE quad{};
-            quad.rect = image.rect;
-            quad.color = image.tintColor;
-            quad.alpha = TweenedAlphaUVE(entityManager, entity, image.alpha);
-            quad.kind = image.textureAssetGuid.value == 0U ? UIDrawItemKindUVE::SolidColor : UIDrawItemKindUVE::Image;
-            quad.imageAssetGuid = image.textureAssetGuid;
-            RankWidgetUVE(entity, ResolveCanvasAncestryUVE(entityManager, entity), 0, {quad}, ranked);
+            std::vector<UIQuadUVE> quads;
+            AppendImageQuadsUVE(image, TweenedAlphaUVE(entityManager, entity, image.alpha), quads);
+            RankWidgetUVE(entity, ResolveCanvasAncestryUVE(entityManager, entity), 0, std::move(quads), ranked);
         });
 
     entityManager.ForEachUVE<Scene::UIProgressBarComponentUVE>(
