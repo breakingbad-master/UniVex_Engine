@@ -112,6 +112,7 @@ add_executable(uve_core_tests
     Gameplay/trigger_volume_uve_tests.cpp
     Gameplay/pawn_uve_tests.cpp
     Gameplay/cinematic_uve_tests.cpp
+    Gameplay/camera_follow_uve_tests.cpp
     AI/utility_ai_uve_tests.cpp
     AI/perception_uve_tests.cpp
     Input/input_names_uve_tests.cpp

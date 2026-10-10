@@ -25,6 +25,7 @@ add_library(uve_component STATIC
     Internal/area_component_uve.cpp
     Internal/audio_source_component_uve.cpp
     Internal/camera_component_uve.cpp
+    Internal/camera_follow_component_uve.cpp
     Internal/canvas_component_uve.cpp
     Internal/character_controller_component_uve.cpp
     Internal/collider_component_uve.cpp

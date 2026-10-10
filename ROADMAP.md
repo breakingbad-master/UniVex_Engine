@@ -504,8 +504,8 @@ script per node; see `Engine/Runtime/UVScript/README.md`.
 - [x] A formal actor/pawn/controller-style gameplay object model above raw ECS entities +
   components (Pawn/Controller components with mutual-or-absent links, Possess/Unpossess stealing
   both sides, input routing to Player pawns, the player-look/interact/character flow resolved
-  through possession, character motion steered from pawn input, and possessed/unpossessed
-  lifecycle events)
+  through possession, character motion steered from pawn input, possessed/unpossessed
+  lifecycle events, and follow cameras that track the possessed pawn)
 - [x] An input-action-mapping layer (bind a logical action like "Jump" to any physical
   input across keyboard/gamepad, with rebinding support), rather than scripts polling raw
   key codes directly

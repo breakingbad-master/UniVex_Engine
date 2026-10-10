@@ -527,6 +527,14 @@ private:
     /// animation.
     void SyncBoneAttachment3DObjectsUVE();
 
+    /// Positions every root follow camera from its target through Scene::UpdateCameraFollowUVE() -
+    /// that function owns the skip rules (parked, dead, transformless, parented) and the pose
+    /// math. This seam owns the order: after every mover has stepped, before
+    /// SceneGraphUVE::UpdateUVE() propagates, so the camera's world transform is current for the
+    /// same frame's render. Runs ungated like the bone attachments, so a paused simulation still
+    /// frames its target instead of freezing mid-cutscene.
+    void SyncCameraFollowUVE();
+
     /// Steps every live Projectile3DComponentUVE entity (that also has a transform): the motion is
     /// `Physics::StepProjectile3DUVE()` - `velocity` accumulates `acceleration * dt`, the sphere of
     /// `radius` is swept along that step in world space against the layers `collisionMask` accepts

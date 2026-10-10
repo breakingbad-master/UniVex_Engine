@@ -86,6 +86,7 @@
 #include "uve/gameplay/interact_requested_event_uve.h"
 #include "uve/gameplay/trigger_events_uve.h"
 #include "uve/gameplay/trigger_volume_uve.h"
+#include "uve/gameplay/camera_follow_uve.h"
 #include "uve/gameplay/pawn_uve.h"
 #include "uve/gameplay/pawn_events_uve.h"
 #include "uve/input/mobile_gesture_system_uve.h"
@@ -1707,6 +1708,14 @@ void EngineCoreUVE::SyncBoneAttachment3DObjectsUVE() {
     static_cast<void>(Scene::SyncBoneAttachment3DObjectsUVE(*m_entityManager, *m_sceneGraph));
 }
 
+void EngineCoreUVE::SyncCameraFollowUVE() {
+    // The skip rules live with the cameras they act on (Scene::UpdateCameraFollowUVE). What this
+    // seam is for is the ORDER: after every mover has stepped and before the graph propagates
+    // world transforms, so the follow reads the freshest target pose available and the camera's
+    // own world transform is current for this frame's render.
+    Scene::UpdateCameraFollowUVE(*m_entityManager);
+}
+
 void EngineCoreUVE::SyncKinematic3DObjectsUVE(const float fixedDeltaTimeSeconds) {
     if (fixedDeltaTimeSeconds <= 0.0F) {
         return;
@@ -2837,9 +2846,15 @@ void EngineCoreUVE::Update() {
             if (transition.kind == Scene::PossessionTransitionKindUVE::Possessed) {
                 m_eventSystem->QueueEvent(
                     Gameplay::PawnPossessedEventUVE{transition.controller, transition.pawn});
+                // The queued event is for game code; the engine's own flagged follow cameras
+                // consume the same transition inline, with no subscription round-trip.
+                Scene::RetargetPossessionFollowersUVE(*m_entityManager, transition.controller,
+                                                      transition.pawn);
             } else {
                 m_eventSystem->QueueEvent(
                     Gameplay::PawnUnpossessedEventUVE{transition.controller, transition.pawn});
+                Scene::ReleasePossessionFollowersUVE(*m_entityManager, transition.controller,
+                                                     transition.pawn);
             }
         }
         const Scene::EntityUVE player = Scene::ResolvePossessedPlayerUVE(*m_entityManager);
@@ -2907,6 +2922,7 @@ void EngineCoreUVE::Update() {
     // propagates world transforms: a weapon on a hand is on the hand in the same frame the hand
     // moved, rather than a frame behind the animation that owns it.
     SyncBoneAttachment3DObjectsUVE();
+    SyncCameraFollowUVE();
     m_sceneGraph->UpdateUVE(*m_entityManager);
     // The fraction of a fixed step already elapsed, handed to the renderer so it can draw between
     // the last two simulated poses instead of snapping to the newest one. Measured on a 144 Hz

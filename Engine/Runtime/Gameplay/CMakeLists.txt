@@ -13,6 +13,7 @@ add_library(uve_gameplay STATIC
     Internal/trigger_volume_uve.cpp
     Internal/pawn_uve.cpp
     Internal/cinematic_uve.cpp
+    Internal/camera_follow_uve.cpp
 )
 target_include_directories(uve_gameplay PUBLIC Expose)
 target_link_libraries(uve_gameplay PUBLIC uve_input uve_math uve_component uve_physics)
