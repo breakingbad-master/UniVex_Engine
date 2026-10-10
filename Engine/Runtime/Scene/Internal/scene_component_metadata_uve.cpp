@@ -789,8 +789,9 @@ void DeclareRenderingUVE(std::vector<TypeMetadataEntryUVE>& entries) {
                 }(),
                 DeclareUVE<&WorldEnvironment3DComponentUVE::colorFilter>(
                     "colorFilter", "Color Filter", kPropertyTypeColorUVE),
-                WithTooltipUVE(DeclareUVE<&WorldEnvironment3DComponentUVE::skyAssetPath>(
-                                   "skyAssetPath", "Sky Asset", kPropertyTypeStringUVE),
+                WithTooltipUVE(WithCustomDrawerUVE(DeclareUVE<&WorldEnvironment3DComponentUVE::skyAssetPath>(
+                                                       "skyAssetPath", "Sky Asset", kPropertyTypeStringUVE),
+                                                   "file:uvtex"),
                                "Equirectangular sky texture. Empty keeps the procedural sky; Ambient Light Source "
                                "uses this texture when set to Environment Map, and falls back to Sky while it "
                                "is unavailable."),
