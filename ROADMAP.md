@@ -566,8 +566,9 @@ script per node; see `Engine/Runtime/UVScript/README.md`.
   the plain runtime and the live editor's own viewport during play
 - [x] A baked bitmap font atlas approach for UI text rendering
 - [ ] Layout containers (horizontal/vertical stacks, grids, anchors/margins that respond to
-  screen-size and aspect-ratio changes) — current UI elements are placed at fixed pixel
-  positions
+  screen-size and aspect-ratio changes) — horizontal/vertical stack containers with
+  padding/spacing/alignment have landed and run inside UIRuntimeUVE::TickUVE; grids,
+  anchors/margins, auto-sizing, and text measurement are still open
 - [ ] Additional widget types: sliders, checkboxes, dropdowns, text input fields, scroll
   views, progress bars, tooltips
 - [ ] Rich text (multiple fonts/sizes/styles/colors within one text block, not just one

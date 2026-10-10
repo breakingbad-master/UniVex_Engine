@@ -13,6 +13,7 @@
 #include "uve/component/ui_text_component_uve.h"
 #include "uve/input/mouse_button_uve.h"
 #include "uve/ui/canvas_ancestry_uve.h"
+#include "uve/ui/ui_layout_uve.h"
 
 namespace UVE::UI {
 
@@ -59,6 +60,9 @@ void UIRuntimeUVE::SetCoordinateTransformUVE(const UICoordinateTransformUVE& tra
 
 void UIRuntimeUVE::TickUVE(Scene::IEntityManagerUVE& entityManager, const Input::IInputSystemUVE& inputSystem,
                            const UITextLocalizationUVE& localization) {
+    // Containers position their children before anything reads a widget rect, so hit-testing and
+    // every emitted quad agree on where a laid-out widget is within the same tick.
+    LayoutUIContainersUVE(entityManager);
     m_drawBatch.quads.clear();
     std::vector<RankedWidgetUVE> ranked;
 
