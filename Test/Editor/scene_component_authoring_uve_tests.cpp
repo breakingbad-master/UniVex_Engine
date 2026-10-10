@@ -1,5 +1,6 @@
 // Copyright (c) 2026 UniVex Studios. All Rights Reserved.
 
+#include <filesystem>
 #include <limits>
 #include <string>
 
@@ -7,6 +8,7 @@
 
 #include "Support/test_scratch_uve.h"
 
+#include "uve/asset/animation_library_asset_uve.h"
 #include "uve/asset/asset_guid_uve.h"
 #include "uve/core/engine_core_uve.h"
 #include "uve/editor/editor_uve.h"
@@ -240,6 +242,54 @@ TEST(SceneComponentAuthoringUVETest, SetSelectedSceneComponentUVE_RejectsInvalid
         invalidAnimation.speed = std::numeric_limits<float>::quiet_NaN();
         EXPECT_FALSE(editor.SetSelectedSceneComponentUVE(EditorSceneComponentKindUVE::AnimationSequencer, invalidAnimation));
         EXPECT_FALSE(entityManager.HasComponentUVE<Scene::AnimationSequencerComponentUVE>(entity));
+
+        editor.ShutdownUVE();
+    }
+    engine.Shutdown();
+}
+
+TEST(SceneComponentAuthoringUVETest, AnimationLibraryExportImportRoundTripsThePlayerListInOneUndoStep) {
+    const std::filesystem::path root = ::UVE::Tests::MakeTestCaseDirectoryUVE("sequencer_library_roundtrip");
+    Core::EngineCoreUVE engine(MakeSceneComponentAuthoringTestConfigUVE());
+    engine.Init();
+    ASSERT_TRUE(engine.Load());
+    {
+        EditorUVE editor(engine.GetServicesUVE(), "uve_sequencer_library.uvscene");
+        editor.InitUVE();
+        Scene::IEntityManagerUVE& entityManager = engine.GetServicesUVE().GetEntityManagerUVE();
+        const Scene::EntityUVE entity = editor.CreateDocumentEntityUVE(EditorEntityKindUVE::Empty);
+        ASSERT_TRUE(entityManager.IsAliveUVE(entity));
+
+        Scene::AnimationSequencerComponentUVE animation;
+        animation.clip = Asset::AssetGuidUVE{0xA11CEU};
+        animation.library = {Asset::AssetGuidUVE{0xA11CEU}, Asset::AssetGuidUVE{0xB22CEU}};
+        ASSERT_TRUE(editor.SetSelectedSceneComponentUVE(EditorSceneComponentKindUVE::AnimationSequencer, animation));
+
+        const std::filesystem::path libraryPath = root / "Player Library.uvanimlib";
+        EXPECT_TRUE(editor.ExportAnimationSequencerToLibraryUVE(entity, libraryPath));
+        Asset::AnimationLibraryAssetUVE library;
+        ASSERT_TRUE(Asset::LoadAnimationLibraryAssetUVE(libraryPath, library));
+        ASSERT_EQ(library.entries.size(), 2U);
+        EXPECT_EQ(library.entries[0].clip.value, 0xA11CEU);
+        EXPECT_EQ(library.entries[1].clip.value, 0xB22CEU);
+        // The GUIDs are made up and resolve to nothing: they keep their GUIDs under a
+        // "(missing)" name, so importing back restores the exact same list.
+        EXPECT_EQ(library.entries[0].name, "(missing)");
+
+        // Clear the player through the real edit funnel, import the file back, and prove the
+        // whole import lands as a single undo step.
+        ASSERT_TRUE(editor.EditAnimationSequencerUVE(entity, [](Scene::AnimationSequencerComponentUVE& component) {
+            component.library.clear();
+            component.clip = Asset::AssetGuidUVE{};
+        }));
+        EXPECT_TRUE(editor.ImportAnimationLibraryIntoSequencerUVE(entity, libraryPath));
+        const Scene::AnimationSequencerComponentUVE& imported =
+            entityManager.GetComponentUVE<Scene::AnimationSequencerComponentUVE>(entity);
+        EXPECT_EQ(imported.library.size(), 2U);
+        EXPECT_EQ(imported.clip.value, 0xA11CEU);
+        EXPECT_FALSE(editor.ImportAnimationLibraryIntoSequencerUVE(entity, libraryPath)); // nothing new
+        ASSERT_TRUE(editor.UndoUVE());
+        EXPECT_TRUE(entityManager.GetComponentUVE<Scene::AnimationSequencerComponentUVE>(entity).library.empty());
 
         editor.ShutdownUVE();
     }

@@ -539,6 +539,12 @@ public:
                                 const std::function<void(Scene::AnimationSequencerComponentUVE&)>& change);
     /// Adds a project clip to the player's list and makes it the one playing.
     bool AddClipToAnimationSequencerUVE(Scene::EntityUVE player, const std::filesystem::path& absoluteClip);
+    /// Imports every clip in the `.uvanimlib` file into the player's list as one undo step,
+    /// skipping clips already there. The current clip only changes when the player has none.
+    bool ImportAnimationLibraryIntoSequencerUVE(Scene::EntityUVE player, const std::filesystem::path& absoluteLibrary);
+    /// Writes the player's list (and its clip, when it is not listed) to `absoluteLibrary`.
+    /// Missing clips keep their GUIDs with a "(missing)" name, so importing back restores the list.
+    bool ExportAnimationSequencerToLibraryUVE(Scene::EntityUVE player, const std::filesystem::path& absoluteLibrary);
 
     /// Brings a model source (an FBX, glTF or OBJ in Content, by its content-relative path) into the
     /// scene as one undo step and returns its root. A file with bones becomes
@@ -2239,6 +2245,9 @@ private:
         std::string pickerSearch;
         bool renameClipRequested = false;
         std::string clipName;
+        /// A request to export the player's list, and the library name the popup edits.
+        bool exportLibraryRequested = false;
+        std::string exportLibraryName;
         /// Curves view instead of the dope sheet, and which channel it draws (-1: all that move).
         bool curves = false;
         int curveChannel = -1;
