@@ -312,6 +312,7 @@ add_executable(uve_integration_tests
     Physics/character_body_motion_uve_tests.cpp
     Physics/character_3d_uve_tests.cpp
     Physics/uvscript_physics_forces_uve_tests.cpp
+    Script/uvscript_node_state_uve_tests.cpp
     Audio/uvscript_audio_bindings_uve_tests.cpp
     Physics/collider_3d_uve_tests.cpp
     Physics/collider_shape_uve_tests.cpp

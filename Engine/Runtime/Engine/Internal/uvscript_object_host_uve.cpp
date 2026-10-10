@@ -8,10 +8,13 @@
 #include "uve/audio/i_audio_source_system_uve.h"
 #include "uve/audio/i_audio_system_uve.h"
 #include "uve/component/audio_source_component_uve.h"
+#include "uve/component/camera_component_uve.h"
 #include "uve/component/character_controller_component_uve.h"
+#include "uve/component/light_component_uve.h"
 #include "uve/component/name_component_uve.h"
 #include "uve/component/rigid_3d_component_uve.h"
 #include "uve/component/transform_component_uve.h"
+#include "uve/component/visibility_component_uve.h"
 #include "uve/component/world_transform_component_uve.h"
 #include "uve/entity/i_entity_manager_uve.h"
 #include "uve/input/i_input_system_uve.h"
@@ -59,6 +62,17 @@ std::optional<HostPropertyUVE> UVScriptObjectHostUVE::DescribePropertyUVE(const 
     }
     if ((name == "volume" || name == "pitch") &&
         m_entityManager.HasComponentUVE<Scene::AudioSourceComponentUVE>(m_entity)) {
+        return HostPropertyUVE{TypeUVE::FloatUVE(), true};
+    }
+    // Ungated: every object is inherently visible, so a script reads true and a write adds the
+    // component. The scene graph owns visibleInHierarchy; scripts only ever touch the switch.
+    if (name == "visible") {
+        return HostPropertyUVE{TypeUVE::BoolUVE(), true};
+    }
+    if (name == "intensity" && m_entityManager.HasComponentUVE<Scene::LightComponentUVE>(m_entity)) {
+        return HostPropertyUVE{TypeUVE::FloatUVE(), true};
+    }
+    if (name == "fov" && m_entityManager.HasComponentUVE<Scene::CameraComponentUVE>(m_entity)) {
         return HostPropertyUVE{TypeUVE::FloatUVE(), true};
     }
     if (m_entityManager.HasComponentUVE<Scene::CharacterControllerComponentUVE>(m_entity)) {
@@ -136,6 +150,18 @@ ValueUVE UVScriptObjectHostUVE::GetPropertyUVE(const std::string_view name) {
             m_entityManager.GetComponentUVE<Scene::AudioSourceComponentUVE>(m_entity);
         return static_cast<double>(name == "volume" ? source.volume : source.pitch);
     }
+    if (name == "visible") {
+        return !m_entityManager.HasComponentUVE<Scene::VisibilityComponentUVE>(m_entity) ||
+               m_entityManager.GetComponentUVE<Scene::VisibilityComponentUVE>(m_entity).visible;
+    }
+    if (name == "intensity") {
+        return static_cast<double>(
+            m_entityManager.GetComponentUVE<Scene::LightComponentUVE>(m_entity).intensity);
+    }
+    if (name == "fov") {
+        return static_cast<double>(
+            m_entityManager.GetComponentUVE<Scene::CameraComponentUVE>(m_entity).fieldOfViewDegrees);
+    }
     return m_entityManager.GetComponentUVE<Scene::CharacterControllerComponentUVE>(m_entity).grounded;
 }
 
@@ -165,6 +191,27 @@ void UVScriptObjectHostUVE::SetPropertyUVE(const std::string_view name, const Va
                                                : (std::isfinite(updated) && updated > 0.0F);
         if (accepted) {
             (name == "volume" ? source.volume : source.pitch) = updated;
+        }
+    } else if (name == "visible") {
+        const bool shown = std::get<bool>(value);
+        if (m_entityManager.HasComponentUVE<Scene::VisibilityComponentUVE>(m_entity)) {
+            m_entityManager.GetComponentUVE<Scene::VisibilityComponentUVE>(m_entity).visible = shown;
+        } else {
+            Scene::VisibilityComponentUVE visibility;
+            visibility.visible = shown;
+            m_entityManager.AddComponentUVE<Scene::VisibilityComponentUVE>(m_entity, visibility);
+        }
+    } else if (name == "intensity") {
+        const float updated = static_cast<float>(std::get<double>(value));
+        if (std::isfinite(updated) && updated >= 0.0F) {
+            m_entityManager.GetComponentUVE<Scene::LightComponentUVE>(m_entity).intensity = updated;
+        }
+    } else if (name == "fov") {
+        const float updated = static_cast<float>(std::get<double>(value));
+        if (std::isfinite(updated) && updated >= Scene::kMinimumCameraFieldOfViewDegreesUVE &&
+            updated < 180.0F) {
+            m_entityManager.GetComponentUVE<Scene::CameraComponentUVE>(m_entity).fieldOfViewDegrees =
+                updated;
         }
     }
 }

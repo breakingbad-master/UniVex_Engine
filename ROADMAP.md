@@ -498,7 +498,8 @@ script per node; see `Engine/Runtime/UVScript/README.md`.
   bodies, with rigid-body velocity readable/writable), as have audio bindings (play/stop
   plus a playing query on audio sources, with volume/pitch readable/writable) and
   collision/overlap events (both parties' scripts hear each enter/exit with the other's
-  name); other node kinds remain
+  name); other node kinds have landed too (writable `visible` on every object, `intensity`
+  on lights, `fov` on cameras)
 - [ ] An in-editor debugger (breakpoints, stepping, live values)
 - [x] C++23 output for release builds: bytecode translated to C++, registered by program fingerprint,
   checked against the interpreter
