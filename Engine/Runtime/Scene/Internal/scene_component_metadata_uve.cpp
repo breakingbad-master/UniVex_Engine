@@ -45,6 +45,7 @@
 #include "uve/component/ui_progress_bar_component_uve.h"
 #include "uve/component/ui_slider_component_uve.h"
 #include "uve/component/ui_text_component_uve.h"
+#include "uve/component/ui_text_input_component_uve.h"
 #include "uve/component/ui_tooltip_component_uve.h"
 #include "uve/component/ui_tween_component_uve.h"
 #include "uve/component/visibility_component_uve.h"
@@ -2084,6 +2085,43 @@ void DeclareMediaAndUIUVE(std::vector<TypeMetadataEntryUVE>& entries) {
                          DeclareRuntimeStateUVE<&UIDropdownComponentUVE::wasSelectionChangedThisFrame>(
                              "wasSelectionChangedThisFrame", "Selection Changed This Frame",
                              kPropertyTypeBoolUVE),
+                     }));
+    AddUVE<UITextInputComponentUVE>(
+        entries,
+        MakeEntryUVE("component.ui_text_input", "UITextInputComponentUVE", "UI Text Input",
+                     kSectionOrderTypeSpecificUVE,
+                     {
+                         DeclareUVE<&UITextInputComponentUVE::rect>("rect", "Rect", kPropertyTypeRectUVE),
+                         DeclareUVE<&UITextInputComponentUVE::text>("text", "Text", kPropertyTypeStringUVE),
+                         DeclareUVE<&UITextInputComponentUVE::maxLength>("maxLength", "Max Length",
+                                                                        kPropertyTypeInt32UVE),
+                         DeclareUVE<&UITextInputComponentUVE::placeholder>("placeholder", "Placeholder",
+                                                                          kPropertyTypeStringUVE),
+                         DeclareUVE<&UITextInputComponentUVE::fontSize>("fontSize", "Font Size",
+                                                                       kPropertyTypeFloatUVE),
+                         DeclareUVE<&UITextInputComponentUVE::textPadding>("textPadding", "Text Padding",
+                                                                          kPropertyTypeFloatUVE),
+                         DeclareUVE<&UITextInputComponentUVE::boxColor>("boxColor", "Box",
+                                                                       kPropertyTypeColorUVE),
+                         DeclareUVE<&UITextInputComponentUVE::focusColor>("focusColor", "Focus",
+                                                                         kPropertyTypeColorUVE),
+                         DeclareUVE<&UITextInputComponentUVE::textColor>("textColor", "Text",
+                                                                        kPropertyTypeColorUVE),
+                         DeclareUVE<&UITextInputComponentUVE::caretColor>("caretColor", "Caret",
+                                                                         kPropertyTypeColorUVE),
+                         DeclareUVE<&UITextInputComponentUVE::placeholderColor>("placeholderColor",
+                                                                               "Placeholder",
+                                                                               kPropertyTypeColorUVE),
+                         DeclareRuntimeStateUVE<&UITextInputComponentUVE::focused>(
+                             "focused", "Focused", kPropertyTypeBoolUVE),
+                         DeclareRuntimeStateUVE<&UITextInputComponentUVE::caretIndex>(
+                             "caretIndex", "Caret", kPropertyTypeInt32UVE),
+                         DeclareRuntimeStateUVE<&UITextInputComponentUVE::wasSubmittedThisFrame>(
+                             "wasSubmittedThisFrame", "Submitted This Frame", kPropertyTypeBoolUVE),
+                         DeclareRuntimeStateUVE<&UITextInputComponentUVE::blinkTime>(
+                             "blinkTime", "Blink Time", kPropertyTypeFloatUVE),
+                         DeclareRuntimeStateUVE<&UITextInputComponentUVE::scrollOffset>(
+                             "scrollOffset", "Scroll", kPropertyTypeFloatUVE),
                      }));
 }
 

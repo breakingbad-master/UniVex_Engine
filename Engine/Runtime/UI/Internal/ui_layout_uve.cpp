@@ -13,6 +13,7 @@
 #include "uve/component/ui_checkbox_component_uve.h"
 #include "uve/component/ui_dropdown_component_uve.h"
 #include "uve/component/ui_image_component_uve.h"
+#include "uve/component/ui_text_input_component_uve.h"
 #include "uve/component/ui_layout_container_component_uve.h"
 #include "uve/component/ui_progress_bar_component_uve.h"
 #include "uve/component/ui_slider_component_uve.h"
@@ -56,6 +57,7 @@ struct PositionableChildUVE final {
     bool isProgress = false;
     bool isCheckbox = false;
     bool isDropdown = false;
+    bool isTextInput = false;
     bool isText = false;
 };
 
@@ -81,6 +83,9 @@ void MoveChildUVE(Scene::IEntityManagerUVE& entityManager, const PositionableChi
     }
     if (child.isDropdown) {
         entityManager.GetComponentUVE<Scene::UIDropdownComponentUVE>(child.entity).rect.position = position;
+    }
+    if (child.isTextInput) {
+        entityManager.GetComponentUVE<Scene::UITextInputComponentUVE>(child.entity).rect.position = position;
     }
     if (child.isText) {
         entityManager.GetComponentUVE<Scene::UITextComponentUVE>(child.entity).positionPixels = position;
@@ -114,9 +119,10 @@ std::vector<PositionableChildUVE> CollectContainerItemsUVE(Scene::IEntityManager
         item.isProgress = entityManager.HasComponentUVE<Scene::UIProgressBarComponentUVE>(child.entity);
         item.isCheckbox = entityManager.HasComponentUVE<Scene::UICheckboxComponentUVE>(child.entity);
         item.isDropdown = entityManager.HasComponentUVE<Scene::UIDropdownComponentUVE>(child.entity);
+        item.isTextInput = entityManager.HasComponentUVE<Scene::UITextInputComponentUVE>(child.entity);
         item.isText = entityManager.HasComponentUVE<Scene::UITextComponentUVE>(child.entity);
         if (!item.isButton && !item.isImage && !item.isContainer && !item.isSlider && !item.isProgress &&
-            !item.isCheckbox && !item.isDropdown && !item.isText) {
+            !item.isCheckbox && !item.isDropdown && !item.isTextInput && !item.isText) {
             continue; // nothing positionable: ignored, not even spaced
         }
         if (item.isButton) {
@@ -134,6 +140,8 @@ std::vector<PositionableChildUVE> CollectContainerItemsUVE(Scene::IEntityManager
             item.extent = entityManager.GetComponentUVE<Scene::UICheckboxComponentUVE>(child.entity).rect.size;
         } else if (item.isDropdown) {
             item.extent = entityManager.GetComponentUVE<Scene::UIDropdownComponentUVE>(child.entity).rect.size;
+        } else if (item.isTextInput) {
+            item.extent = entityManager.GetComponentUVE<Scene::UITextInputComponentUVE>(child.entity).rect.size;
         } else {
             const Scene::UITextComponentUVE& text =
                 entityManager.GetComponentUVE<Scene::UITextComponentUVE>(child.entity);

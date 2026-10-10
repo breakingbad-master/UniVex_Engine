@@ -18,11 +18,12 @@ namespace UVE::UI {
 /// its children in the same pass; depth ties break by entity handle, and hierarchy cycles
 /// degrade to a stable order via the shared ancestry cap instead of hanging.
 ///
-/// A parent qualifies by carrying a container, button, image, slider, progress-bar, or checkbox
-/// rect, in that priority - anything else anchors against the viewport. Buttons, images,
-/// containers, sliders, progress bars, checkboxes, and dropdowns take the full resolved rect;
-/// texts take the resolved minimum as positionPixels. (Tooltips position themselves and never
-/// anchor; dropdown popups likewise, while the dropdown's box anchors.) Anchored entities without
+/// A parent qualifies by carrying a container, button, image, slider, progress-bar, checkbox,
+/// dropdown, or text-input rect, in that priority - anything else anchors against the viewport.
+/// Buttons, images, containers, sliders, progress bars, checkboxes, dropdowns, and text inputs
+/// take the full resolved rect; texts take the resolved minimum as positionPixels. (Tooltips
+/// position themselves and never anchor; dropdown popups likewise, while the dropdown's box
+/// anchors.) Anchored entities without
 /// any positioned component are skipped, and an invalid anchor component is skipped fail-closed.
 /// Runs before the stack/grid pass, which then overwrites container children's positions - for
 /// those widgets anchors contribute size, the container contributes position.

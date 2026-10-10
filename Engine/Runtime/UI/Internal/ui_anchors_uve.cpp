@@ -13,6 +13,7 @@
 #include "uve/component/ui_checkbox_component_uve.h"
 #include "uve/component/ui_dropdown_component_uve.h"
 #include "uve/component/ui_image_component_uve.h"
+#include "uve/component/ui_text_input_component_uve.h"
 #include "uve/component/ui_layout_container_component_uve.h"
 #include "uve/component/ui_progress_bar_component_uve.h"
 #include "uve/component/ui_slider_component_uve.h"
@@ -65,6 +66,9 @@ struct AnchoredWidgetUVE final {
     if (entityManager.HasComponentUVE<Scene::UIDropdownComponentUVE>(parent)) {
         return entityManager.GetComponentUVE<Scene::UIDropdownComponentUVE>(parent).rect;
     }
+    if (entityManager.HasComponentUVE<Scene::UITextInputComponentUVE>(parent)) {
+        return entityManager.GetComponentUVE<Scene::UITextInputComponentUVE>(parent).rect;
+    }
     return viewport;
 }
 
@@ -104,9 +108,10 @@ void ResolveUIAnchorsUVE(Scene::IEntityManagerUVE& entityManager,
         const bool isProgress = entityManager.HasComponentUVE<Scene::UIProgressBarComponentUVE>(widget.entity);
         const bool isCheckbox = entityManager.HasComponentUVE<Scene::UICheckboxComponentUVE>(widget.entity);
         const bool isDropdown = entityManager.HasComponentUVE<Scene::UIDropdownComponentUVE>(widget.entity);
+        const bool isTextInput = entityManager.HasComponentUVE<Scene::UITextInputComponentUVE>(widget.entity);
         const bool isText = entityManager.HasComponentUVE<Scene::UITextComponentUVE>(widget.entity);
         if (!isButton && !isImage && !isContainer && !isSlider && !isProgress && !isCheckbox && !isDropdown &&
-            !isText) {
+            !isTextInput && !isText) {
             continue;
         }
         const Math::RectUVE parent = AnchorParentRectUVE(entityManager, widget.entity, viewportSize);
@@ -146,6 +151,10 @@ void ResolveUIAnchorsUVE(Scene::IEntityManagerUVE& entityManager,
         if (isDropdown) {
             entityManager.GetComponentUVE<Scene::UIDropdownComponentUVE>(widget.entity).rect = {resolvedMin,
                                                                                                 resolvedSize};
+        }
+        if (isTextInput) {
+            entityManager.GetComponentUVE<Scene::UITextInputComponentUVE>(widget.entity).rect = {resolvedMin,
+                                                                                                 resolvedSize};
         }
         if (isText) {
             entityManager.GetComponentUVE<Scene::UITextComponentUVE>(widget.entity).positionPixels = resolvedMin;

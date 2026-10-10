@@ -579,7 +579,8 @@ script per node; see `Engine/Runtime/UVScript/README.md`.
 - [ ] Additional widget types: sliders, checkboxes, dropdowns, text input fields, scroll
   views, progress bars, tooltips — sliders, progress bars, checkboxes, hover-delay
   tooltips, and dropdowns have landed with draw batching and layout/anchor
-  participation; text input and scroll views remain
+  participation, as has single-line text input (focus, caret, basic editing);
+  scroll views remain
 - [ ] Rich text (multiple fonts/sizes/styles/colors within one text block, not just one
   baked font per label)
 - [x] 9-slice/scalable image borders for resolution-independent UI art — textured images

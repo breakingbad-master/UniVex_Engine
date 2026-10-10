@@ -17,7 +17,9 @@
 #include "uve/component/ui_progress_bar_component_uve.h"
 #include "uve/component/ui_slider_component_uve.h"
 #include "uve/component/ui_text_component_uve.h"
+#include "uve/component/ui_text_input_component_uve.h"
 #include "uve/component/ui_tooltip_component_uve.h"
+#include "uve/input/key_code_uve.h"
 #include "uve/input/mouse_button_uve.h"
 #include "uve/ui/canvas_ancestry_uve.h"
 #include "uve/ui/ui_anchors_uve.h"
@@ -178,6 +180,31 @@ void AppendImageQuadsUVE(const Scene::UIImageComponentUVE& image, const float al
     }
     return Math::RectUVE{Math::Vector2UVE{dropdown.rect.position.x, y},
                          Math::Vector2UVE{dropdown.rect.size.x, height}};
+}
+
+/// Maps a pressed key to the character it types, if any. Letters honor shift, digits yield
+/// US-layout punctuation under shift, space is space - the rest of KeyCodeUVE (arrows, editing,
+/// modifiers, function keys) types nothing and is handled by the caller.
+[[nodiscard]] std::optional<char> TextInputCharOfUVE(const Input::KeyCodeUVE key, const bool shift) noexcept {
+    const int code = static_cast<int>(key);
+    constexpr int kA = static_cast<int>(Input::KeyCodeUVE::A);
+    constexpr int kZ = static_cast<int>(Input::KeyCodeUVE::Z);
+    if (code >= kA && code <= kZ) {
+        return static_cast<char>((shift ? 'A' : 'a') + (code - kA));
+    }
+    constexpr int kNum0 = static_cast<int>(Input::KeyCodeUVE::Num0);
+    constexpr int kNum9 = static_cast<int>(Input::KeyCodeUVE::Num9);
+    if (code >= kNum0 && code <= kNum9) {
+        if (shift) {
+            constexpr char kShiftedDigits[] = {')', '!', '@', '#', '$', '%', '^', '&', '*', '('};
+            return kShiftedDigits[static_cast<std::size_t>(code - kNum0)];
+        }
+        return static_cast<char>('0' + (code - kNum0));
+    }
+    if (key == Input::KeyCodeUVE::Space) {
+        return ' ';
+    }
+    return std::nullopt;
 }
 
 void RankWidgetUVE(const Scene::EntityUVE entity, const CanvasAncestryUVE& ancestry, const std::uint8_t layer,
@@ -602,6 +629,131 @@ void UIRuntimeUVE::TickUVE(Scene::IEntityManagerUVE& entityManager, const Input:
                 }
             }
             RankWidgetUVE(entity, ancestry, 2, std::move(textQuads), ranked);
+        });
+
+    entityManager.ForEachUVE<Scene::UITextInputComponentUVE>(
+        [this, &entityManager, &inputSystem, &ranked, &mousePosition, mousePressedThisFrame, &glyphQuads](
+            const Scene::EntityUVE entity, Scene::UITextInputComponentUVE& field) {
+            field.wasSubmittedThisFrame = false;
+            if (!ShouldDrawUiWidgetUVE(entityManager, entity) || !IsUITextInputComponentValidUVE(field)) {
+                field.focused = false;
+                field.blinkTime = 0.0F;
+                field.scrollOffset = 0.0F;
+                return;
+            }
+            if (mousePressedThisFrame) {
+                const bool hovered = Math::ContainsUVE(field.rect, mousePosition);
+                if (hovered != field.focused) {
+                    field.blinkTime = 0.0F;
+                }
+                field.focused = hovered;
+            }
+            field.caretIndex = std::clamp(field.caretIndex, 0, static_cast<std::int32_t>(field.text.size()));
+            if (field.focused) {
+                field.blinkTime += m_deltaTime;
+                const bool shift = inputSystem.IsKeyDownUVE(Input::KeyCodeUVE::LeftShift) ||
+                                   inputSystem.IsKeyDownUVE(Input::KeyCodeUVE::RightShift);
+                bool caretActivity = false;
+                for (int code = static_cast<int>(Input::KeyCodeUVE::A);
+                     code < static_cast<int>(Input::KeyCodeUVE::Count) && field.focused; ++code) {
+                    const Input::KeyCodeUVE key = static_cast<Input::KeyCodeUVE>(code);
+                    if (!inputSystem.WasKeyPressedThisFrameUVE(key)) {
+                        continue;
+                    }
+                    if (key == Input::KeyCodeUVE::Backspace) {
+                        if (field.caretIndex > 0) {
+                            field.text.erase(static_cast<std::size_t>(field.caretIndex) - 1U, 1U);
+                            --field.caretIndex;
+                            caretActivity = true;
+                        }
+                    } else if (key == Input::KeyCodeUVE::Left) {
+                        field.caretIndex = std::max(0, field.caretIndex - 1);
+                        caretActivity = true;
+                    } else if (key == Input::KeyCodeUVE::Right) {
+                        field.caretIndex =
+                            std::min(field.caretIndex + 1, static_cast<std::int32_t>(field.text.size()));
+                        caretActivity = true;
+                    } else if (key == Input::KeyCodeUVE::Enter) {
+                        field.wasSubmittedThisFrame = true;
+                    } else if (key == Input::KeyCodeUVE::Escape) {
+                        field.focused = false;
+                        field.blinkTime = 0.0F;
+                    } else if (const std::optional<char> typed = TextInputCharOfUVE(key, shift);
+                               typed.has_value()) {
+                        if (field.text.size() < static_cast<std::size_t>(field.maxLength)) {
+                            field.text.insert(static_cast<std::size_t>(field.caretIndex), 1U, *typed);
+                            ++field.caretIndex;
+                            caretActivity = true;
+                        }
+                    }
+                }
+                if (caretActivity) {
+                    field.blinkTime = 0.0F;
+                }
+                if (field.text.empty()) {
+                    field.scrollOffset = 0.0F;
+                } else {
+                    const float caretPenX =
+                        field.textPadding +
+                        m_fontAtlas.MeasureTextWidthUVE(
+                            std::string_view(field.text).substr(0U, static_cast<std::size_t>(field.caretIndex)),
+                            field.fontSize);
+                    const float visibleWidth =
+                        std::max(0.0F, field.rect.size.x - 2.0F * field.textPadding);
+                    if (caretPenX - field.scrollOffset > field.textPadding + visibleWidth) {
+                        field.scrollOffset = caretPenX - field.textPadding - visibleWidth;
+                    } else if (caretPenX - field.scrollOffset < field.textPadding) {
+                        field.scrollOffset = std::max(0.0F, caretPenX - field.textPadding);
+                    }
+                }
+            }
+            const float alpha = TweenedAlphaUVE(entityManager, entity, 1.0F);
+            const CanvasAncestryUVE ancestry = ResolveCanvasAncestryUVE(entityManager, entity);
+            UIQuadUVE box{};
+            box.rect = field.rect;
+            box.color = field.focused ? field.focusColor : field.boxColor;
+            box.alpha = alpha;
+            box.kind = UIDrawItemKindUVE::SolidColor;
+            RankWidgetUVE(entity, ancestry, 1, std::vector<UIQuadUVE>{box}, ranked);
+            std::vector<UIQuadUVE> fieldQuads;
+            glyphQuads.clear();
+            float cursorX = field.rect.position.x + field.textPadding -
+                            (field.text.empty() ? 0.0F : field.scrollOffset);
+            float cursorY = field.rect.position.y + field.textPadding + field.fontSize;
+            m_fontAtlas.AppendTextQuadsUVE(field.text.empty() ? std::string_view(field.placeholder)
+                                                              : std::string_view(field.text),
+                                           cursorX, cursorY, field.fontSize, glyphQuads);
+            for (const UIGlyphQuadUVE& glyphQuad : glyphQuads) {
+                UIQuadUVE quad{};
+                quad.rect =
+                    Math::RectUVE{Math::Vector2UVE{glyphQuad.x0, glyphQuad.y0},
+                                   Math::Vector2UVE{glyphQuad.x1 - glyphQuad.x0, glyphQuad.y1 - glyphQuad.y0}};
+                quad.u0 = glyphQuad.u0;
+                quad.v0 = glyphQuad.v0;
+                quad.u1 = glyphQuad.u1;
+                quad.v1 = glyphQuad.v1;
+                quad.color = field.text.empty() ? field.placeholderColor : field.textColor;
+                quad.alpha = alpha;
+                quad.kind = UIDrawItemKindUVE::Glyph;
+                fieldQuads.push_back(quad);
+            }
+            if (field.focused && std::fmod(field.blinkTime, 1.0F) < 0.5F) {
+                const float caretPenX =
+                    field.textPadding +
+                    m_fontAtlas.MeasureTextWidthUVE(
+                        std::string_view(field.text).substr(0U, static_cast<std::size_t>(field.caretIndex)),
+                        field.fontSize);
+                UIQuadUVE caret{};
+                caret.rect = Math::RectUVE{
+                    Math::Vector2UVE{field.rect.position.x + caretPenX - field.scrollOffset,
+                                      field.rect.position.y + field.textPadding},
+                    Math::Vector2UVE{2.0F, field.fontSize}};
+                caret.color = field.caretColor;
+                caret.alpha = alpha;
+                caret.kind = UIDrawItemKindUVE::SolidColor;
+                fieldQuads.push_back(caret);
+            }
+            RankWidgetUVE(entity, ancestry, 2, std::move(fieldQuads), ranked);
         });
 
     std::sort(ranked.begin(), ranked.end(), [](const RankedWidgetUVE& lhs, const RankedWidgetUVE& rhs) {
