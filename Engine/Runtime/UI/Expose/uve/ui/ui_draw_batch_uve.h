@@ -6,7 +6,7 @@
 #include <vector>
 
 #include "uve/asset/asset_guid_uve.h"
-#include "uve/math/vector2_uve.h"
+#include "uve/math/rect_uve.h"
 #include "uve/math/vector3_uve.h"
 
 namespace UVE::UI {
@@ -28,8 +28,7 @@ enum class UIDrawItemKindUVE : std::uint8_t {
 /// `color`/`alpha` tint whatever `kind` samples (or is the flat fill color for SolidColor). Plain
 /// data only - no GPU resource is referenced anywhere in this struct.
 struct UIQuadUVE final {
-    Math::Vector2UVE positionPixels{};
-    Math::Vector2UVE sizePixels{};
+    Math::RectUVE rect{};
     float u0 = 0.0F;
     float v0 = 0.0F;
     float u1 = 1.0F;

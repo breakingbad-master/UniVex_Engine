@@ -996,6 +996,9 @@ std::uint64_t GetProgramFingerprintUVE(const ProgramUVE& program) {
 
 std::uint64_t ComputeProgramFingerprintUVE(const ProgramUVE& program) {
     // FNV-1a over a plain serialization; stable across runs and builds.
+    // Kept local deliberately: this module is standard-library-only by design, and linking
+    // uve_utilities would drag uve_platform in transitively. Same algorithm and values as
+    // Utilities::Fnv1a64UVE — keep in sync.
     std::uint64_t hash = 0xcbf29ce484222325ULL;
     const auto bytes = [&hash](const void* const data, const std::size_t size) {
         const auto* const p = static_cast<const unsigned char*>(data);

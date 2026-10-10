@@ -1135,16 +1135,19 @@ void EngineCoreUVE::SyncUIRuntimeUVE() {
                 if (viewportLayout.width > 0U && viewportLayout.height > 0U &&
                     (viewportLayout.x != 0U || viewportLayout.y != 0U ||
                      viewportLayout.width != framebufferWidth || viewportLayout.height != framebufferHeight)) {
-                    outputRegion = Render::ViewportRectUVE{viewportLayout.x, viewportLayout.y,
-                                                           viewportLayout.width, viewportLayout.height};
+                    outputRegion = Render::ViewportRectUVE{
+                        Math::Vector2iUVE{static_cast<std::int32_t>(viewportLayout.x),
+                                          static_cast<std::int32_t>(viewportLayout.y)},
+                        Math::Vector2iUVE{static_cast<std::int32_t>(viewportLayout.width),
+                                          static_cast<std::int32_t>(viewportLayout.height)}};
                 }
             }
 
             std::uint32_t projectionWidth = 0U;
             std::uint32_t projectionHeight = 0U;
             if (outputRegion.has_value()) {
-                projectionWidth = outputRegion->width;
-                projectionHeight = outputRegion->height;
+                projectionWidth = static_cast<std::uint32_t>(outputRegion->size.x);
+                projectionHeight = static_cast<std::uint32_t>(outputRegion->size.y);
             } else {
                 const std::uint32_t drawableWidth =
                     hasProjectViewportLayout && viewportLayout.width > 0U ? viewportLayout.width : framebufferWidth;
@@ -1169,8 +1172,10 @@ void EngineCoreUVE::SyncUIRuntimeUVE() {
                                                          static_cast<float>(framebufferHeight);
                 const float inputScaleX = contentScaleX * projectionScaleX;
                 const float inputScaleY = contentScaleY * projectionScaleY;
-                const float inputOffsetX = outputRegion.has_value() ? static_cast<float>(outputRegion->x) : 0.0F;
-                const float inputOffsetY = outputRegion.has_value() ? static_cast<float>(outputRegion->y) : 0.0F;
+                const float inputOffsetX =
+                    outputRegion.has_value() ? static_cast<float>(outputRegion->position.x) : 0.0F;
+                const float inputOffsetY =
+                    outputRegion.has_value() ? static_cast<float>(outputRegion->position.y) : 0.0F;
 
                 switch (m_config.stretchModeUVE) {
                 case Platform::StretchModeUVE::Disabled:
@@ -2490,9 +2495,11 @@ void EngineCoreUVE::SyncAdaptiveRenderResolutionUVE() {
     // SetEditorViewportRegionUVE()'s own doc comment). Absent one (every standalone runtime/test
     // path), this is exactly the previous full-window behavior.
     std::uint32_t drawableWidth =
-        m_editorViewportRegionUVE.has_value() ? m_editorViewportRegionUVE->width : m_windowManager->GetWidthUVE();
+        m_editorViewportRegionUVE.has_value() ? static_cast<std::uint32_t>(m_editorViewportRegionUVE->size.x)
+                                              : m_windowManager->GetWidthUVE();
     std::uint32_t drawableHeight =
-        m_editorViewportRegionUVE.has_value() ? m_editorViewportRegionUVE->height : m_windowManager->GetHeightUVE();
+        m_editorViewportRegionUVE.has_value() ? static_cast<std::uint32_t>(m_editorViewportRegionUVE->size.y)
+                                               : m_windowManager->GetHeightUVE();
     if (!m_editorViewportRegionUVE.has_value() &&
         m_config.stretchModeUVE == Platform::StretchModeUVE::Viewport) {
         const Window::PresentationLayoutUVE layout =
@@ -2776,7 +2783,10 @@ void EngineCoreUVE::Render() {
             if (layout.width > 0U && layout.height > 0U &&
                 (layout.x != 0U || layout.y != 0U || layout.width != m_windowManager->GetWidthUVE() ||
                  layout.height != m_windowManager->GetHeightUVE())) {
-                contentRegion = Render::ViewportRectUVE{layout.x, layout.y, layout.width, layout.height};
+                contentRegion = Render::ViewportRectUVE{
+                    Math::Vector2iUVE{static_cast<std::int32_t>(layout.x), static_cast<std::int32_t>(layout.y)},
+                    Math::Vector2iUVE{static_cast<std::int32_t>(layout.width),
+                                      static_cast<std::int32_t>(layout.height)}};
             }
         }
         if (contentRegion.has_value() && !m_editorViewportRegionUVE.has_value()) {
@@ -3124,6 +3134,13 @@ Scene::EntityUVE EngineCoreUVE::GetActiveCameraUVE() const noexcept {
 }
 
 void EngineCoreUVE::SetEditorViewportRegionUVE(std::optional<Render::ViewportRectUVE> region) noexcept {
+    // ViewportRectUVE is a signed rect now (Math::RectIntUVE); the old four-uint32 struct made a
+    // negative region unrepresentable, so clamp one here to keep that invariant for the
+    // projection/drawable-size readers rather than letting a cast wrap it.
+    if (region.has_value()) {
+        region->position = Math::MaxUVE(region->position, Math::Vector2iUVE{0, 0});
+        region->size = Math::MaxUVE(region->size, Math::Vector2iUVE{0, 0});
+    }
     m_editorViewportRegionUVE = region;
 }
 

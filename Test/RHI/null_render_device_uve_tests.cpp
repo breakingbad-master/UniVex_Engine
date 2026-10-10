@@ -843,6 +843,150 @@ TEST(NullRenderDeviceUVETest, DispatchUVE_RecordsOutsidePassWithStorageTextureAn
     device.DestroyShaderUVE(computeShader);
 }
 
+TEST(NullRenderDeviceUVETest, CreatePipelineUVE_UnknownCullMode_ReturnsInvalidBeforePublication) {
+    NullRenderDeviceUVE device;
+    const ShaderHandleUVE vertexShader = device.CreateShaderUVE(ShaderDescUVE{ShaderStageUVE::Vertex, "vs"});
+    const ShaderHandleUVE fragmentShader = device.CreateShaderUVE(ShaderDescUVE{ShaderStageUVE::Fragment, "fs"});
+    PipelineDescUVE invalidDesc;
+    invalidDesc.vertexShader = vertexShader;
+    invalidDesc.fragmentShader = fragmentShader;
+    invalidDesc.cullMode = static_cast<CullModeUVE>(0xFFU);
+
+    EXPECT_EQ(device.CreatePipelineUVE(invalidDesc), kInvalidPipelineHandleUVE);
+    EXPECT_EQ(device.GetLiveResourceCountUVE(), 2U);
+
+    invalidDesc.cullMode = CullModeUVE::Back;
+    const PipelineHandleUVE validPipeline = device.CreatePipelineUVE(invalidDesc);
+    EXPECT_EQ(validPipeline.value, 1U);
+}
+
+TEST(NullRenderDeviceUVETest, CreatePipelineFromBinaryUVE_UnknownCullMode_ReturnsInvalidBeforePublication) {
+    NullRenderDeviceUVE device;
+    const std::array<std::byte, 4> binary{};
+    PipelineBinaryDescUVE invalidDesc;
+    invalidDesc.cullMode = static_cast<CullModeUVE>(0xFFU);
+
+    EXPECT_EQ(device.CreatePipelineFromBinaryUVE(binary, 0U, invalidDesc), kInvalidPipelineHandleUVE);
+    EXPECT_EQ(device.GetLiveResourceCountUVE(), 0U);
+
+    invalidDesc.cullMode = CullModeUVE::Back;
+    const PipelineHandleUVE validPipeline = device.CreatePipelineFromBinaryUVE(binary, 0U, invalidDesc);
+    EXPECT_EQ(validPipeline.value, 1U);
+}
+
+TEST(NullRenderDeviceUVETest, CreatePipelineUVE_UnknownFrontFace_ReturnsInvalidBeforePublication) {
+    NullRenderDeviceUVE device;
+    const ShaderHandleUVE vertexShader = device.CreateShaderUVE(ShaderDescUVE{ShaderStageUVE::Vertex, "vs"});
+    const ShaderHandleUVE fragmentShader = device.CreateShaderUVE(ShaderDescUVE{ShaderStageUVE::Fragment, "fs"});
+    PipelineDescUVE invalidDesc;
+    invalidDesc.vertexShader = vertexShader;
+    invalidDesc.fragmentShader = fragmentShader;
+    invalidDesc.frontFace = static_cast<FrontFaceUVE>(0xFFU);
+
+    EXPECT_EQ(device.CreatePipelineUVE(invalidDesc), kInvalidPipelineHandleUVE);
+    EXPECT_EQ(device.GetLiveResourceCountUVE(), 2U);
+
+    invalidDesc.frontFace = FrontFaceUVE::Clockwise;
+    const PipelineHandleUVE validPipeline = device.CreatePipelineUVE(invalidDesc);
+    EXPECT_EQ(validPipeline.value, 1U);
+}
+
+TEST(NullRenderDeviceUVETest, CreatePipelineFromBinaryUVE_UnknownFrontFace_ReturnsInvalidBeforePublication) {
+    NullRenderDeviceUVE device;
+    const std::array<std::byte, 4> binary{};
+    PipelineBinaryDescUVE invalidDesc;
+    invalidDesc.frontFace = static_cast<FrontFaceUVE>(0xFFU);
+
+    EXPECT_EQ(device.CreatePipelineFromBinaryUVE(binary, 0U, invalidDesc), kInvalidPipelineHandleUVE);
+    EXPECT_EQ(device.GetLiveResourceCountUVE(), 0U);
+
+    invalidDesc.frontFace = FrontFaceUVE::Clockwise;
+    const PipelineHandleUVE validPipeline = device.CreatePipelineFromBinaryUVE(binary, 0U, invalidDesc);
+    EXPECT_EQ(validPipeline.value, 1U);
+}
+
+TEST(NullRenderDeviceUVETest, CreatePipelineUVE_UnknownFillMode_ReturnsInvalidBeforePublication) {
+    NullRenderDeviceUVE device;
+    const ShaderHandleUVE vertexShader = device.CreateShaderUVE(ShaderDescUVE{ShaderStageUVE::Vertex, "vs"});
+    const ShaderHandleUVE fragmentShader = device.CreateShaderUVE(ShaderDescUVE{ShaderStageUVE::Fragment, "fs"});
+    PipelineDescUVE invalidDesc;
+    invalidDesc.vertexShader = vertexShader;
+    invalidDesc.fragmentShader = fragmentShader;
+    invalidDesc.fillMode = static_cast<FillModeUVE>(0xFFU);
+
+    EXPECT_EQ(device.CreatePipelineUVE(invalidDesc), kInvalidPipelineHandleUVE);
+    EXPECT_EQ(device.GetLiveResourceCountUVE(), 2U);
+
+    invalidDesc.fillMode = FillModeUVE::Wireframe;
+    const PipelineHandleUVE validPipeline = device.CreatePipelineUVE(invalidDesc);
+    EXPECT_EQ(validPipeline.value, 1U);
+}
+
+TEST(NullRenderDeviceUVETest, CreatePipelineFromBinaryUVE_UnknownFillMode_ReturnsInvalidBeforePublication) {
+    NullRenderDeviceUVE device;
+    const std::array<std::byte, 4> binary{};
+    PipelineBinaryDescUVE invalidDesc;
+    invalidDesc.fillMode = static_cast<FillModeUVE>(0xFFU);
+
+    EXPECT_EQ(device.CreatePipelineFromBinaryUVE(binary, 0U, invalidDesc), kInvalidPipelineHandleUVE);
+    EXPECT_EQ(device.GetLiveResourceCountUVE(), 0U);
+
+    invalidDesc.fillMode = FillModeUVE::Wireframe;
+    const PipelineHandleUVE validPipeline = device.CreatePipelineFromBinaryUVE(binary, 0U, invalidDesc);
+    EXPECT_EQ(validPipeline.value, 1U);
+}
+
+TEST(NullRenderDeviceUVETest, CreatePipelineUVE_UnknownDepthCompare_ReturnsInvalidBeforePublication) {
+    NullRenderDeviceUVE device;
+    const ShaderHandleUVE vertexShader = device.CreateShaderUVE(ShaderDescUVE{ShaderStageUVE::Vertex, "vs"});
+    const ShaderHandleUVE fragmentShader = device.CreateShaderUVE(ShaderDescUVE{ShaderStageUVE::Fragment, "fs"});
+    PipelineDescUVE invalidDesc;
+    invalidDesc.vertexShader = vertexShader;
+    invalidDesc.fragmentShader = fragmentShader;
+    invalidDesc.depthCompare = static_cast<DepthCompareUVE>(0xFFU);
+
+    EXPECT_EQ(device.CreatePipelineUVE(invalidDesc), kInvalidPipelineHandleUVE);
+    EXPECT_EQ(device.GetLiveResourceCountUVE(), 2U);
+
+    invalidDesc.depthCompare = DepthCompareUVE::LessOrEqual;
+    const PipelineHandleUVE validPipeline = device.CreatePipelineUVE(invalidDesc);
+    EXPECT_EQ(validPipeline.value, 1U);
+}
+
+TEST(NullRenderDeviceUVETest, CreatePipelineFromBinaryUVE_UnknownDepthCompare_ReturnsInvalidBeforePublication) {
+    NullRenderDeviceUVE device;
+    const std::array<std::byte, 4> binary{};
+    PipelineBinaryDescUVE invalidDesc;
+    invalidDesc.depthCompare = static_cast<DepthCompareUVE>(0xFFU);
+
+    EXPECT_EQ(device.CreatePipelineFromBinaryUVE(binary, 0U, invalidDesc), kInvalidPipelineHandleUVE);
+    EXPECT_EQ(device.GetLiveResourceCountUVE(), 0U);
+
+    invalidDesc.depthCompare = DepthCompareUVE::LessOrEqual;
+    const PipelineHandleUVE validPipeline = device.CreatePipelineFromBinaryUVE(binary, 0U, invalidDesc);
+    EXPECT_EQ(validPipeline.value, 1U);
+}
+
+TEST(NullRenderDeviceUVETest, PipelineDescs_DefaultRasterizerState_MatchesPreTier21Behavior) {
+    const PipelineDescUVE desc;
+    EXPECT_EQ(desc.cullMode, CullModeUVE::None);
+    EXPECT_EQ(desc.frontFace, FrontFaceUVE::CounterClockwise);
+    EXPECT_EQ(desc.fillMode, FillModeUVE::Fill);
+    EXPECT_FALSE(desc.depthBiasEnabled);
+    EXPECT_FLOAT_EQ(desc.depthBiasConstantFactor, 0.0F);
+    EXPECT_FLOAT_EQ(desc.depthBiasSlopeFactor, 0.0F);
+    EXPECT_EQ(desc.depthCompare, DepthCompareUVE::Less);
+
+    const PipelineBinaryDescUVE binaryDesc;
+    EXPECT_EQ(binaryDesc.cullMode, CullModeUVE::None);
+    EXPECT_EQ(binaryDesc.frontFace, FrontFaceUVE::CounterClockwise);
+    EXPECT_EQ(binaryDesc.fillMode, FillModeUVE::Fill);
+    EXPECT_FALSE(binaryDesc.depthBiasEnabled);
+    EXPECT_FLOAT_EQ(binaryDesc.depthBiasConstantFactor, 0.0F);
+    EXPECT_FLOAT_EQ(binaryDesc.depthBiasSlopeFactor, 0.0F);
+    EXPECT_EQ(binaryDesc.depthCompare, DepthCompareUVE::Less);
+}
+
 #if UVE_DEBUG
 TEST(NullRenderDeviceUVEDeathTest, CommandBuffer_DispatchInsideRenderPass_Asserts) {
     NullRenderDeviceUVE device;

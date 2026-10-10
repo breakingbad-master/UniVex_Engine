@@ -2,11 +2,13 @@
 
 #pragma once
 
+#include "uve/containers/fixed_array_uve.h"
 #include "uve/threading/i_thread_pool_uve.h"
 
 #include <cstddef>
 #include <cstdint>
 #include <functional>
+#include <span>
 #include <string>
 #include <vector>
 
@@ -86,15 +88,15 @@ public:
     [[nodiscard]] FrameTaskGraphValidationResultUVE ValidateUVE() const;
 
     [[nodiscard]] std::size_t GetTaskCountUVE() const noexcept {
-        return m_tasks.size();
+        return m_tasks.SizeUVE();
     }
 
-    [[nodiscard]] const std::vector<FrameTaskDefinitionUVE>& GetTasksUVE() const noexcept {
-        return m_tasks;
+    [[nodiscard]] std::span<const FrameTaskDefinitionUVE> GetTasksUVE() const noexcept {
+        return m_tasks.AsSpanUVE();
     }
 
 private:
-    std::vector<FrameTaskDefinitionUVE> m_tasks;
+    Containers::FixedArrayUVE<FrameTaskDefinitionUVE, kMaximumTasksUVE> m_tasks;
 };
 
 enum class FrameScheduleResultCodeUVE : std::uint8_t {

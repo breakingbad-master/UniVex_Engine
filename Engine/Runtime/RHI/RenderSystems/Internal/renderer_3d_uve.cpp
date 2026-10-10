@@ -35,7 +35,9 @@
 #include "uve/logging/assert_uve.h"
 #include "uve/logging/logging_macros_uve.h"
 #include "uve/math/aabb_uve.h"
+#include "uve/math/color_uve.h"
 #include "uve/math/frustum_uve.h"
+#include "uve/math/matrix3x3_uve.h"
 #include "uve/math/matrix4x4_uve.h"
 #include "uve/math/quaternion_uve.h"
 #include "uve/math/vector3_uve.h"
@@ -1658,6 +1660,9 @@ struct Renderer3DUVE::ImplUVE {
         Shader::ShaderProgramStagesDescUVE blendedDesc = programDesc;
         blendedDesc.depthWriteEnabled = false;
         blendedDesc.blendMode = PipelineBlendModeUVE::SourceAlphaOver;
+        // Tier 2.1: overlays pass at EQUAL depth so coplanar blends survive the unified LESS
+        // default (Vulkan's old LESS_OR_EQUAL behavior, now opt-in per pipeline).
+        blendedDesc.depthCompare = DepthCompareUVE::LessOrEqual;
         blendedDesc.debugNameUVE = programDesc.debugNameUVE + " blended";
         const std::shared_ptr<Shader::ShaderProgramUVE> blendedProgram =
             shaderManager.CreateProgramFromStagesUVE(blendedDesc);
@@ -2098,12 +2103,14 @@ struct Renderer3DUVE::ImplUVE {
     /// the same rule the per-object path has always used, factored out so the instanced path
     /// cannot quietly adopt a different one. A singular world matrix means the item would not
     /// project to visible geometry anyway.
-    [[nodiscard]] static Math::Matrix4x4UVE ComputeNormalMatrixUVE(const Math::Matrix4x4UVE& worldMatrix) {
-        Math::Matrix4x4UVE inverseWorldMatrix{};
-        if (Math::TryInverseUVE(worldMatrix, inverseWorldMatrix)) {
-            return Math::TransposeUVE(inverseWorldMatrix);
+    /// The computation is honestly 3x3 (normals are directions, so translation must not reach
+    /// them); callers embed the result in a 4x4 for the mat4-only uniform/buffer upload.
+    [[nodiscard]] static Math::Matrix3x3UVE ComputeNormalMatrixUVE(const Math::Matrix4x4UVE& worldMatrix) {
+        Math::Matrix3x3UVE inverseUpper{};
+        if (Math::TryInverseUVE(Math::ToMatrix3x3UVE(worldMatrix), inverseUpper)) {
+            return Math::TransposeUVE(inverseUpper);
         }
-        return worldMatrix;
+        return Math::ToMatrix3x3UVE(worldMatrix);
     }
 
     /// Grows the three instancing buffers to hold `instanceCount` transforms. Returns false if any
@@ -2146,7 +2153,7 @@ struct Renderer3DUVE::ImplUVE {
         instanceTransposeStaging.reserve(modelMatrices.size());
         for (const Math::Matrix4x4UVE& model : modelMatrices) {
             instanceTransposeStaging.push_back(Math::TransposeUVE(model));
-            instanceNormalMatrixStaging.push_back(Math::TransposeUVE(ComputeNormalMatrixUVE(model)));
+            instanceNormalMatrixStaging.push_back(Math::TransposeUVE(Math::ToMatrix4x4UVE(ComputeNormalMatrixUVE(model))));
         }
         return renderDevice.UpdateBufferUVE(instanceTransformBuffer,
                                             std::as_bytes(std::span(instanceTransposeStaging))) &&
@@ -2171,12 +2178,17 @@ struct Renderer3DUVE::ImplUVE {
                           static_cast<std::int32_t>(kAmbientEnvironmentTextureSlotUVE));
         program.SetIntUVE("uAmbientEnvironmentMapEnabled", frameUniforms.ambientEnvironmentMapEnabled ? 1 : 0);
         for (std::size_t lightIndex = 0; lightIndex < kMaxLightsUVE; ++lightIndex) {
-            const LightDataUVE& light = frameUniforms.lights[lightIndex];
+            // The shader's light slots are fixed at kMaxLightsUVE, but the extracted list only
+            // holds live lights — paste a default (intensity 0, contributes nothing) over the
+            // unused slots so stale uniforms from an earlier frame can never leak through.
+            const LightDataUVE light = lightIndex < frameUniforms.lights.SizeUVE()
+                                           ? frameUniforms.lights[lightIndex]
+                                           : LightDataUVE{};
             const LightUniformNamesUVE& names = uniformNames.lights[lightIndex];
             program.SetIntUVE(names.type, static_cast<std::int32_t>(light.type));
             program.SetVector3UVE(names.position, light.position);
             program.SetVector3UVE(names.direction, light.direction);
-            program.SetVector3UVE(names.color, light.color);
+            program.SetVector3UVE(names.color, Math::ToVector3UVE(light.color));
             program.SetFloatUVE(names.intensity, light.intensity);
             program.SetFloatUVE(names.range, light.range);
             program.SetFloatUVE(names.spotAngleDegrees, light.spotAngleDegrees);
@@ -2209,10 +2221,10 @@ struct Renderer3DUVE::ImplUVE {
         program.SetFloatUVE("uShadowBias", frameUniforms.shadowBias);
         program.SetFloatUVE("uShadowNormalBias", frameUniforms.shadowNormalBias);
         program.SetFloatUVE("uShadowOpacity", frameUniforms.shadowOpacity);
-        program.SetVector3UVE("uAlbedoColor", material.albedoColor);
+        program.SetVector3UVE("uAlbedoColor", Math::ToVector3UVE(material.albedoColor));
         program.SetFloatUVE("uMetallic", material.metallic);
         program.SetFloatUVE("uRoughness", material.roughness);
-        program.SetVector3UVE("uEmissiveColor", material.emissiveColor);
+        program.SetVector3UVE("uEmissiveColor", Math::ToVector3UVE(material.emissiveColor));
         program.SetFloatUVE("uEmissiveEnergy", material.emissiveEnergy);
         program.SetFloatUVE("uNormalScale", material.normalScale);
         program.SetFloatUVE("uOcclusionStrength", material.occlusionStrength);
@@ -2386,7 +2398,7 @@ struct Renderer3DUVE::ImplUVE {
             program->SetMatrix4x4UVE("uModel", item.worldMatrix);
             // Normal matrix = transpose(inverse(model)); see ComputeNormalMatrixUVE, which the
             // instanced path shares so the two cannot disagree about how a normal is transformed.
-            program->SetMatrix4x4UVE("uNormalMatrix", ComputeNormalMatrixUVE(item.worldMatrix));
+            program->SetMatrix3x3UVE("uNormalMatrix", ComputeNormalMatrixUVE(item.worldMatrix));
             ApplyFrameAndMaterialUniformsUVE(*program, *material, frameUniforms);
             program->SetIntUVE("uMeshRenderLayers", static_cast<std::int32_t>(item.renderLayers));
             program->SetFloatUVE("uSurfaceOpacity", item.opacity);
@@ -2553,7 +2565,7 @@ struct Renderer3DUVE::ImplUVE {
             program->SetMatrix4x4UVE("uModel", item.worldMatrix);
             // Normal matrix = transpose(inverse(model)); see ComputeNormalMatrixUVE, shared with
             // the lit mesh path so the two cannot disagree under non-uniform scale.
-            program->SetMatrix4x4UVE("uNormalMatrix", ComputeNormalMatrixUVE(item.worldMatrix));
+            program->SetMatrix3x3UVE("uNormalMatrix", ComputeNormalMatrixUVE(item.worldMatrix));
             program->SetVector3UVE("uColor", item.baseColor);
             program->SetFloatUVE("uSurfaceOpacity", item.opacity);
             ApplyLightingUniformsUVE(*program, frameUniforms);
@@ -2585,10 +2597,10 @@ struct Renderer3DUVE::ImplUVE {
         }
         const std::size_t maxVertices = kMaximumUIQuadsUVE * kUIVerticesPerQuadUVE;
         const auto appendQuad = [this](const UI::UIQuadUVE& quad) {
-            const float x0 = quad.positionPixels.x;
-            const float y0 = quad.positionPixels.y;
-            const float x1 = quad.positionPixels.x + quad.sizePixels.x;
-            const float y1 = quad.positionPixels.y + quad.sizePixels.y;
+            const float x0 = quad.rect.position.x;
+            const float y0 = quad.rect.position.y;
+            const float x1 = quad.rect.position.x + quad.rect.size.x;
+            const float y1 = quad.rect.position.y + quad.rect.size.y;
             const auto makeVertex = [&quad](const float x, const float y, const float u, const float v) {
                 return UIVertexUVE{x, y, u, v, quad.color.x, quad.color.y, quad.color.z, quad.alpha};
             };
@@ -2713,6 +2725,12 @@ Renderer3DUVE::Renderer3DUVE(IRenderDeviceUVE& renderDevice, IRenderSystemUVE& r
     shadowProgramDesc.vertexStride = static_cast<std::uint32_t>(sizeof(Asset::MeshVertexUVE));
     shadowProgramDesc.depthTestEnabled = true;
     shadowProgramDesc.depthWriteEnabled = true;
+    // Tier 2.1: the shadow-depth pipeline opts OUT of hardware depth bias with explicit zeros
+    // rather than the defaults, so a future default change can't silently bias shadow maps.
+    // (The instanced twin below inherits these via the copy.)
+    shadowProgramDesc.depthBiasEnabled = false;
+    shadowProgramDesc.depthBiasConstantFactor = 0.0F;
+    shadowProgramDesc.depthBiasSlopeFactor = 0.0F;
     shadowProgramDesc.debugNameUVE = "ShadowDepth";
     m_impl->shadowProgram = shaderManager.CreateProgramUVE(shadowProgramDesc);
 
@@ -3159,7 +3177,7 @@ void Renderer3DUVE::RenderFrameUVE(Scene::IEntityManagerUVE& entityManager, Scen
             continue;
         }
         m_impl->sunDirection = Math::NormalizeUVE(incoming);
-        m_impl->sunColor = light.color;
+        m_impl->sunColor = Math::ToVector3UVE(light.color);
         m_impl->sunEnergy = light.intensity;
         m_impl->sunVolumetricFogEnergy = light.volumetricFogEnergy;
         break;
@@ -3806,8 +3824,10 @@ void Renderer3DUVE::RenderFrameUVE(Scene::IEntityManagerUVE& entityManager, Scen
             passDesc.viewportOverride = m_impl->destinationViewportOverride;
             if (!passDesc.viewportOverride.has_value() && m_impl->destinationTextureOverride.has_value() &&
                 m_impl->destinationTextureSizeOverride.has_value()) {
-                passDesc.viewportOverride = ViewportRectUVE{0U, 0U, m_impl->destinationTextureSizeOverride->first,
-                                                            m_impl->destinationTextureSizeOverride->second};
+                passDesc.viewportOverride =
+                    ViewportRectUVE{Math::Vector2iUVE{0, 0},
+                                    Math::Vector2iUVE{static_cast<std::int32_t>(m_impl->destinationTextureSizeOverride->first),
+                                                      static_cast<std::int32_t>(m_impl->destinationTextureSizeOverride->second)}};
             }
             commandBuffer.BeginRenderPassUVE(passDesc);
             m_impl->toneMappingProgram->SetIntUVE("uSourceTexture", 0);
@@ -3942,12 +3962,14 @@ void Renderer3DUVE::RenderFrameUVE(Scene::IEntityManagerUVE& entityManager, Scen
         const std::uint32_t uiWidth = m_impl->destinationTextureSizeOverride.has_value()
                                            ? m_impl->destinationTextureSizeOverride->first
                                        : m_impl->destinationViewportOverride.has_value()
-                                           ? m_impl->destinationViewportOverride->width
+                                           ? static_cast<std::uint32_t>(
+                                                 m_impl->destinationViewportOverride->size.x)
                                            : m_impl->targetWidth;
         const std::uint32_t uiHeight = m_impl->destinationTextureSizeOverride.has_value()
                                             ? m_impl->destinationTextureSizeOverride->second
                                         : m_impl->destinationViewportOverride.has_value()
-                                            ? m_impl->destinationViewportOverride->height
+                                            ? static_cast<std::uint32_t>(
+                                                  m_impl->destinationViewportOverride->size.y)
                                             : m_impl->targetHeight;
         if (uiWidth > 0U && uiHeight > 0U) {
             const std::array<RenderGraphResourceUseUVE, 1U> uiOverlayResources{

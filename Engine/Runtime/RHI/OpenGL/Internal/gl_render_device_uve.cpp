@@ -725,6 +725,22 @@ PipelineHandleUVE GlRenderDeviceUVE::CreatePipelineUVE(const PipelineDescUVE& de
         UVE_ERROR("GlRenderDeviceUVE: CreatePipelineUVE received an unknown primitive topology");
         return kInvalidPipelineHandleUVE;
     }
+    if (!IsCullModeValidUVE(desc.cullMode)) {
+        UVE_ERROR("GlRenderDeviceUVE: CreatePipelineUVE received an unknown cull mode");
+        return kInvalidPipelineHandleUVE;
+    }
+    if (!IsFrontFaceValidUVE(desc.frontFace)) {
+        UVE_ERROR("GlRenderDeviceUVE: CreatePipelineUVE received an unknown front-face winding");
+        return kInvalidPipelineHandleUVE;
+    }
+    if (!IsFillModeValidUVE(desc.fillMode)) {
+        UVE_ERROR("GlRenderDeviceUVE: CreatePipelineUVE received an unknown fill mode");
+        return kInvalidPipelineHandleUVE;
+    }
+    if (!IsDepthCompareValidUVE(desc.depthCompare)) {
+        UVE_ERROR("GlRenderDeviceUVE: CreatePipelineUVE received an unknown depth comparison");
+        return kInvalidPipelineHandleUVE;
+    }
     if (m_impl->state.maxVertexAttribs <= 0 ||
         desc.vertexLayout.size() > static_cast<std::size_t>(m_impl->state.maxVertexAttribs)) {
         UVE_ERROR("GlRenderDeviceUVE: pipeline vertex layout exceeds GL vertex-attrib limits");
@@ -767,9 +783,21 @@ PipelineHandleUVE GlRenderDeviceUVE::CreatePipelineUVE(const PipelineDescUVE& de
     GLuint glVao = 0;
     m_impl->state.gl.glGenVertexArrays(1, &glVao);
 
-    Detail::GlDeviceStateUVE::PipelineRecordUVE record{
-        glProgram, glVao, desc.vertexLayout, desc.vertexStride, desc.depthTestEnabled, desc.depthWriteEnabled,
-        desc.blendMode, /*isCompute=*/false, {}};
+    Detail::GlDeviceStateUVE::PipelineRecordUVE record;
+    record.glProgram = glProgram;
+    record.glVao = glVao;
+    record.vertexLayout = desc.vertexLayout;
+    record.vertexStride = desc.vertexStride;
+    record.depthTestEnabled = desc.depthTestEnabled;
+    record.depthWriteEnabled = desc.depthWriteEnabled;
+    record.blendMode = desc.blendMode;
+    record.cullMode = desc.cullMode;
+    record.frontFace = desc.frontFace;
+    record.fillMode = desc.fillMode;
+    record.depthBiasEnabled = desc.depthBiasEnabled;
+    record.depthBiasConstantFactor = desc.depthBiasConstantFactor;
+    record.depthBiasSlopeFactor = desc.depthBiasSlopeFactor;
+    record.depthCompare = desc.depthCompare;
     ReflectPipelineUniformsUVE(m_impl->state.gl, glProgram, record.uniforms);
 
     const std::uint32_t handleValue = m_impl->state.nextPipelineHandle++;
@@ -913,6 +941,22 @@ PipelineHandleUVE GlRenderDeviceUVE::CreatePipelineFromBinaryUVE(std::span<const
         UVE_ERROR("GlRenderDeviceUVE: CreatePipelineFromBinaryUVE received an unknown primitive topology");
         return kInvalidPipelineHandleUVE;
     }
+    if (!IsCullModeValidUVE(desc.cullMode)) {
+        UVE_ERROR("GlRenderDeviceUVE: CreatePipelineFromBinaryUVE received an unknown cull mode");
+        return kInvalidPipelineHandleUVE;
+    }
+    if (!IsFrontFaceValidUVE(desc.frontFace)) {
+        UVE_ERROR("GlRenderDeviceUVE: CreatePipelineFromBinaryUVE received an unknown front-face winding");
+        return kInvalidPipelineHandleUVE;
+    }
+    if (!IsFillModeValidUVE(desc.fillMode)) {
+        UVE_ERROR("GlRenderDeviceUVE: CreatePipelineFromBinaryUVE received an unknown fill mode");
+        return kInvalidPipelineHandleUVE;
+    }
+    if (!IsDepthCompareValidUVE(desc.depthCompare)) {
+        UVE_ERROR("GlRenderDeviceUVE: CreatePipelineFromBinaryUVE received an unknown depth comparison");
+        return kInvalidPipelineHandleUVE;
+    }
     if (m_impl->state.maxVertexAttribs <= 0 ||
         desc.vertexLayout.size() > static_cast<std::size_t>(m_impl->state.maxVertexAttribs)) {
         UVE_ERROR("GlRenderDeviceUVE: pipeline vertex layout exceeds GL vertex-attrib limits");
@@ -947,9 +991,21 @@ PipelineHandleUVE GlRenderDeviceUVE::CreatePipelineFromBinaryUVE(std::span<const
     GLuint glVao = 0;
     m_impl->state.gl.glGenVertexArrays(1, &glVao);
 
-    Detail::GlDeviceStateUVE::PipelineRecordUVE record{
-        glProgram, glVao, desc.vertexLayout, desc.vertexStride, desc.depthTestEnabled, desc.depthWriteEnabled,
-        desc.blendMode, /*isCompute=*/false, {}};
+    Detail::GlDeviceStateUVE::PipelineRecordUVE record;
+    record.glProgram = glProgram;
+    record.glVao = glVao;
+    record.vertexLayout = desc.vertexLayout;
+    record.vertexStride = desc.vertexStride;
+    record.depthTestEnabled = desc.depthTestEnabled;
+    record.depthWriteEnabled = desc.depthWriteEnabled;
+    record.blendMode = desc.blendMode;
+    record.cullMode = desc.cullMode;
+    record.frontFace = desc.frontFace;
+    record.fillMode = desc.fillMode;
+    record.depthBiasEnabled = desc.depthBiasEnabled;
+    record.depthBiasConstantFactor = desc.depthBiasConstantFactor;
+    record.depthBiasSlopeFactor = desc.depthBiasSlopeFactor;
+    record.depthCompare = desc.depthCompare;
     // Uniform locations are not guaranteed portable across a binary load even though behavior
     // is - reflection must always be re-run here, never assumed inherited from the original
     // compile that produced this binary.

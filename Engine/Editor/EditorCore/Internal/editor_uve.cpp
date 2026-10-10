@@ -7,6 +7,7 @@
 #include "uve/editor/editor_settings_uve.h"
 #include "editor_settings_binding_uve.h"
 #include "uve/editor/editor_render_stats_uve.h"
+#include "uve/math/trs_uve.h"
 
 #include "editor_chrome_layout_uve.h"
 #include "editor_entity_label_uve.h"
@@ -208,10 +209,6 @@ constexpr float kMaximum2DCanvasZoomUVE = 4.00F;
 
 [[nodiscard]] bool IsFiniteUVE(const float value) noexcept {
     return std::isfinite(value);
-}
-
-[[nodiscard]] Math::QuaternionUVE ConjugateUVE(const Math::QuaternionUVE& value) noexcept {
-    return Math::QuaternionUVE{-value.x, -value.y, -value.z, value.w};
 }
 
 [[nodiscard]] Scene::Objects::SceneObjectKindUVE ToSceneObjectKindUVE(const EditorEntityKindUVE kind) noexcept {
@@ -1370,13 +1367,11 @@ bool EditorUVE::AreSceneComponentValuesEqualUVE(const EditorSceneComponentValueU
                 return left.text == right.text && left.positionPixels == right.positionPixels &&
                        left.fontSize == right.fontSize && left.color == right.color && left.alpha == right.alpha;
             } else if constexpr (std::is_same_v<LeftType, Scene::UIImageComponentUVE>) {
-                return left.textureAssetGuid == right.textureAssetGuid &&
-                       left.positionPixels == right.positionPixels && left.sizePixels == right.sizePixels &&
+                return left.textureAssetGuid == right.textureAssetGuid && left.rect == right.rect &&
                        left.tintColor == right.tintColor && left.alpha == right.alpha;
             } else if constexpr (std::is_same_v<LeftType, Scene::UIButtonComponentUVE>) {
-                return left.positionPixels == right.positionPixels && left.sizePixels == right.sizePixels &&
-                       left.normalColor == right.normalColor && left.hoverColor == right.hoverColor &&
-                       left.pressedColor == right.pressedColor;
+                return left.rect == right.rect && left.normalColor == right.normalColor &&
+                       left.hoverColor == right.hoverColor && left.pressedColor == right.pressedColor;
             } else if constexpr (std::is_same_v<LeftType, Scene::PhysicsInterpolationComponentUVE>) {
                 // Only `mode` is the authored, comparable field - the pose members are
                 // runtime-computed and never part of an authoring diff (see the component's own
@@ -2596,10 +2591,11 @@ bool EditorUVE::ComputeKeepWorldLocalTransformUVE(const Scene::EntityUVE entity,
     if (!Math::TryInverseUVE(parentRotation, parentInverse)) {
         return false;
     }
-    const Math::Vector3UVE unrotated = Math::RotateVectorUVE(
-        parentInverse, sourceWorld.worldPosition - parentPosition);
-    outTransform.localPosition = Math::Vector3UVE{
-        unrotated.x / parentScale.x, unrotated.y / parentScale.y, unrotated.z / parentScale.z};
+    const Math::TrsUVE parentTrs{parentPosition, parentRotation, parentScale};
+    if (!Math::TryInverseTransformPointUVE(parentTrs, sourceWorld.worldPosition,
+                                            outTransform.localPosition)) {
+        return false;
+    }
     if (!Math::TryNormalizeUVE(Math::MultiplyUVE(parentInverse, sourceRotation), outTransform.localRotation)) {
         return false;
     }
@@ -4488,13 +4484,11 @@ bool EditorUVE::ComputeLocalDeltaForWorldDeltaUVE(const Scene::EntityUVE entity,
         return false;
     }
 
-    const Math::Vector3UVE unrotated =
-        Math::RotateVectorUVE(ConjugateUVE(parentWorld.worldRotation), worldDelta);
-    outLocalDelta = Math::Vector3UVE{
-        unrotated.x / parentWorld.worldScale.x,
-        unrotated.y / parentWorld.worldScale.y,
-        unrotated.z / parentWorld.worldScale.z,
-    };
+    const Math::TrsUVE parentTrs{
+        parentWorld.worldPosition, parentWorld.worldRotation, parentWorld.worldScale};
+    if (!Math::TryInverseTransformDirectionUVE(parentTrs, worldDelta, outLocalDelta)) {
+        return false;
+    }
     return IsFiniteVectorUVE(outLocalDelta);
 }
 

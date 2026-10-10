@@ -129,6 +129,49 @@ VKAPI_ATTR VkBool32 VKAPI_CALL VulkanValidationMessageCallbackUVE(
     return VK_ATTACHMENT_LOAD_OP_CLEAR; // unreachable; constexpr-safe default
 }
 
+/// Tier 2.1: explicit RHI → Vulkan rasterizer mappings. Every switch covers all enumerators and
+/// ends in a constexpr-safe default reproducing the pre-2.1 hardcoded value — an invalid enum
+/// can never produce an undefined `Vk*` value.
+[[nodiscard]] constexpr VkCullModeFlags ToVkCullModeUVE(const CullModeUVE mode) noexcept {
+    switch (mode) {
+        case CullModeUVE::None:         return VK_CULL_MODE_NONE;
+        case CullModeUVE::Front:        return VK_CULL_MODE_FRONT_BIT;
+        case CullModeUVE::Back:         return VK_CULL_MODE_BACK_BIT;
+        case CullModeUVE::FrontAndBack: return VK_CULL_MODE_FRONT_AND_BACK;
+    }
+    return VK_CULL_MODE_NONE; // unreachable; constexpr-safe default
+}
+
+[[nodiscard]] constexpr VkFrontFace ToVkFrontFaceUVE(const FrontFaceUVE face) noexcept {
+    switch (face) {
+        case FrontFaceUVE::CounterClockwise: return VK_FRONT_FACE_COUNTER_CLOCKWISE;
+        case FrontFaceUVE::Clockwise:        return VK_FRONT_FACE_CLOCKWISE;
+    }
+    return VK_FRONT_FACE_COUNTER_CLOCKWISE; // unreachable; constexpr-safe default
+}
+
+[[nodiscard]] constexpr VkPolygonMode ToVkFillModeUVE(const FillModeUVE mode) noexcept {
+    switch (mode) {
+        case FillModeUVE::Fill:      return VK_POLYGON_MODE_FILL;
+        case FillModeUVE::Wireframe: return VK_POLYGON_MODE_LINE;
+    }
+    return VK_POLYGON_MODE_FILL; // unreachable; constexpr-safe default
+}
+
+[[nodiscard]] constexpr VkCompareOp ToVkDepthCompareUVE(const DepthCompareUVE compare) noexcept {
+    switch (compare) {
+        case DepthCompareUVE::Never:          return VK_COMPARE_OP_NEVER;
+        case DepthCompareUVE::Less:           return VK_COMPARE_OP_LESS;
+        case DepthCompareUVE::Equal:          return VK_COMPARE_OP_EQUAL;
+        case DepthCompareUVE::LessOrEqual:    return VK_COMPARE_OP_LESS_OR_EQUAL;
+        case DepthCompareUVE::Greater:        return VK_COMPARE_OP_GREATER;
+        case DepthCompareUVE::NotEqual:       return VK_COMPARE_OP_NOT_EQUAL;
+        case DepthCompareUVE::GreaterOrEqual: return VK_COMPARE_OP_GREATER_OR_EQUAL;
+        case DepthCompareUVE::Always:         return VK_COMPARE_OP_ALWAYS;
+    }
+    return VK_COMPARE_OP_LESS; // unreachable; constexpr-safe default (the unified RHI default)
+}
+
 } // namespace
 
 namespace {
@@ -3093,8 +3136,10 @@ PipelineHandleUVE VulkanRenderDeviceUVE::CreatePipelineUVE(const PipelineDescUVE
     }
     if (!IsVertexLayoutValidUVE(desc.vertexLayout) ||
         !IsVertexLayoutWithinStrideUVE(desc.vertexLayout, desc.vertexStride) ||
-        !IsPrimitiveTopologyValidUVE(desc.topology) || !IsPipelineBlendModeValidUVE(desc.blendMode)) {
-        return fail("malformed pipeline descriptor (vertex layout/stride, topology, or blend mode)");
+        !IsPrimitiveTopologyValidUVE(desc.topology) || !IsPipelineBlendModeValidUVE(desc.blendMode) ||
+        !IsCullModeValidUVE(desc.cullMode) || !IsFrontFaceValidUVE(desc.frontFace) ||
+        !IsFillModeValidUVE(desc.fillMode) || !IsDepthCompareValidUVE(desc.depthCompare)) {
+        return fail("malformed pipeline descriptor (vertex layout/stride, topology, blend mode, or rasterizer state)");
     }
 
     VkPipelineShaderStageCreateInfo stages[2]{};
@@ -3155,10 +3200,14 @@ PipelineHandleUVE VulkanRenderDeviceUVE::CreatePipelineUVE(const PipelineDescUVE
     rasterizer.sType = VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO;
     rasterizer.depthClampEnable = VK_FALSE;
     rasterizer.rasterizerDiscardEnable = VK_FALSE;
-    rasterizer.polygonMode = VK_POLYGON_MODE_FILL;
-    rasterizer.cullMode = VK_CULL_MODE_NONE; // GL device default: no culling policy in the RHI
-    rasterizer.frontFace = VK_FRONT_FACE_COUNTER_CLOCKWISE;
-    rasterizer.depthBiasEnable = VK_FALSE;
+    // Tier 2.1: rasterizer state threads from the desc (defaults reproduce these pre-2.1 values).
+    rasterizer.polygonMode = ToVkFillModeUVE(desc.fillMode);
+    rasterizer.cullMode = ToVkCullModeUVE(desc.cullMode);
+    rasterizer.frontFace = ToVkFrontFaceUVE(desc.frontFace);
+    rasterizer.depthBiasEnable = desc.depthBiasEnabled ? VK_TRUE : VK_FALSE;
+    rasterizer.depthBiasConstantFactor = desc.depthBiasConstantFactor;
+    rasterizer.depthBiasSlopeFactor = desc.depthBiasSlopeFactor;
+    rasterizer.depthBiasClamp = 0.0F; // the RHI has no clamp knob; Vulkan still needs SOME value
     rasterizer.lineWidth = 1.0F;
 
     VkPipelineMultisampleStateCreateInfo multisample{};
@@ -3168,11 +3217,13 @@ PipelineHandleUVE VulkanRenderDeviceUVE::CreatePipelineUVE(const PipelineDescUVE
     VkPipelineDepthStencilStateCreateInfo depthStencil{};
     depthStencil.sType = VK_STRUCTURE_TYPE_PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO;
     // M2b: the swapchain render pass now carries a real depth attachment, so the RHI's two
-    // depth flags bind exactly as they do in GlRenderDeviceUVE (LESS_OR_EQUAL compare matches
-    // its GL depth-func policy).
+    // depth flags bind exactly as they do in GlRenderDeviceUVE. Tier 2.1: the compare op threads
+    // from the desc — Less is the unified default, matching GL's effective behavior (GL never
+    // calls glDepthFunc, so the context default LESS rules; the old claim that LESS_OR_EQUAL
+    // matched GL was wrong).
     depthStencil.depthTestEnable = desc.depthTestEnabled ? VK_TRUE : VK_FALSE;
     depthStencil.depthWriteEnable = desc.depthWriteEnabled ? VK_TRUE : VK_FALSE;
-    depthStencil.depthCompareOp = VK_COMPARE_OP_LESS_OR_EQUAL;
+    depthStencil.depthCompareOp = ToVkDepthCompareUVE(desc.depthCompare);
     depthStencil.stencilTestEnable = VK_FALSE;
 
     VkPipelineColorBlendAttachmentState blendAttachment{};
@@ -4492,17 +4543,16 @@ void VulkanRenderDeviceUVE::ReplayRecordedCommandsUVE(const std::vector<Recorded
     const auto applyViewportOverrideUVE = [&impl](const ViewportRectUVE& rect,
                                                   const std::uint32_t surfaceHeight) {
         VkViewport viewport{};
-        viewport.x = static_cast<float>(rect.x);
+        viewport.x = static_cast<float>(rect.position.x);
         viewport.y = static_cast<float>(static_cast<std::int64_t>(surfaceHeight) -
-                                        static_cast<std::int64_t>(rect.y + rect.height));
-        viewport.width = static_cast<float>(rect.width);
-        viewport.height = static_cast<float>(rect.height);
+                                        (static_cast<std::int64_t>(rect.position.y) + static_cast<std::int64_t>(rect.size.y)));
+        viewport.width = static_cast<float>(rect.size.x);
+        viewport.height = static_cast<float>(rect.size.y);
         viewport.minDepth = 0.0F;
         viewport.maxDepth = 1.0F;
         VkRect2D scissor{};
-        scissor.offset = {static_cast<std::int32_t>(rect.x),
-                          static_cast<std::int32_t>(viewport.y)};
-        scissor.extent = {rect.width, rect.height};
+        scissor.offset = {rect.position.x, static_cast<std::int32_t>(viewport.y)};
+        scissor.extent = {static_cast<std::uint32_t>(rect.size.x), static_cast<std::uint32_t>(rect.size.y)};
         impl.vk.vkCmdSetViewport(impl.commandBuffer, 0U, 1U, &viewport);
         impl.vk.vkCmdSetScissor(impl.commandBuffer, 0U, 1U, &scissor);
     };

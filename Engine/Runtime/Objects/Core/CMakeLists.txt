@@ -15,6 +15,7 @@ add_library(uve_object STATIC
 )
 target_include_directories(uve_object PUBLIC Expose)
 # PUBLIC: variant_uve.h stores Math vector and quaternion types by value.
-target_link_libraries(uve_object PUBLIC uve_math)
+# PUBLIC: type_metadata_uve.h stores StringIdUVE type ids by value.
+target_link_libraries(uve_object PUBLIC uve_math uve_strings)
 target_compile_features(uve_object PUBLIC cxx_std_23)
 uve_set_warnings(uve_object)

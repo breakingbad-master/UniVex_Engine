@@ -71,7 +71,7 @@ TEST(SceneComponentMetadataUVETest, EveryDeclarationRegistersAndCarriesItsNative
             // can do anything with it.
             EXPECT_NE(property.getValue, nullptr) << entry.typeId << "." << property.name;
             EXPECT_NE(property.setValue, nullptr) << entry.typeId << "." << property.name;
-            EXPECT_FALSE(property.typeId.empty()) << entry.typeId << "." << property.name;
+            EXPECT_FALSE(property.typeId.IsEmptyUVE()) << entry.typeId << "." << property.name;
         }
     }
 }
@@ -1346,6 +1346,21 @@ TEST(SceneComponentMetadataUVETest, TheArea3DSectionCarriesSpaceOverrideAndOccup
     AreaComponentUVE unknownMode{};
     unknownMode.gravityOverride = static_cast<AreaSpaceOverrideModeUVE>(9U);
     EXPECT_FALSE(area->isInstanceValid(&unknownMode));
+}
+
+TEST(SceneComponentMetadataUVETest, EveryComponentEntryNamesItsCppType) {
+    // Auto-discovery joins the registry to the serializer's component table on cppName: an
+    // entry without one is invisible to generic serialization, and a duplicate would fight
+    // over one table slot. This is the drift guard for both.
+    const Core::TypeMetadataRegistryUVE& registry = GetSceneComponentMetadataRegistryUVE();
+    std::vector<std::string> names;
+    for (const TypeMetadataEntryUVE& entry : registry.GetSnapshotUVE().entries) {
+        EXPECT_FALSE(entry.cppName.empty()) << entry.typeId;
+        names.push_back(entry.cppName);
+    }
+    ASSERT_FALSE(names.empty());
+    std::sort(names.begin(), names.end());
+    EXPECT_EQ(std::adjacent_find(names.begin(), names.end()), names.end());
 }
 
 } // namespace

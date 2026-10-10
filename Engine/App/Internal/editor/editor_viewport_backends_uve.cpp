@@ -845,8 +845,8 @@ private:
         const ImVec2 origin = ImGui::GetMainViewport()->Pos;
         ImDrawList* const drawList = ImGui::GetForegroundDrawList(ImGui::GetMainViewport());
         for (const UVE::UI::UIQuadUVE& quad : batch.quads) {
-            const ImVec2 pMin{origin.x + quad.positionPixels.x, origin.y + quad.positionPixels.y};
-            const ImVec2 pMax{pMin.x + quad.sizePixels.x, pMin.y + quad.sizePixels.y};
+            const ImVec2 pMin{origin.x + quad.rect.position.x, origin.y + quad.rect.position.y};
+            const ImVec2 pMax{pMin.x + quad.rect.size.x, pMin.y + quad.rect.size.y};
             const ImU32 tint = ImGui::ColorConvertFloat4ToU32(
                 ImVec4{quad.color.x, quad.color.y, quad.color.z, quad.alpha});
             if (quad.kind == UVE::UI::UIDrawItemKindUVE::Glyph && uiFontAtlasTexture_ != 0U) {

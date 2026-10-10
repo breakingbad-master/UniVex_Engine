@@ -180,6 +180,22 @@ PipelineHandleUVE NullRenderDeviceUVE::CreatePipelineUVE(const PipelineDescUVE& 
         UVE_ERROR("NullRenderDeviceUVE: CreatePipelineUVE received an unknown primitive topology");
         return kInvalidPipelineHandleUVE;
     }
+    if (!IsCullModeValidUVE(desc.cullMode)) {
+        UVE_ERROR("NullRenderDeviceUVE: CreatePipelineUVE received an unknown cull mode");
+        return kInvalidPipelineHandleUVE;
+    }
+    if (!IsFrontFaceValidUVE(desc.frontFace)) {
+        UVE_ERROR("NullRenderDeviceUVE: CreatePipelineUVE received an unknown front-face winding");
+        return kInvalidPipelineHandleUVE;
+    }
+    if (!IsFillModeValidUVE(desc.fillMode)) {
+        UVE_ERROR("NullRenderDeviceUVE: CreatePipelineUVE received an unknown fill mode");
+        return kInvalidPipelineHandleUVE;
+    }
+    if (!IsDepthCompareValidUVE(desc.depthCompare)) {
+        UVE_ERROR("NullRenderDeviceUVE: CreatePipelineUVE received an unknown depth comparison");
+        return kInvalidPipelineHandleUVE;
+    }
     if (!m_impl->shaders.contains(desc.vertexShader.value) || !m_impl->shaders.contains(desc.fragmentShader.value)) {
         UVE_ERROR("NullRenderDeviceUVE: CreatePipelineUVE referenced an unknown vertex or fragment shader handle");
         return kInvalidPipelineHandleUVE;
@@ -242,6 +258,22 @@ PipelineHandleUVE NullRenderDeviceUVE::CreatePipelineFromBinaryUVE(std::span<con
         UVE_ERROR("NullRenderDeviceUVE: CreatePipelineFromBinaryUVE received an unknown primitive topology");
         return kInvalidPipelineHandleUVE;
     }
+    if (!IsCullModeValidUVE(desc.cullMode)) {
+        UVE_ERROR("NullRenderDeviceUVE: CreatePipelineFromBinaryUVE received an unknown cull mode");
+        return kInvalidPipelineHandleUVE;
+    }
+    if (!IsFrontFaceValidUVE(desc.frontFace)) {
+        UVE_ERROR("NullRenderDeviceUVE: CreatePipelineFromBinaryUVE received an unknown front-face winding");
+        return kInvalidPipelineHandleUVE;
+    }
+    if (!IsFillModeValidUVE(desc.fillMode)) {
+        UVE_ERROR("NullRenderDeviceUVE: CreatePipelineFromBinaryUVE received an unknown fill mode");
+        return kInvalidPipelineHandleUVE;
+    }
+    if (!IsDepthCompareValidUVE(desc.depthCompare)) {
+        UVE_ERROR("NullRenderDeviceUVE: CreatePipelineFromBinaryUVE received an unknown depth comparison");
+        return kInvalidPipelineHandleUVE;
+    }
     static_cast<void>(binary); // NullRenderDeviceUVE never inspects binary contents.
     static_cast<void>(format);
     PipelineDescUVE bookkeepingDesc;
@@ -252,6 +284,14 @@ PipelineHandleUVE NullRenderDeviceUVE::CreatePipelineFromBinaryUVE(std::span<con
     bookkeepingDesc.depthTestEnabled = desc.depthTestEnabled;
     bookkeepingDesc.depthWriteEnabled = desc.depthWriteEnabled;
     bookkeepingDesc.vertexStride = desc.vertexStride;
+    bookkeepingDesc.blendMode = desc.blendMode;
+    bookkeepingDesc.cullMode = desc.cullMode;
+    bookkeepingDesc.frontFace = desc.frontFace;
+    bookkeepingDesc.fillMode = desc.fillMode;
+    bookkeepingDesc.depthBiasEnabled = desc.depthBiasEnabled;
+    bookkeepingDesc.depthBiasConstantFactor = desc.depthBiasConstantFactor;
+    bookkeepingDesc.depthBiasSlopeFactor = desc.depthBiasSlopeFactor;
+    bookkeepingDesc.depthCompare = desc.depthCompare;
 
     const std::uint32_t handleValue = m_impl->nextPipelineHandle++;
     m_impl->pipelines.emplace(handleValue, bookkeepingDesc);

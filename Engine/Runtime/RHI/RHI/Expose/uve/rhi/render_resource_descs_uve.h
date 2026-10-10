@@ -12,6 +12,7 @@
 #include <string>
 #include <vector>
 
+#include "uve/math/rect_int_uve.h"
 #include "uve/rhi/shader_handle_uve.h"
 #include "uve/rhi/texture_handle_uve.h"
 
@@ -399,6 +400,81 @@ enum class PipelineBlendModeUVE : std::uint8_t { Opaque, SourceAlphaOver, Additi
     return false;
 }
 
+/// Which triangle faces the rasterizer discards. `None` (no culling) is the default both
+/// backends already implement: GL never enables `GL_CULL_FACE` for RHI pipelines, and Vulkan
+/// hardcodes `VK_CULL_MODE_NONE`.
+enum class CullModeUVE : std::uint8_t { None, Front, Back, FrontAndBack };
+
+[[nodiscard]] constexpr bool IsCullModeValidUVE(const CullModeUVE mode) noexcept {
+    switch (mode) {
+        case CullModeUVE::None:
+        case CullModeUVE::Front:
+        case CullModeUVE::Back:
+        case CullModeUVE::FrontAndBack:
+            return true;
+    }
+    return false;
+}
+
+/// Which vertex winding counts as front-facing for culling. Counter-clockwise is the default
+/// both backends already implement (and the winding glTF importers produce).
+enum class FrontFaceUVE : std::uint8_t { CounterClockwise, Clockwise };
+
+[[nodiscard]] constexpr bool IsFrontFaceValidUVE(const FrontFaceUVE face) noexcept {
+    switch (face) {
+        case FrontFaceUVE::CounterClockwise:
+        case FrontFaceUVE::Clockwise:
+            return true;
+    }
+    return false;
+}
+
+/// How triangles fill their pixels. `Fill` is the default both backends already implement.
+/// There is no point mode: points need a point-size state neither backend was given.
+enum class FillModeUVE : std::uint8_t { Fill, Wireframe };
+
+[[nodiscard]] constexpr bool IsFillModeValidUVE(const FillModeUVE mode) noexcept {
+    switch (mode) {
+        case FillModeUVE::Fill:
+        case FillModeUVE::Wireframe:
+            return true;
+    }
+    return false;
+}
+
+/// How an incoming fragment's depth compares against the depth buffer when the depth test is
+/// on. Ordered to match `VkCompareOp`'s numbering (Never=0 … Always=7) — backends still map
+/// explicitly, never by static_cast, so the order is a reading convenience, not a contract.
+///
+/// The default is `Less`, matching what the GL backend has always done (it never calls
+/// `glDepthFunc`, so the context default rules). Note this CHANGES the Vulkan backend, which
+/// hardcoded `LESS_OR_EQUAL` under a comment claiming it matched GL — it did not.
+enum class DepthCompareUVE : std::uint8_t {
+    Never,
+    Less,
+    Equal,
+    LessOrEqual,
+    Greater,
+    NotEqual,
+    GreaterOrEqual,
+    Always,
+};
+
+[[nodiscard]] constexpr bool IsDepthCompareValidUVE(const DepthCompareUVE compare) noexcept {
+    switch (compare) {
+        case DepthCompareUVE::Never:
+        case DepthCompareUVE::Less:
+        case DepthCompareUVE::Equal:
+        case DepthCompareUVE::LessOrEqual:
+        case DepthCompareUVE::Greater:
+        case DepthCompareUVE::NotEqual:
+        case DepthCompareUVE::GreaterOrEqual:
+        case DepthCompareUVE::Always:
+            return true;
+    }
+    return false;
+}
+
 /// Describes a pipeline state object to create via IRenderDeviceUVE::CreatePipelineUVE().
 /// Fixed-function state remains deliberately small; blending is explicit because editor visual
 /// composition is the first proven consumer rather than an implicit global OpenGL side effect.
@@ -416,6 +492,17 @@ struct PipelineDescUVE {
     /// `glVertexAttribPointer` stride parameter). `0` (the default) is only ever valid for
     /// `NullRenderDeviceUVE`, which ignores this field like every other one it merely bookkeeps.
     std::uint32_t vertexStride = 0;
+
+    // Appended after existing members to preserve aggregate initialization of legacy descriptors.
+    // Defaults reproduce what both backends already did — except depthCompare, where Less
+    // matches GL and moves Vulkan off its hardcoded LessOrEqual (see DepthCompareUVE).
+    CullModeUVE cullMode = CullModeUVE::None;
+    FrontFaceUVE frontFace = FrontFaceUVE::CounterClockwise;
+    FillModeUVE fillMode = FillModeUVE::Fill;
+    bool depthBiasEnabled = false;
+    float depthBiasConstantFactor = 0.0F;
+    float depthBiasSlopeFactor = 0.0F;
+    DepthCompareUVE depthCompare = DepthCompareUVE::Less;
 };
 
 /// Describes a COMPUTE pipeline to create via IRenderDeviceUVE::CreateComputePipelineUVE()
@@ -441,6 +528,16 @@ struct PipelineBinaryDescUVE {
     bool depthTestEnabled = true;
     bool depthWriteEnabled = true;
     PipelineBlendModeUVE blendMode = PipelineBlendModeUVE::Opaque;
+
+    // Same appended-rasterizer-state tail as PipelineDescUVE: a cache-loaded pipeline must be
+    // able to express everything a compiled one can, or cache hits would silently drop state.
+    CullModeUVE cullMode = CullModeUVE::None;
+    FrontFaceUVE frontFace = FrontFaceUVE::CounterClockwise;
+    FillModeUVE fillMode = FillModeUVE::Fill;
+    bool depthBiasEnabled = false;
+    float depthBiasConstantFactor = 0.0F;
+    float depthBiasSlopeFactor = 0.0F;
+    DepthCompareUVE depthCompare = DepthCompareUVE::Less;
 };
 
 /// What happens to a render pass attachment's existing contents at the start of the pass.
@@ -467,12 +564,10 @@ enum class LoadOpUVE : std::uint8_t { Clear, Load, DontCare };
 /// render into different regions of the same window in a single frame - but it's a general
 /// RenderPassDescUVE capability, not split-view-specific, since any caller may want to render into
 /// less than the full attachment.
-struct ViewportRectUVE {
-    std::uint32_t x = 0;
-    std::uint32_t y = 0;
-    std::uint32_t width = 0;
-    std::uint32_t height = 0;
-};
+/// Implemented as Math::RectIntUVE under an RHI name: the old four-uint32 struct retired in
+/// favour of the one shared integer-rect type. Position/size are signed now; backends reject
+/// a negative or zero-size rect through the same viewport fit-check as an out-of-bounds one.
+using ViewportRectUVE = Math::RectIntUVE;
 
 struct RenderPassDescUVE {
     TextureHandleUVE colorAttachment;
@@ -482,10 +577,9 @@ struct RenderPassDescUVE {
     LoadOpUVE depthLoadOp = LoadOpUVE::Clear;
     float clearDepth = 1.0F;
     /// When set, the pass's GL viewport is this pixel rect instead of the full attachment/window
-    /// size. Must fit entirely within the target: `x + width` and `y + height` must not exceed the
-    /// attachment's (or, for the default framebuffer, the window's) dimensions. A backend rejects
-    /// an out-of-bounds rect the same way it rejects any other malformed pass descriptor, rather
-    /// than silently clamping it.
+    /// size. Must fit entirely within the target: a zero-size, negative, or out-of-bounds rect is
+    /// rejected the same way as any other malformed pass descriptor, rather than silently
+    /// clamped. See Math::ContainsUVE for the exact fit-check the backends apply.
     std::optional<ViewportRectUVE> viewportOverride;
 };
 

@@ -18,12 +18,6 @@ namespace UVE::UI {
 
 namespace {
 
-[[nodiscard]] bool IsPointInsideRectUVE(const Math::Vector2UVE& point, const Math::Vector2UVE& rectPosition,
-                                        const Math::Vector2UVE& rectSize) noexcept {
-    return point.x >= rectPosition.x && point.x <= rectPosition.x + rectSize.x && point.y >= rectPosition.y &&
-           point.y <= rectPosition.y + rectSize.y;
-}
-
 struct RankedWidgetUVE final {
     std::int32_t sortOrder = 0;
     bool hasCanvas = false;
@@ -74,8 +68,7 @@ void UIRuntimeUVE::TickUVE(Scene::IEntityManagerUVE& entityManager, const Input:
                 return;
             }
             UIQuadUVE quad{};
-            quad.positionPixels = image.positionPixels;
-            quad.sizePixels = image.sizePixels;
+            quad.rect = image.rect;
             quad.color = image.tintColor;
             quad.alpha = image.alpha;
             quad.kind = image.textureAssetGuid.value == 0U ? UIDrawItemKindUVE::SolidColor : UIDrawItemKindUVE::Image;
@@ -101,12 +94,11 @@ void UIRuntimeUVE::TickUVE(Scene::IEntityManagerUVE& entityManager, const Input:
                 button.wasClickedThisFrame = false;
                 return;
             }
-            button.isHovered = IsPointInsideRectUVE(mousePosition, button.positionPixels, button.sizePixels);
+            button.isHovered = Math::ContainsUVE(button.rect, mousePosition);
             button.wasClickedThisFrame = button.isHovered && mousePressedThisFrame;
 
             UIQuadUVE quad{};
-            quad.positionPixels = button.positionPixels;
-            quad.sizePixels = button.sizePixels;
+            quad.rect = button.rect;
             quad.color = button.isHovered ? (mouseDown ? button.pressedColor : button.hoverColor) : button.normalColor;
             quad.alpha = 1.0F;
             quad.kind = UIDrawItemKindUVE::SolidColor;
@@ -135,8 +127,8 @@ void UIRuntimeUVE::TickUVE(Scene::IEntityManagerUVE& entityManager, const Input:
             quads.reserve(glyphQuads.size());
             for (const UIGlyphQuadUVE& glyphQuad : glyphQuads) {
                 UIQuadUVE quad{};
-                quad.positionPixels = Math::Vector2UVE{glyphQuad.x0, glyphQuad.y0};
-                quad.sizePixels = Math::Vector2UVE{glyphQuad.x1 - glyphQuad.x0, glyphQuad.y1 - glyphQuad.y0};
+                quad.rect = Math::RectUVE{Math::Vector2UVE{glyphQuad.x0, glyphQuad.y0},
+                                           Math::Vector2UVE{glyphQuad.x1 - glyphQuad.x0, glyphQuad.y1 - glyphQuad.y0}};
                 quad.u0 = glyphQuad.u0;
                 quad.v0 = glyphQuad.v0;
                 quad.u1 = glyphQuad.u1;
@@ -174,10 +166,9 @@ void UIRuntimeUVE::TickUVE(Scene::IEntityManagerUVE& entityManager, const Input:
         m_drawBatch.quads.insert(m_drawBatch.quads.end(), widget.quads.begin(), widget.quads.end());
     }
     for (UIQuadUVE& quad : m_drawBatch.quads) {
-        quad.positionPixels.x = quad.positionPixels.x * m_coordinateTransform.scaleX + m_coordinateTransform.offsetX;
-        quad.positionPixels.y = quad.positionPixels.y * m_coordinateTransform.scaleY + m_coordinateTransform.offsetY;
-        quad.sizePixels.x *= m_coordinateTransform.scaleX;
-        quad.sizePixels.y *= m_coordinateTransform.scaleY;
+        quad.rect = Math::TransformUVE(quad.rect,
+                                       Math::Vector2UVE{m_coordinateTransform.scaleX, m_coordinateTransform.scaleY},
+                                       Math::Vector2UVE{m_coordinateTransform.offsetX, m_coordinateTransform.offsetY});
     }
 }
 

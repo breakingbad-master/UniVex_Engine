@@ -94,18 +94,18 @@ namespace {
         return true;
     }
     const ViewportRectUVE& rect = *renderPassDesc.viewportOverride;
-    if (rect.width == 0U || rect.height == 0U || rect.x + rect.width > targetWidth ||
-        rect.y + rect.height > targetHeight) {
+    const ViewportRectUVE targetBounds{Math::Vector2iUVE{0, 0},
+                                        Math::Vector2iUVE{static_cast<std::int32_t>(targetWidth),
+                                                          static_cast<std::int32_t>(targetHeight)}};
+    if (rect.size.x <= 0 || rect.size.y <= 0 || !Math::ContainsUVE(targetBounds, rect)) {
         UVE_ERROR("GlCommandBufferUVE: BeginRenderPassUVE viewportOverride ({}, {}, {}x{}) does not fit within "
                   "the {}x{} target",
-                  rect.x, rect.y, rect.width, rect.height, targetWidth, targetHeight);
+                  rect.position.x, rect.position.y, rect.size.x, rect.size.y, targetWidth, targetHeight);
         return false;
     }
     glEnable(GL_SCISSOR_TEST);
-    glScissor(static_cast<GLint>(rect.x), static_cast<GLint>(rect.y), static_cast<GLsizei>(rect.width),
-              static_cast<GLsizei>(rect.height));
-    glViewport(static_cast<GLint>(rect.x), static_cast<GLint>(rect.y), static_cast<GLsizei>(rect.width),
-               static_cast<GLsizei>(rect.height));
+    glScissor(rect.position.x, rect.position.y, rect.size.x, rect.size.y);
+    glViewport(rect.position.x, rect.position.y, rect.size.x, rect.size.y);
     return true;
 }
 
@@ -353,6 +353,59 @@ void GlCommandBufferUVE::BindPipelineUVE(PipelineHandleUVE pipeline) {
         case PipelineBlendModeUVE::Opaque:
             glDisable(GL_BLEND);
             break;
+    }
+    // Tier 2.1: rasterizer state from the pipeline record. Defaults reproduce pre-2.1 behavior
+    // exactly (culling off, CCW, fill, no polygon offset, LESS compare — the compare call is
+    // new but LESS is what the untouched context default always gave us).
+    switch (pipelineIt->second.cullMode) {
+        case CullModeUVE::None:
+            glDisable(GL_CULL_FACE);
+            break;
+        case CullModeUVE::Front:
+            glEnable(GL_CULL_FACE);
+            glCullFace(GL_FRONT);
+            break;
+        case CullModeUVE::Back:
+            glEnable(GL_CULL_FACE);
+            glCullFace(GL_BACK);
+            break;
+        case CullModeUVE::FrontAndBack:
+            glEnable(GL_CULL_FACE);
+            glCullFace(GL_FRONT_AND_BACK);
+            break;
+    }
+    switch (pipelineIt->second.frontFace) {
+        case FrontFaceUVE::CounterClockwise:
+            glFrontFace(GL_CCW);
+            break;
+        case FrontFaceUVE::Clockwise:
+            glFrontFace(GL_CW);
+            break;
+    }
+    switch (pipelineIt->second.fillMode) {
+        case FillModeUVE::Fill:
+            glPolygonMode(GL_FRONT_AND_BACK, GL_FILL);
+            break;
+        case FillModeUVE::Wireframe:
+            glPolygonMode(GL_FRONT_AND_BACK, GL_LINE);
+            break;
+    }
+    if (pipelineIt->second.depthBiasEnabled) {
+        glEnable(GL_POLYGON_OFFSET_FILL);
+        // NOTE the argument order: glPolygonOffset takes (slopeFactor, constantUnits).
+        glPolygonOffset(pipelineIt->second.depthBiasSlopeFactor, pipelineIt->second.depthBiasConstantFactor);
+    } else {
+        glDisable(GL_POLYGON_OFFSET_FILL);
+    }
+    switch (pipelineIt->second.depthCompare) {
+        case DepthCompareUVE::Never:          glDepthFunc(GL_NEVER);   break;
+        case DepthCompareUVE::Less:           glDepthFunc(GL_LESS);    break;
+        case DepthCompareUVE::Equal:          glDepthFunc(GL_EQUAL);   break;
+        case DepthCompareUVE::LessOrEqual:    glDepthFunc(GL_LEQUAL);  break;
+        case DepthCompareUVE::Greater:        glDepthFunc(GL_GREATER); break;
+        case DepthCompareUVE::NotEqual:       glDepthFunc(GL_NOTEQUAL); break;
+        case DepthCompareUVE::GreaterOrEqual: glDepthFunc(GL_GEQUAL);  break;
+        case DepthCompareUVE::Always:         glDepthFunc(GL_ALWAYS);  break;
     }
 }
 

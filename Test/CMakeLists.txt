@@ -29,10 +29,17 @@ add_executable(uve_core_tests
     Core/Memory/memory_manager_uve_tests.cpp
     Core/Memory/allocator_utils_uve_tests.cpp
     Core/Memory/memory_alignment_uve_tests.cpp
+    Core/Memory/std_allocator_uve_tests.cpp
     Core/Threading/job_counter_uve_tests.cpp
     Core/Threading/job_graph_uve_tests.cpp
     Core/Threading/thread_pool_uve_tests.cpp
     Core/Utilities/timer_uve_tests.cpp
+    Core/Utilities/hash_uve_tests.cpp
+    Core/Utilities/binary_buffer_uve_tests.cpp
+    Core/Containers/fixed_array_uve_tests.cpp
+    Core/Containers/small_vector_uve_tests.cpp
+    Core/Containers/handle_table_uve_tests.cpp
+    Core/Strings/string_id_uve_tests.cpp
     Core/Scheduling/frame_scheduler_uve_tests.cpp
     Core/Diagnostics/profiler_diagnostics_uve_tests.cpp
     Core/Events/event_system_uve_tests.cpp
@@ -122,11 +129,20 @@ add_executable(uve_core_tests
     Window/window_style_policy_uve_tests.cpp
     Math/vector2_uve_tests.cpp
     Math/vector3_uve_tests.cpp
+    Math/vector4_uve_tests.cpp
     Math/quaternion_uve_tests.cpp
     Math/matrix4x4_uve_tests.cpp
+    Math/matrix3x3_uve_tests.cpp
+    Math/trs_uve_tests.cpp
+    Math/color_uve_tests.cpp
+    Math/vector2i_uve_tests.cpp
+    Math/vector3i_uve_tests.cpp
+    Math/rect_uve_tests.cpp
+    Math/rect_int_uve_tests.cpp
     Math/aabb_uve_tests.cpp
     Math/plane_uve_tests.cpp
     Math/frustum_uve_tests.cpp
+    Math/scalar_uve_tests.cpp
     Retarget/retarget_names_uve_tests.cpp
     Retarget/retarget_humanoid_uve_tests.cpp
     Retarget/retarget_match_uve_tests.cpp

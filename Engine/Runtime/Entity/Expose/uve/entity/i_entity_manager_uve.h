@@ -81,6 +81,20 @@ public:
         return *(::new (slot) T(std::forward<TArgs>(args)...));
     }
 
+    /// Runtime-typed counterpart to AddComponentUVE<T>(): attaches a component of type
+    /// `componentType` (described by `typeInfo`, whose size/alignment/construct/move/destroy
+    /// must match the type) to `entity`, default-constructed in its archetype slot. The caller
+    /// fills the slot through the returned pointer (a metadata entry's assignInstance from a
+    /// factory-built instance, today). Same asserts as the typed form: `entity` is alive and
+    /// does not already have the type. What lets generic deserialization attach a component it
+    /// only knows by std::type_index.
+    [[nodiscard]] void* AddComponentUVE(EntityUVE entity, std::type_index componentType,
+                                        const ComponentTypeInfoUVE& typeInfo) {
+        void* const slot = AddComponentErased(entity, componentType, typeInfo);
+        typeInfo.constructDefault(slot);
+        return slot;
+    }
+
     /// Removes `T` from `entity`, migrating it to the new archetype (entity's current
     /// components minus `T`). Asserts `entity` is alive and currently has a `T`.
     template <typename T>

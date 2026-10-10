@@ -181,15 +181,15 @@ TEST(SceneComponentAuthoringUVETest, SetSelectedSceneComponentUVE_UIComponentsAd
         EXPECT_EQ(entityManager.GetComponentUVE<Scene::UIImageComponentUVE>(entity).textureAssetGuid.value, 0x3030U);
 
         Scene::UIButtonComponentUVE button{};
-        button.sizePixels = Math::Vector2UVE{200.0F, 48.0F};
+        button.rect.size = Math::Vector2UVE{200.0F, 48.0F};
         ASSERT_TRUE(editor.SetSelectedSceneComponentUVE(EditorSceneComponentKindUVE::UIButton, button));
-        EXPECT_FLOAT_EQ(entityManager.GetComponentUVE<Scene::UIButtonComponentUVE>(entity).sizePixels.x, 200.0F);
+        EXPECT_FLOAT_EQ(entityManager.GetComponentUVE<Scene::UIButtonComponentUVE>(entity).rect.size.x, 200.0F);
 
         ASSERT_TRUE(editor.RemoveSelectedSceneComponentUVE(EditorSceneComponentKindUVE::UIButton));
         EXPECT_FALSE(entityManager.HasComponentUVE<Scene::UIButtonComponentUVE>(entity));
         ASSERT_TRUE(editor.UndoUVE());
         EXPECT_TRUE(entityManager.HasComponentUVE<Scene::UIButtonComponentUVE>(entity));
-        EXPECT_FLOAT_EQ(entityManager.GetComponentUVE<Scene::UIButtonComponentUVE>(entity).sizePixels.x, 200.0F);
+        EXPECT_FLOAT_EQ(entityManager.GetComponentUVE<Scene::UIButtonComponentUVE>(entity).rect.size.x, 200.0F);
         ASSERT_TRUE(editor.RedoUVE());
         EXPECT_FALSE(entityManager.HasComponentUVE<Scene::UIButtonComponentUVE>(entity));
 

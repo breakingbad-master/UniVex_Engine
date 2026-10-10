@@ -15,6 +15,11 @@
 
 #include <gtest/gtest.h>
 
+#include <cstdint>
+#include <optional>
+
+#include <nlohmann/json.hpp>
+
 #include "uve/asset/asset_guid_uve.h"
 #include "uve/asset/uve_file_envelope_uve.h"
 #include "uve/logging/log_sink_uve.h"
@@ -45,6 +50,7 @@
 #include "uve/component/name_component_uve.h"
 #include "uve/component/particle_emitter_component_uve.h"
 #include "uve/component/physics_interpolation_component_uve.h"
+#include "uve/component/solid_body_component_uve.h"
 #include "uve/component/primitive_mesh_component_uve.h"
 #include "uve/component/prefab_instance_component_uve.h"
 #include "uve/component/rigid_3d_component_uve.h"
@@ -1095,10 +1101,12 @@ TEST_F(SceneSerializerUVETest, RestoreUVE_UnknownComponent_RollsBackCreatedEntit
 }
 
 TEST_F(SceneSerializerUVETest, RestoreUVE_MalformedComponentData_RollsBackCreatedEntities) {
+    // Missing keys are old-file leniency now (they load factory defaults), so malformed means a
+    // mistyped value here: the rollback mechanism is what this test is about.
     const EntityUVE existing = entityManager.CreateEntityUVE();
     const std::size_t entityCountBefore = entityManager.GetEntityCountUVE();
     const std::string payloadText =
-        R"({"entities":[{"localId":0,"components":{"NameComponentUVE":{"name":"Valid"}}},{"localId":1,"components":{"MeshComponentUVE":{"meshGuid":5}}}]})";
+        R"({"entities":[{"localId":0,"components":{"NameComponentUVE":{"name":"Valid"}}},{"localId":1,"components":{"MeshComponentUVE":{"meshGuid":"not-a-guid"}}}]})";
     const auto* const payloadBytes = reinterpret_cast<const std::byte*>(payloadText.data());
     const SceneSnapshotUVE snapshot{
         Asset::EncodeUveFileEnvelopeUVE(SceneAssetTypeUVE::Scene,
@@ -2156,7 +2164,7 @@ TEST_F(SceneSerializerUVETest, SaveThenLoad_SingleEntityWithMultipleComponents_R
     entityManager.AddComponentUVE<MeshComponentUVE>(
         entity, MeshComponentUVE{Asset::AssetGuidUVE{111}, Asset::AssetGuidUVE{222}});
     entityManager.AddComponentUVE<LightComponentUVE>(
-        entity, LightComponentUVE{Math::Vector3UVE{0.2F, 0.4F, 0.6F}, 2.5F});
+        entity, LightComponentUVE{Math::ColorUVE{0.2F, 0.4F, 0.6F}, 2.5F});
     entityManager.AddComponentUVE<Rigid3DComponentUVE>(entity, Rigid3DComponentUVE{5.0F, true});
 
     const std::filesystem::path path = "uve_scene_serializer_tests_single.uvscene";
@@ -2171,7 +2179,7 @@ TEST_F(SceneSerializerUVETest, SaveThenLoad_SingleEntityWithMultipleComponents_R
     EXPECT_EQ(loadedManager.GetComponentUVE<MeshComponentUVE>(loaded).meshGuid, Asset::AssetGuidUVE{111});
     EXPECT_EQ(loadedManager.GetComponentUVE<MeshComponentUVE>(loaded).materialGuid, Asset::AssetGuidUVE{222});
     EXPECT_FLOAT_EQ(loadedManager.GetComponentUVE<LightComponentUVE>(loaded).intensity, 2.5F);
-    const Math::Vector3UVE expectedColor{0.2F, 0.4F, 0.6F};
+    const Math::ColorUVE expectedColor{0.2F, 0.4F, 0.6F};
     EXPECT_TRUE(loadedManager.GetComponentUVE<LightComponentUVE>(loaded).color == expectedColor);
     EXPECT_FLOAT_EQ(loadedManager.GetComponentUVE<Rigid3DComponentUVE>(loaded).mass, 5.0F);
     EXPECT_TRUE(loadedManager.GetComponentUVE<Rigid3DComponentUVE>(loaded).isKinematic);
@@ -2302,15 +2310,15 @@ TEST_F(SceneSerializerUVETest, SaveThenLoad_UIComponentsUVE_RoundTripExactly) {
 
     UIImageComponentUVE image{};
     image.textureAssetGuid = Asset::AssetGuidUVE{0x4040U};
-    image.positionPixels = Math::Vector2UVE{5.0F, 6.0F};
-    image.sizePixels = Math::Vector2UVE{128.0F, 64.0F};
+    image.rect.position = Math::Vector2UVE{5.0F, 6.0F};
+    image.rect.size = Math::Vector2UVE{128.0F, 64.0F};
     image.tintColor = Math::Vector3UVE{0.9F, 0.1F, 0.5F};
     image.alpha = 0.5F;
     entityManager.AddComponentUVE<UIImageComponentUVE>(entity, image);
 
     UIButtonComponentUVE button{};
-    button.positionPixels = Math::Vector2UVE{1.0F, 2.0F};
-    button.sizePixels = Math::Vector2UVE{150.0F, 40.0F};
+    button.rect.position = Math::Vector2UVE{1.0F, 2.0F};
+    button.rect.size = Math::Vector2UVE{150.0F, 40.0F};
     button.normalColor = Math::Vector3UVE{0.1F, 0.1F, 0.1F};
     button.hoverColor = Math::Vector3UVE{0.2F, 0.2F, 0.2F};
     button.pressedColor = Math::Vector3UVE{0.3F, 0.3F, 0.3F};
@@ -2340,15 +2348,67 @@ TEST_F(SceneSerializerUVETest, SaveThenLoad_UIComponentsUVE_RoundTripExactly) {
 
     const UIImageComponentUVE& loadedImage = loadedManager.GetComponentUVE<UIImageComponentUVE>(loaded);
     EXPECT_EQ(loadedImage.textureAssetGuid.value, 0x4040U);
-    EXPECT_FLOAT_EQ(loadedImage.sizePixels.y, 64.0F);
+    EXPECT_FLOAT_EQ(loadedImage.rect.size.y, 64.0F);
     EXPECT_FLOAT_EQ(loadedImage.tintColor.y, 0.1F);
     EXPECT_FLOAT_EQ(loadedImage.alpha, 0.5F);
 
     const UIButtonComponentUVE& loadedButton = loadedManager.GetComponentUVE<UIButtonComponentUVE>(loaded);
-    EXPECT_FLOAT_EQ(loadedButton.sizePixels.x, 150.0F);
+    EXPECT_FLOAT_EQ(loadedButton.rect.size.x, 150.0F);
     EXPECT_FLOAT_EQ(loadedButton.hoverColor.x, 0.2F);
     EXPECT_TRUE(loadedButton.isHovered);
     EXPECT_FALSE(loadedButton.wasClickedThisFrame);
+
+    std::filesystem::remove(path);
+}
+
+TEST_F(SceneSerializerUVETest, MetadataPilot_CanvasWritesExactlyItsTwoPropertyKeys) {
+    // The Tier 1.5 pilot: Canvas has no hand-written JSON on either side, so this pins the
+    // generic property writer's exact output shape for it.
+    const EntityUVE entity = entityManager.CreateEntityUVE();
+    CanvasComponentUVE canvas{};
+    canvas.visible = false;
+    canvas.sortOrder = -5;
+    entityManager.AddComponentUVE<CanvasComponentUVE>(entity, canvas);
+
+    const std::optional<SceneSnapshotUVE> snapshot =
+        serializer.CaptureUVE(entityManager, {entity}, SceneAssetTypeUVE::Scene);
+    ASSERT_TRUE(snapshot.has_value());
+    const auto envelope = Asset::DecodeUveFileEnvelopeUVE(snapshot->bytes, "canvas pilot test");
+    ASSERT_TRUE(envelope.has_value());
+    const std::string payloadText(reinterpret_cast<const char*>(envelope->second.data()),
+                                 envelope->second.size());
+    const nlohmann::json payload = nlohmann::json::parse(payloadText);
+    const nlohmann::json& canvasJson =
+        payload.at("entities").at(0).at("components").at("CanvasComponentUVE");
+    EXPECT_EQ(canvasJson.size(), 2U);
+    EXPECT_EQ(canvasJson.at("visible").get<bool>(), false);
+    EXPECT_EQ(canvasJson.at("sortOrder").get<std::int32_t>(), -5);
+}
+
+TEST_F(SceneSerializerUVETest, MetadataPilot_CanvasMissingKeysLoadFactoryDefaults) {
+    // A document from before a property existed (or one that omits it) loads the factory
+    // default for the missing key - the generic reader's equivalent of the hand-written
+    // json.value(key, default) leniency.
+    nlohmann::json components = nlohmann::json::object();
+    components["CanvasComponentUVE"] = nlohmann::json::object();
+    nlohmann::json entityJson = nlohmann::json::object();
+    entityJson["localId"] = 0;
+    entityJson["components"] = std::move(components);
+    nlohmann::json payload = nlohmann::json::object();
+    payload["entities"] = nlohmann::json::array({std::move(entityJson)});
+    const std::string payloadText = payload.dump();
+    const auto* const bytes = reinterpret_cast<const std::byte*>(payloadText.data());
+    const std::vector<std::byte> payloadBytes{bytes, bytes + payloadText.size()};
+    const std::filesystem::path path = "uve_scene_serializer_tests_canvas_defaults.uvscene";
+    std::filesystem::remove(path);
+    ASSERT_TRUE(Asset::WriteUveFileUVE(path, SceneAssetTypeUVE::Scene, payloadBytes));
+
+    EntityManagerUVE loadedManager(memoryManager.GetDefaultAllocatorUVE(), eventSystem);
+    const std::vector<EntityUVE> roots = serializer.LoadUVE(loadedManager, path);
+    ASSERT_EQ(roots.size(), 1U);
+    const CanvasComponentUVE& loaded = loadedManager.GetComponentUVE<CanvasComponentUVE>(roots[0]);
+    EXPECT_TRUE(loaded.visible);
+    EXPECT_EQ(loaded.sortOrder, 0);
 
     std::filesystem::remove(path);
 }
@@ -2591,7 +2651,7 @@ TEST_F(SceneSerializerUVETest, Capture_InvalidExpandedColliderShapeFailsBeforeSn
 TEST_F(SceneSerializerUVETest, SaveThenLoad_LightComponentUVE_RoundTripsTypeRangeSpotAngle) {
     const EntityUVE entity = entityManager.CreateEntityUVE();
     LightComponentUVE light;
-    light.color = Math::Vector3UVE{0.9F, 0.8F, 0.7F};
+    light.color = Math::ColorUVE{0.9F, 0.8F, 0.7F};
     light.intensity = 3.5F;
     light.type = LightTypeUVE::Spot;
     light.range = 15.0F;
@@ -2635,7 +2695,7 @@ TEST_F(SceneSerializerUVETest, LoadUVE_OldFormatLightComponentUVEMissingNewField
     ASSERT_EQ(roots.size(), 1U);
     const LightComponentUVE& loaded = entityManager.GetComponentUVE<LightComponentUVE>(roots[0]);
 
-    EXPECT_TRUE(loaded.color == (Math::Vector3UVE{0.1F, 0.2F, 0.3F}));
+    EXPECT_TRUE(loaded.color == (Math::ColorUVE{0.1F, 0.2F, 0.3F}));
     EXPECT_FLOAT_EQ(loaded.intensity, 4.0F);
     EXPECT_EQ(loaded.type, LightTypeUVE::Directional); // default
     EXPECT_FLOAT_EQ(loaded.range, 10.0F);               // default
@@ -3042,6 +3102,78 @@ TEST_F(SceneSerializerUVETest, SaveLoadUVE_VisibilityParentIsRemappedToTheRestor
     EXPECT_FALSE(loadedManager.GetComponentUVE<VisibilityComponentUVE>(restoredFollower).visibleInHierarchy);
 
     std::filesystem::remove(path);
+}
+
+TEST_F(SceneSerializerUVETest, MetadataDiscovery_PhysicsInterpolationModeNowPersists) {
+    // PhysicsInterpolation's hand-written registration persisted only mode (the pose fields
+    // are per-frame runtime state); it migrates to a generic registration, and this pins
+    // the migration.
+    const EntityUVE entity = entityManager.CreateEntityUVE();
+    PhysicsInterpolationComponentUVE interpolation{};
+    interpolation.mode = PoseSmoothingUVE::Blended;
+    entityManager.AddComponentUVE<PhysicsInterpolationComponentUVE>(entity, interpolation);
+
+    const std::filesystem::path path = "uve_scene_serializer_tests_physics_interp.uvscene";
+    std::filesystem::remove(path);
+    ASSERT_TRUE(serializer.SaveUVE(entityManager, {entity}, path, SceneAssetTypeUVE::Scene));
+
+    EntityManagerUVE loadedManager(memoryManager.GetDefaultAllocatorUVE(), eventSystem);
+    const std::vector<EntityUVE> roots = serializer.LoadUVE(loadedManager, path);
+    ASSERT_EQ(roots.size(), 1U);
+    EXPECT_EQ(loadedManager.GetComponentUVE<PhysicsInterpolationComponentUVE>(roots[0]).mode,
+              PoseSmoothingUVE::Blended);
+
+    std::filesystem::remove(path);
+}
+
+TEST_F(SceneSerializerUVETest, MetadataDiscovery_SolidBodyRoundTrips) {
+    // SolidBody had no round-trip coverage at all; it migrates to a generic registration,
+    // so it gets a pin of its own.
+    const EntityUVE entity = entityManager.CreateEntityUVE();
+    SolidBodyComponentUVE body{};
+    body.lockMotionX = true;
+    body.lockMotionZ = true;
+    entityManager.AddComponentUVE<SolidBodyComponentUVE>(entity, body);
+
+    const std::filesystem::path path = "uve_scene_serializer_tests_solid_body.uvscene";
+    std::filesystem::remove(path);
+    ASSERT_TRUE(serializer.SaveUVE(entityManager, {entity}, path, SceneAssetTypeUVE::Scene));
+
+    EntityManagerUVE loadedManager(memoryManager.GetDefaultAllocatorUVE(), eventSystem);
+    const std::vector<EntityUVE> roots = serializer.LoadUVE(loadedManager, path);
+    ASSERT_EQ(roots.size(), 1U);
+    const SolidBodyComponentUVE& loaded = loadedManager.GetComponentUVE<SolidBodyComponentUVE>(roots[0]);
+    EXPECT_TRUE(loaded.lockMotionX);
+    EXPECT_FALSE(loaded.lockMotionY);
+    EXPECT_TRUE(loaded.lockMotionZ);
+
+    std::filesystem::remove(path);
+}
+
+TEST_F(SceneSerializerUVETest, MetadataDiscovery_MeshWritesExactlyItsThreeKeys) {
+    // The BitMask32 codec's shape pin: a migrated mask writes the plain uint32 its
+    // hand-written predecessor wrote, alongside the two asset guids.
+    const EntityUVE entity = entityManager.CreateEntityUVE();
+    MeshComponentUVE mesh{};
+    mesh.meshGuid = Asset::AssetGuidUVE{0x1111U};
+    mesh.materialGuid = Asset::AssetGuidUVE{0x2222U};
+    mesh.visibilityLayers = 0x5U;
+    entityManager.AddComponentUVE<MeshComponentUVE>(entity, mesh);
+
+    const std::optional<SceneSnapshotUVE> snapshot =
+        serializer.CaptureUVE(entityManager, {entity}, SceneAssetTypeUVE::Scene);
+    ASSERT_TRUE(snapshot.has_value());
+    const auto envelope = Asset::DecodeUveFileEnvelopeUVE(snapshot->bytes, "mesh mask test");
+    ASSERT_TRUE(envelope.has_value());
+    const std::string payloadText(reinterpret_cast<const char*>(envelope->second.data()),
+                                 envelope->second.size());
+    const nlohmann::json payload = nlohmann::json::parse(payloadText);
+    const nlohmann::json& meshJson =
+        payload.at("entities").at(0).at("components").at("MeshComponentUVE");
+    EXPECT_EQ(meshJson.size(), 3U);
+    EXPECT_EQ(meshJson.at("meshGuid").get<std::uint64_t>(), 0x1111U);
+    EXPECT_EQ(meshJson.at("materialGuid").get<std::uint64_t>(), 0x2222U);
+    EXPECT_EQ(meshJson.at("visibilityLayers").get<std::uint32_t>(), 0x5U);
 }
 
 } // namespace UVE::Scene::Tests

@@ -11,6 +11,11 @@
 
 namespace UVE::Editor {
 
+/// Default axis tags for DrawAxisVectorInputUVE (X red, Y green, Z blue, W grey).
+inline constexpr std::array<const char*, 4> kDefaultAxisNamesUVE{"X", "Y", "Z", "W"};
+/// Axis tags for a rect extent row: width/height instead of X/Y (only the first two are read).
+inline constexpr std::array<const char*, 4> kRectSizeAxisNamesUVE{"W", "H", "", ""};
+
 /// One vector field per axis, sharing the available width equally, each led by a coloured axis tag
 /// (X red, Y green, Z blue, W grey) drawn inside the field's own frame. The number is drawn after
 /// the tag and clipped to the field, so it can never spill over the box or into its neighbour -
@@ -19,11 +24,12 @@ namespace UVE::Editor {
 /// Returns true when any component changed this frame. `count` is 2, 3 or 4. The fields form one
 /// group, so ImGui::IsItemActive() and IsItemDeactivated() after the call describe the whole
 /// vector: a drag on any axis is one edit, which callers record as one undo step when it ends.
+/// `axisNames` overrides the per-axis tags (a rect extent row shows W/H instead of X/Y).
 inline bool DrawAxisVectorInputUVE(const char* const id, float* const values, const int count, const float speed,
-                                   const float minimum = 0.0F, const float maximum = 0.0F) {
+                                   const float minimum = 0.0F, const float maximum = 0.0F,
+                                   const std::array<const char*, 4>& axisNames = kDefaultAxisNamesUVE) {
     static constexpr std::array<ImU32, 4> kAxisColors{IM_COL32(214, 72, 72, 255), IM_COL32(96, 180, 72, 255),
                                                       IM_COL32(72, 128, 222, 255), IM_COL32(140, 140, 150, 255)};
-    static constexpr std::array<const char*, 4> kAxisNames{"X", "Y", "Z", "W"};
     ImGui::PushID(id);
     ImGui::BeginGroup();
     const ImGuiStyle& style = ImGui::GetStyle();
@@ -47,7 +53,7 @@ inline bool DrawAxisVectorInputUVE(const char* const id, float* const values, co
         drawList.AddRectFilled(origin, ImVec2{origin.x + tagWidth, origin.y + height},
                                kAxisColors[static_cast<std::size_t>(axis)], style.FrameRounding,
                                ImDrawFlags_RoundCornersLeft);
-        const char* const name = kAxisNames[static_cast<std::size_t>(axis)];
+        const char* const name = axisNames[static_cast<std::size_t>(axis)];
         const ImVec2 labelSize = ImGui::CalcTextSize(name);
         drawList.AddText(ImVec2{origin.x + ((tagWidth - labelSize.x) * 0.5F), origin.y + ((height - labelSize.y) * 0.5F)},
                          IM_COL32(255, 255, 255, 240), name);

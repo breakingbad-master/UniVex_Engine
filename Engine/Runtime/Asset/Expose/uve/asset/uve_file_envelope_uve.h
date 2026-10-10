@@ -59,8 +59,8 @@ struct UveFileHeaderUVE {
 /// Encodes `payload` as a universal `.uve*` binary envelope in memory: magic "UVE\0",
 /// `version uint32` (the current payload schema version), `assetType uint32`,
 /// `compressionMethod uint32` (always `0 = None`), `payloadLength uint64`, then `payload`
-/// verbatim. It is the authoritative byte layout used by both filesystem persistence and
-/// in-memory scene-history snapshots.
+/// verbatim. All header integers are little-endian. It is the authoritative byte layout used by
+/// both filesystem persistence and in-memory scene-history snapshots.
 [[nodiscard]] std::vector<std::byte> EncodeUveFileEnvelopeUVE(AssetKindUVE assetType,
                                                                const std::vector<std::byte>& payload);
 

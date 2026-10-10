@@ -110,6 +110,16 @@ struct GlDeviceStateUVE {
         bool depthWriteEnabled = true;
         PipelineBlendModeUVE blendMode = PipelineBlendModeUVE::Opaque;
 
+        // Tier 2.1: rasterizer tail mirroring PipelineDescUVE — defaults reproduce the pre-2.1
+        // effective state (no culling, CCW front, fill, no polygon offset, LESS compare).
+        CullModeUVE cullMode = CullModeUVE::None;
+        FrontFaceUVE frontFace = FrontFaceUVE::CounterClockwise;
+        FillModeUVE fillMode = FillModeUVE::Fill;
+        bool depthBiasEnabled = false;
+        float depthBiasConstantFactor = 0.0F;
+        float depthBiasSlopeFactor = 0.0F;
+        DepthCompareUVE depthCompare = DepthCompareUVE::Less;
+
         /// M5a: true for programs linked from CreateComputePipelineUVE(). Such records carry no
         /// VAO/vertex layout and no render state — GlCommandBufferUVE skips the graphics-side
         /// setup for them and DispatchUVE() requires one to be the currently bound pipeline.

@@ -1366,6 +1366,219 @@ TEST_F(VulkanRenderDeviceUVETest, DepthTestWorksInColorOnlyOffscreenPass) {
     device->DestroyShaderUVE(quadFS);
 }
 
+TEST_F(VulkanRenderDeviceUVETest, DepthCompareSelectsTheCoplanarWinner) {
+    // Tier 2.1 proof that PipelineDescUVE::depthCompare threads into the Vulkan pipeline: two
+    // pipelines identical except the compare op each render GREEN-then-RED at the SAME depth
+    // into separate offscreen targets. Less keeps the first draw (green wins); LessOrEqual
+    // lets the coplanar second draw through (red wins). Same shader, same constants — the
+    // only variable is the compare op.
+    ShaderDescUVE vertexDesc{};
+    vertexDesc.stage = ShaderStageUVE::Vertex;
+    vertexDesc.sourceCode = kDepthUniformVertexSpirvUVE;
+    ShaderDescUVE fragmentDesc{};
+    fragmentDesc.stage = ShaderStageUVE::Fragment;
+    fragmentDesc.sourceCode = kDepthUniformFragmentSpirvUVE;
+    const ShaderHandleUVE depthVS = device->CreateShaderUVE(vertexDesc);
+    const ShaderHandleUVE depthFS = device->CreateShaderUVE(fragmentDesc);
+    ASSERT_NE(depthVS, kInvalidShaderHandleUVE);
+    ASSERT_NE(depthFS, kInvalidShaderHandleUVE);
+
+    PipelineDescUVE lessDesc{};
+    lessDesc.vertexShader = depthVS;
+    lessDesc.fragmentShader = depthFS;
+    lessDesc.vertexStride = 12U;
+    lessDesc.vertexLayout.push_back(
+        VertexAttributeUVE{"POSITION", VertexAttributeFormatUVE::Float3, 0U});
+    lessDesc.depthTestEnabled = true;
+    lessDesc.depthWriteEnabled = true;
+    lessDesc.depthCompare = DepthCompareUVE::Less;
+    const PipelineHandleUVE lessPipeline = device->CreatePipelineUVE(lessDesc);
+    ASSERT_NE(lessPipeline, kInvalidPipelineHandleUVE);
+
+    PipelineDescUVE lequalDesc = lessDesc;
+    lequalDesc.depthCompare = DepthCompareUVE::LessOrEqual;
+    const PipelineHandleUVE lequalPipeline = device->CreatePipelineUVE(lequalDesc);
+    ASSERT_NE(lequalPipeline, kInvalidPipelineHandleUVE);
+
+    ShaderHandleUVE quadVS{}, quadFS{};
+    const PipelineHandleUVE texturedPipeline = CreateTexturedPipelineUVE(*device, &quadVS, &quadFS);
+    ASSERT_NE(texturedPipeline, kInvalidPipelineHandleUVE);
+
+    TextureDescUVE rtDesc{};
+    rtDesc.width = 64U;
+    rtDesc.height = 64U;
+    rtDesc.format = TextureFormatUVE::RGBA8Unorm;
+    const TextureHandleUVE lessTarget = device->CreateTextureUVE(rtDesc);
+    ASSERT_NE(lessTarget, kInvalidTextureHandleUVE);
+    const TextureHandleUVE lequalTarget = device->CreateTextureUVE(rtDesc);
+    ASSERT_NE(lequalTarget, kInvalidTextureHandleUVE);
+
+    const float triVertices[9] = {
+        -1.0F, -1.0F, 0.0F,
+         3.0F, -1.0F, 0.0F,
+        -1.0F,  3.0F, 0.0F,
+    };
+    BufferDescUVE triBufferDesc{};
+    triBufferDesc.sizeBytes = sizeof(triVertices);
+    triBufferDesc.usage = BufferUsageUVE::Vertex;
+    const BufferHandleUVE triBuffer = device->CreateBufferUVE(triBufferDesc,
+        std::span<const std::byte>(reinterpret_cast<const std::byte*>(triVertices),
+                                   sizeof(triVertices)));
+    ASSERT_NE(triBuffer, kInvalidBufferHandleUVE);
+
+    const float quadVertices[30] = {
+        -1.0F, -1.0F, 0.0F,  0.0F, 0.0F,
+         1.0F, -1.0F, 0.0F,  1.0F, 0.0F,
+        -1.0F,  1.0F, 0.0F,  0.0F, 1.0F,
+         1.0F, -1.0F, 0.0F,  1.0F, 0.0F,
+         1.0F,  1.0F, 0.0F,  1.0F, 1.0F,
+        -1.0F,  1.0F, 0.0F,  0.0F, 1.0F,
+    };
+    BufferDescUVE quadBufferDesc{};
+    quadBufferDesc.sizeBytes = sizeof(quadVertices);
+    quadBufferDesc.usage = BufferUsageUVE::Vertex;
+    const BufferHandleUVE quadBuffer = device->CreateBufferUVE(quadBufferDesc,
+        std::span<const std::byte>(reinterpret_cast<const std::byte*>(quadVertices),
+                                   sizeof(quadVertices)));
+    ASSERT_NE(quadBuffer, kInvalidBufferHandleUVE);
+
+    // Submission 1: GREEN then RED at the SAME depth through the Less pipeline.
+    {
+        auto commandBuffer = device->CreateCommandBufferUVE();
+        RenderPassDescUVE passDesc{};
+        passDesc.colorAttachment = lessTarget;
+        passDesc.colorLoadOp = LoadOpUVE::Clear;
+        passDesc.clearColor = {0.0F, 0.0F, 1.0F, 1.0F};
+        passDesc.depthLoadOp = LoadOpUVE::Clear;
+        passDesc.clearDepth = 1.0F;
+        commandBuffer->BeginRenderPassUVE(passDesc);
+        commandBuffer->BindPipelineUVE(lessPipeline);
+        commandBuffer->BindVertexBufferUVE(triBuffer);
+        commandBuffer->SetUniformVector3UVE("uColorTri", Math::Vector3UVE{0.0F, 1.0F, 0.0F});
+        commandBuffer->SetUniformFloatUVE("uDepth", 0.3F);
+        commandBuffer->SetUniformFloatUVE("uOffsetX", 0.0F);
+        commandBuffer->SetUniformFloatUVE("uOffsetY", 0.0F);
+        commandBuffer->DrawUVE(3U);
+        commandBuffer->SetUniformVector3UVE("uColorTri", Math::Vector3UVE{1.0F, 0.0F, 0.0F});
+        commandBuffer->SetUniformFloatUVE("uDepth", 0.3F);
+        commandBuffer->DrawUVE(3U);
+        commandBuffer->EndRenderPassUVE();
+        device->SubmitUVE(std::move(commandBuffer));
+    }
+    // Submission 2: the identical coplanar pair through the LessOrEqual pipeline.
+    {
+        auto commandBuffer = device->CreateCommandBufferUVE();
+        RenderPassDescUVE passDesc{};
+        passDesc.colorAttachment = lequalTarget;
+        passDesc.colorLoadOp = LoadOpUVE::Clear;
+        passDesc.clearColor = {0.0F, 0.0F, 1.0F, 1.0F};
+        passDesc.depthLoadOp = LoadOpUVE::Clear;
+        passDesc.clearDepth = 1.0F;
+        commandBuffer->BeginRenderPassUVE(passDesc);
+        commandBuffer->BindPipelineUVE(lequalPipeline);
+        commandBuffer->BindVertexBufferUVE(triBuffer);
+        commandBuffer->SetUniformVector3UVE("uColorTri", Math::Vector3UVE{0.0F, 1.0F, 0.0F});
+        commandBuffer->SetUniformFloatUVE("uDepth", 0.3F);
+        commandBuffer->SetUniformFloatUVE("uOffsetX", 0.0F);
+        commandBuffer->SetUniformFloatUVE("uOffsetY", 0.0F);
+        commandBuffer->DrawUVE(3U);
+        commandBuffer->SetUniformVector3UVE("uColorTri", Math::Vector3UVE{1.0F, 0.0F, 0.0F});
+        commandBuffer->SetUniformFloatUVE("uDepth", 0.3F);
+        commandBuffer->DrawUVE(3U);
+        commandBuffer->EndRenderPassUVE();
+        device->SubmitUVE(std::move(commandBuffer));
+    }
+    // Submission 3: show the Less target.
+    {
+        auto commandBuffer = device->CreateCommandBufferUVE();
+        RenderPassDescUVE passDesc{};
+        passDesc.colorLoadOp = LoadOpUVE::Clear;
+        passDesc.clearColor = {0.0F, 0.0F, 0.0F, 1.0F};
+        passDesc.depthLoadOp = LoadOpUVE::Clear;
+        commandBuffer->BeginRenderPassUVE(passDesc);
+        commandBuffer->BindPipelineUVE(texturedPipeline);
+        commandBuffer->BindVertexBufferUVE(quadBuffer);
+        commandBuffer->BindTextureUVE(lessTarget, 0U);
+        commandBuffer->DrawUVE(6U);
+        commandBuffer->EndRenderPassUVE();
+        device->SubmitUVE(std::move(commandBuffer));
+    }
+    device->PresentUVE();
+    ASSERT_TRUE(device->IsUsableUVE());
+
+    std::vector<std::byte> pixels(1280U * 720U * 4U);
+    std::uint32_t width = 0;
+    std::uint32_t height = 0;
+    ASSERT_TRUE(device->ReadbackLatestPresentedImageUVE(pixels, width, height));
+    if (width == 0U || height == 0U) {
+        GTEST_SKIP() << "driver reported a zero-sized extent; coverage math needs pixels";
+    }
+
+    const std::string_view name = device->GetBackendNameUVE();
+    if (name == "Vulkan (M2c textures+staging)") {
+        const auto center = ChannelAtNdcUVE(pixels, width, height, 0.0F, 0.0F);
+        EXPECT_GT(center[0], 240); // fallback white, frame intact
+        EXPECT_GT(center[1], 240);
+        EXPECT_GT(center[2], 240);
+    } else {
+        const auto center = ChannelAtNdcUVE(pixels, width, height, 0.0F, 0.0F);
+        EXPECT_LT(center[0], 80);
+        EXPECT_GT(center[1], 200);
+        EXPECT_LT(center[2], 80) << "Less must reject the coplanar red redraw - "
+            "got (" << center[0] << "," << center[1] << "," << center[2] << ")";
+    }
+
+    // Submission 4: show the LessOrEqual target.
+    {
+        auto commandBuffer = device->CreateCommandBufferUVE();
+        RenderPassDescUVE passDesc{};
+        passDesc.colorLoadOp = LoadOpUVE::Clear;
+        passDesc.clearColor = {0.0F, 0.0F, 0.0F, 1.0F};
+        passDesc.depthLoadOp = LoadOpUVE::Clear;
+        commandBuffer->BeginRenderPassUVE(passDesc);
+        commandBuffer->BindPipelineUVE(texturedPipeline);
+        commandBuffer->BindVertexBufferUVE(quadBuffer);
+        commandBuffer->BindTextureUVE(lequalTarget, 0U);
+        commandBuffer->DrawUVE(6U);
+        commandBuffer->EndRenderPassUVE();
+        device->SubmitUVE(std::move(commandBuffer));
+    }
+    device->PresentUVE();
+    ASSERT_TRUE(device->IsUsableUVE());
+
+    std::uint32_t width2 = 0;
+    std::uint32_t height2 = 0;
+    ASSERT_TRUE(device->ReadbackLatestPresentedImageUVE(pixels, width2, height2));
+    if (width2 == 0U || height2 == 0U) {
+        GTEST_SKIP() << "driver reported a zero-sized extent; coverage math needs pixels";
+    }
+
+    if (name == "Vulkan (M2c textures+staging)") {
+        const auto center = ChannelAtNdcUVE(pixels, width2, height2, 0.0F, 0.0F);
+        EXPECT_GT(center[0], 240); // fallback white, frame intact
+        EXPECT_GT(center[1], 240);
+        EXPECT_GT(center[2], 240);
+    } else {
+        const auto center = ChannelAtNdcUVE(pixels, width2, height2, 0.0F, 0.0F);
+        EXPECT_GT(center[0], 200);
+        EXPECT_LT(center[1], 80);
+        EXPECT_LT(center[2], 80) << "LessOrEqual must accept the coplanar red redraw - "
+            "got (" << center[0] << "," << center[1] << "," << center[2] << ")";
+    }
+
+    device->DestroyBufferUVE(triBuffer);
+    device->DestroyBufferUVE(quadBuffer);
+    device->DestroyTextureUVE(lessTarget);
+    device->DestroyTextureUVE(lequalTarget);
+    device->DestroyPipelineUVE(lessPipeline);
+    device->DestroyPipelineUVE(lequalPipeline);
+    device->DestroyPipelineUVE(texturedPipeline);
+    device->DestroyShaderUVE(depthVS);
+    device->DestroyShaderUVE(depthFS);
+    device->DestroyShaderUVE(quadVS);
+    device->DestroyShaderUVE(quadFS);
+}
+
 TEST_F(VulkanRenderDeviceUVETest, NonAttachableTexturePassSkipsButTheFrameSurvives) {
     // RGBA16Float is a legal SAMPLING texture but never a legal render target in M2d (the
     // pipeline contract is the swapchain's format). The offscreen pass degrades to a one-shot

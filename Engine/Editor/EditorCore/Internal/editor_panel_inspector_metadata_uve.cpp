@@ -53,6 +53,8 @@
 #include "uve/component/visibility_component_uve.h"
 #include "uve/core/engine_project_settings_uve.h"
 #include "uve/entity/i_entity_manager_uve.h"
+#include "uve/math/color_uve.h"
+#include "uve/math/rect_uve.h"
 #include "uve/math/vector2_uve.h"
 #include "uve/math/vector3_uve.h"
 #include "uve/objects/3d/lod_group_3d_uve.h"
@@ -84,7 +86,7 @@ constexpr std::array<const char*, 3> kCustomDrawnComponentTypeIdsUVE{
     "component.hierarchy",
 };
 
-[[nodiscard]] bool IsCustomDrawnUVE(const std::string& typeId) noexcept {
+[[nodiscard]] bool IsCustomDrawnUVE(std::string_view typeId) noexcept {
     return std::find_if(kCustomDrawnComponentTypeIdsUVE.cbegin(), kCustomDrawnComponentTypeIdsUVE.cend(),
                         [&typeId](const char* const candidate) { return typeId == candidate; }) !=
            kCustomDrawnComponentTypeIdsUVE.cend();
@@ -93,9 +95,9 @@ constexpr std::array<const char*, 3> kCustomDrawnComponentTypeIdsUVE{
 /// "component.rigid_body" becomes "rigid-body": the stable drawer id the registry orders and the
 /// Inspector's search filter matches on. Derived rather than declared so an id can never drift
 /// from the type it belongs to.
-[[nodiscard]] std::string DrawerIdForTypeIdUVE(const std::string& typeId) {
+[[nodiscard]] std::string DrawerIdForTypeIdUVE(std::string_view typeId) {
     constexpr std::string_view prefix = "component.";
-    std::string id = typeId.rfind(prefix, 0U) == 0U ? typeId.substr(prefix.size()) : typeId;
+    std::string id{typeId.rfind(prefix, 0U) == 0U ? typeId.substr(prefix.size()) : typeId};
     std::replace(id.begin(), id.end(), '_', '-');
     return id;
 }
@@ -266,7 +268,7 @@ void EditorUVE::RegisterMetadataInspectorDrawersUVE() {
         // The snapshot is a copy; register against the registry's own stable entry, because the
         // drawer callback and any history entry hold a pointer to it.
         const TypeMetadataEntryUVE* const stable = registry.FindTypeUVE(snapshotEntry.typeId);
-        if (stable != nullptr && !IsCustomDrawnUVE(stable->typeId)) {
+        if (stable != nullptr && !IsCustomDrawnUVE(stable->typeId.ToStringUVE())) {
             entries.push_back(stable);
         }
     }
@@ -275,7 +277,7 @@ void EditorUVE::RegisterMetadataInspectorDrawersUVE() {
                          if (left->order != right->order) {
                              return left->order < right->order;
                          }
-                         return left->typeId < right->typeId;
+                         return left->typeId.ToStringUVE() < right->typeId.ToStringUVE();
                      });
 
     // A nested type is drawn by the first of its hosts the entity carries, and on its own when it
@@ -283,7 +285,7 @@ void EditorUVE::RegisterMetadataInspectorDrawersUVE() {
     // it, so it is left out of the list.
     const auto findHostsUVE = [&entries](const TypeMetadataEntryUVE& entry) {
         std::vector<const TypeMetadataEntryUVE*> hosts;
-        for (const std::string& hostId : entry.nestedUnderTypeIds) {
+        for (const Strings::StringIdUVE& hostId : entry.nestedUnderTypeIds) {
             const auto host = std::find_if(entries.cbegin(), entries.cend(),
                                            [&hostId](const TypeMetadataEntryUVE* candidate) {
                                                return candidate->typeId == hostId;
@@ -314,7 +316,7 @@ void EditorUVE::RegisterMetadataInspectorDrawersUVE() {
         }
         const std::vector<const TypeMetadataEntryUVE*> hosts = findHostsUVE(*entry);
         static_cast<void>(m_inspectorDrawerRegistry.RegisterDrawerUVE(InspectorDrawerEntryUVE{
-            DrawerIdForTypeIdUVE(entry->typeId),
+            DrawerIdForTypeIdUVE(entry->typeId.ToStringUVE()),
             [this, entry, hosts](const Scene::EntityUVE entity) {
                 const Scene::IEntityManagerUVE& entityManager = m_services->GetEntityManagerUVE();
                 return IsDocumentEntityUVE(entity) && entityManager.HasComponentUVE(entity, entry->typeIndex) &&
@@ -338,7 +340,7 @@ void EditorUVE::RegisterMetadataInspectorDrawersUVE() {
         }
         if (!group.empty()) {
             static_cast<void>(
-                m_inspectorDrawerRegistry.SetDrawerGroupUVE(DrawerIdForTypeIdUVE(entry->typeId), std::move(group)));
+                m_inspectorDrawerRegistry.SetDrawerGroupUVE(DrawerIdForTypeIdUVE(entry->typeId.ToStringUVE()), std::move(group)));
         }
     }
     if (!transformRegistered) {
@@ -357,7 +359,7 @@ void EditorUVE::DrawMetadataComponentDrawerUVE(const Scene::EntityUVE entity, co
     }
     const void* const instance = entityManager.GetComponentPointerUVE(entity, entry.typeIndex);
 
-    ImGui::PushID(entry.typeId.c_str());
+    ImGui::PushID(entry.typeId.ToCStringUVE());
     if (entry.presentedInline) {
         ImGui::Spacing();
         DrawMetadataPropertyRowsUVE(entry, instance);
@@ -370,8 +372,8 @@ void EditorUVE::DrawMetadataComponentDrawerUVE(const Scene::EntityUVE entity, co
     // reset the section's open state when the value changes.
     const std::string sectionTitle{entry.sectionTitle != nullptr ? entry.sectionTitle(instance)
                                                                  : entry.displayName.c_str()};
-    const std::string header = sectionTitle + "###" + entry.typeId;
-    const bool sectionOpen = DrawInspectorFoldUVE(header.c_str(), "section:" + entry.typeId, true, true, 0);
+    const std::string header = sectionTitle + "###" + std::string(entry.typeId.ToStringUVE());
+    const bool sectionOpen = DrawInspectorFoldUVE(header.c_str(), "section:" + std::string(entry.typeId.ToStringUVE()), true, true, 0);
     DrawInspectorSectionMenuUVE(&entry, sectionTitle.c_str());
     if (sectionOpen) {
         DrawMetadataPropertyRowsUVE(entry, instance);
@@ -394,10 +396,10 @@ void EditorUVE::DrawMetadataComponentDrawerUVE(const Scene::EntityUVE entity, co
                             })) {
                 continue;
             }
-            ImGui::PushID(child->typeId.c_str());
+            ImGui::PushID(child->typeId.ToCStringUVE());
             constexpr ImGuiTreeNodeFlags kNestedFlags = ImGuiTreeNodeFlags_SpanAvailWidth |
                                                         ImGuiTreeNodeFlags_FramePadding;
-            if (DrawInspectorFoldUVE(child->displayName.c_str(), "nested:" + child->typeId, true, false,
+            if (DrawInspectorFoldUVE(child->displayName.c_str(), "nested:" + std::string(child->typeId.ToStringUVE()), true, false,
                                      kNestedFlags)) {
                 DrawMetadataPropertyRowsUVE(*child, entityManager.GetComponentPointerUVE(entity, child->typeIndex));
                 ImGui::TreePop();
@@ -447,7 +449,7 @@ void EditorUVE::DrawMetadataPropertyRowsUVE(const TypeMetadataEntryUVE& entry, c
                 constexpr ImGuiTreeNodeFlags kGroupFlags = ImGuiTreeNodeFlags_SpanAvailWidth |
                                                            ImGuiTreeNodeFlags_FramePadding;
                 const std::string groupId = property.section + "##group-" + property.section;
-                groupOpen = DrawInspectorFoldUVE(groupId.c_str(), "group:" + entry.typeId + "/" + property.section,
+                groupOpen = DrawInspectorFoldUVE(groupId.c_str(), "group:" + std::string(entry.typeId.ToStringUVE()) + "/" + property.section,
                                                  false, false, kGroupFlags);
             }
         }
@@ -568,6 +570,17 @@ void EditorUVE::DrawMetadataPropertyRowUVE(const TypeMetadataEntryUVE& entry,
         const bool changed = DrawAxisVectorInputUVE("##value", &value.x, 3, RangeStepUVE(property, 0.01F),
                                                     RangeMinimumUVE(property), RangeMaximumUVE(property));
         edited = ApplyContinuousPropertyEditUVE(entry, property, changed, &value) || edited;
+    } else if (property.typeId == Scene::kPropertyTypeRectUVE) {
+        Math::RectUVE value{};
+        property.getValue(instance, &value);
+        bool changed =
+            DrawAxisVectorInputUVE("##rectPosition", &value.position.x, 2, RangeStepUVE(property, 0.01F),
+                                 RangeMinimumUVE(property), RangeMaximumUVE(property));
+        changed = DrawAxisVectorInputUVE("##rectSize", &value.size.x, 2, RangeStepUVE(property, 0.01F),
+                                         RangeMinimumUVE(property), RangeMaximumUVE(property),
+                                         kRectSizeAxisNamesUVE) ||
+                  changed;
+        edited = ApplyContinuousPropertyEditUVE(entry, property, changed, &value) || edited;
     } else if (property.typeId == Scene::kPropertyTypeColorUVE) {
         // Shown live while the picker is open, recorded as one undo step when it closes.
         Math::Vector3UVE value{};
@@ -576,6 +589,26 @@ void EditorUVE::DrawMetadataPropertyRowUVE(const TypeMetadataEntryUVE& entry,
         const ColorFieldEventUVE event =
             DrawColorFieldUVE("##value", property.displayName.c_str(), color, false, m_colorPickerPreferences);
         const Math::Vector3UVE picked{color.r, color.g, color.b};
+        if (event == ColorFieldEventUVE::Edited) {
+            static_cast<void>(PreviewSelectedComponentPropertyUVE(entry, property, &picked));
+        } else if (event == ColorFieldEventUVE::Committed) {
+            static_cast<void>(PreviewSelectedComponentPropertyUVE(entry, property, &picked));
+            edited = CommitComponentPropertyPreviewUVE();
+        } else if (event == ColorFieldEventUVE::Cancelled) {
+            static_cast<void>(CancelComponentPropertyPreviewUVE());
+        }
+    } else if (property.typeId == Scene::kPropertyTypeLinearColorUVE) {
+        // Linear-stored twin of the Color branch above: the picker edits in display space, so the
+        // stored value is converted out for display and the picked value converted back to linear
+        // on the way in. Same live-preview/one-undo-step session semantics.
+        Math::ColorUVE value{};
+        property.getValue(instance, &value);
+        const Math::Vector3UVE shown = Math::DisplayFromColorUVE(value);
+        EditorColorUVE color{shown.x, shown.y, shown.z, 1.0F};
+        const ColorFieldEventUVE event =
+            DrawColorFieldUVE("##value", property.displayName.c_str(), color, false, m_colorPickerPreferences);
+        const Math::ColorUVE picked =
+            Math::ColorFromDisplayUVE(Math::Vector3UVE{color.r, color.g, color.b});
         if (event == ColorFieldEventUVE::Edited) {
             static_cast<void>(PreviewSelectedComponentPropertyUVE(entry, property, &picked));
         } else if (event == ColorFieldEventUVE::Committed) {
@@ -711,7 +744,7 @@ void EditorUVE::DrawMetadataPropertyRowUVE(const TypeMetadataEntryUVE& entry,
     } else {
         // A value type nothing here knows how to draw. Saying so is better than drawing something
         // that looks editable and silently is not.
-        ImGui::TextDisabled("No editor for type \"%s\".", property.typeId.c_str());
+        ImGui::TextDisabled("No editor for type \"%s\".", property.typeId.ToCStringUVE());
     }
     ImGui::EndDisabled();
     static_cast<void>(edited);
@@ -1604,7 +1637,9 @@ bool EditorUVE::ResetSelectedComponentPropertyUVE(const TypeMetadataEntryUVE& en
                          property.typeId == Scene::kPropertyTypeBitMask32UVE ||
                          property.typeId == Scene::kPropertyTypeVector2UVE ||
                          property.typeId == Scene::kPropertyTypeVector3UVE ||
+                         property.typeId == Scene::kPropertyTypeRectUVE ||
                          property.typeId == Scene::kPropertyTypeColorUVE ||
+                         property.typeId == Scene::kPropertyTypeLinearColorUVE ||
                          property.typeId == Scene::kPropertyTypeQuaternionUVE;
     if (!trivial) {
         return false;

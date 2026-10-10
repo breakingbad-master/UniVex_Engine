@@ -114,4 +114,19 @@ TEST(FrameSchedulerUVETest, ExecuteUVE_RejectsEmptyGraphBeforeSubmittingWork) {
     EXPECT_EQ(result.taskCount, 0U);
 }
 
+TEST(FrameTaskGraphUVETest, AddTaskUVE_RejectsTaskBeyondCapacity) {
+    FrameTaskGraphUVE graph;
+    for (std::size_t index = 0U; index < FrameTaskGraphUVE::kMaximumTasksUVE; ++index) {
+        ASSERT_TRUE(graph.AddTaskUVE(MakeTaskUVE(static_cast<FrameTaskIdUVE>(index + 1U), "task", {}, [] {}))
+                        .IsAcceptedUVE())
+            << "task index " << index;
+    }
+    EXPECT_EQ(graph.GetTaskCountUVE(), FrameTaskGraphUVE::kMaximumTasksUVE);
+
+    const FrameTaskGraphMutationResultUVE overflow =
+        graph.AddTaskUVE(MakeTaskUVE(1000000U, "overflow", {}, [] {}));
+    EXPECT_EQ(overflow.code, FrameTaskGraphMutationCodeUVE::CapacityExceeded);
+    EXPECT_EQ(graph.GetTaskCountUVE(), FrameTaskGraphUVE::kMaximumTasksUVE);
+}
+
 } // namespace UVE::Core

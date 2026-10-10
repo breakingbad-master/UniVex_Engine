@@ -1658,7 +1658,7 @@ TEST(EngineCoreUVETest, CameraSystem_ReachableAndComputesViewProjectionAfterInit
     engine.Shutdown();
 }
 
-TEST(EngineCoreUVETest, LightSystem_ReachableAndReturnsSentinelWithNoLightEntityAfterInit) {
+TEST(EngineCoreUVETest, LightSystem_ReachableAndReturnsEmptyListWithNoLightEntityAfterInit) {
     EngineCoreUVE engine(MakeTestConfigUVE());
     engine.Init();
     ASSERT_TRUE(engine.Load());
@@ -1666,9 +1666,8 @@ TEST(EngineCoreUVETest, LightSystem_ReachableAndReturnsSentinelWithNoLightEntity
     Render::ILightSystemUVE& lightSystem = engine.GetServicesUVE().GetLightSystemUVE();
     const Render::LightListUVE lights =
         lightSystem.ExtractActiveLightsUVE(engine.GetServicesUVE().GetEntityManagerUVE());
-    for (const Render::LightDataUVE& slot : lights) {
-        EXPECT_FLOAT_EQ(slot.intensity, 0.0F);
-    }
+    EXPECT_TRUE(lights.EmptyUVE());
+    EXPECT_EQ(lights.SizeUVE(), 0U);
 
     engine.Shutdown();
 }
@@ -3664,14 +3663,15 @@ TEST(EngineCoreUVETest, WindowedMode_UIOverlayRendersAuthoredUIAndRegistersAReal
 
     const Scene::EntityUVE imageEntity = entityManager.CreateEntityUVE();
     entityManager.AddComponentUVE<Scene::UIImageComponentUVE>(
-        imageEntity, Scene::UIImageComponentUVE{Asset::AssetGuidUVE{}, Math::Vector2UVE{10.0F, 10.0F},
-                                                 Math::Vector2UVE{20.0F, 20.0F}, Math::Vector3UVE{0.90F, 0.10F, 0.10F},
-                                                 1.0F});
+        imageEntity, Scene::UIImageComponentUVE{Asset::AssetGuidUVE{},
+                                                 Math::RectUVE{Math::Vector2UVE{10.0F, 10.0F},
+                                                               Math::Vector2UVE{20.0F, 20.0F}},
+                                                 Math::Vector3UVE{0.90F, 0.10F, 0.10F}, 1.0F});
 
     const Scene::EntityUVE buttonEntity = entityManager.CreateEntityUVE();
     Scene::UIButtonComponentUVE buttonComponent{};
-    buttonComponent.positionPixels = Math::Vector2UVE{60.0F, 10.0F};
-    buttonComponent.sizePixels = Math::Vector2UVE{40.0F, 20.0F};
+    buttonComponent.rect.position = Math::Vector2UVE{60.0F, 10.0F};
+    buttonComponent.rect.size = Math::Vector2UVE{40.0F, 20.0F};
     buttonComponent.normalColor = Math::Vector3UVE{0.10F, 0.85F, 0.10F};
     buttonComponent.hoverColor = Math::Vector3UVE{0.10F, 0.10F, 0.85F};
     buttonComponent.pressedColor = Math::Vector3UVE{0.85F, 0.85F, 0.10F};
@@ -3814,7 +3814,7 @@ TEST(EngineCoreUVETest, SetEditorViewportRegionUVE_DrivesRenderTargetToRegionNot
 
     // A region clearly smaller than, and offset within, the window - proves the target tracks the
     // region's own dimensions ("very narrow"/"resized side panels" editor layouts), not the window.
-    engine.SetEditorViewportRegionUVE(Render::ViewportRectUVE{20U, 10U, 90U, 60U});
+    engine.SetEditorViewportRegionUVE(Render::ViewportRectUVE{Math::Vector2iUVE{20, 10}, Math::Vector2iUVE{90, 60}});
     engine.TickFrameUVE();
     const Render::Renderer3DFrameDiagnosticsUVE regionDrivenDiagnostics =
         services.GetRenderer3DUVE().GetLastFrameDiagnosticsUVE();
@@ -3915,7 +3915,7 @@ TEST(EngineCoreUVETest, SetEditorViewportRegionUVE_HandlesVeryNarrowAndVeryWideR
     engine.SetActiveCameraUVE(camera);
 
     // Very narrow: a 10px-wide sliver on the right (e.g. a Scene panel dragged nearly closed).
-    engine.SetEditorViewportRegionUVE(Render::ViewportRectUVE{180U, 0U, 10U, 150U});
+    engine.SetEditorViewportRegionUVE(Render::ViewportRectUVE{Math::Vector2iUVE{180, 0}, Math::Vector2iUVE{10, 150}});
     engine.TickFrameUVE();
     const Render::Renderer3DFrameDiagnosticsUVE narrowDiagnostics =
         services.GetRenderer3DUVE().GetLastFrameDiagnosticsUVE();
@@ -3924,7 +3924,7 @@ TEST(EngineCoreUVETest, SetEditorViewportRegionUVE_HandlesVeryNarrowAndVeryWideR
 
     // Very wide/short: the full width, a thin 8px strip in height (e.g. a bottom dock nearly
     // maximized over the viewport).
-    engine.SetEditorViewportRegionUVE(Render::ViewportRectUVE{0U, 0U, 200U, 8U});
+    engine.SetEditorViewportRegionUVE(Render::ViewportRectUVE{Math::Vector2iUVE{0, 0}, Math::Vector2iUVE{200, 8}});
     engine.TickFrameUVE();
     const Render::Renderer3DFrameDiagnosticsUVE wideDiagnostics =
         services.GetRenderer3DUVE().GetLastFrameDiagnosticsUVE();

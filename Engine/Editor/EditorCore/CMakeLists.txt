@@ -185,6 +185,6 @@ target_include_directories(uve_editor PRIVATE "${_uve_editor_generated_dir}")
 target_compile_features(uve_editor PUBLIC cxx_std_23)
 target_link_libraries(uve_editor
     PUBLIC uve_core uve_plugins uve_retarget
-    PRIVATE uve_editor_imgui nlohmann_json::nlohmann_json glfw
+    PRIVATE uve_editor_imgui nlohmann_json::nlohmann_json glfw uve_strings
 )
 uve_set_warnings(uve_editor)

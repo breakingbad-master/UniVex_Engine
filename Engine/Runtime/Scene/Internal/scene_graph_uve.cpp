@@ -15,6 +15,7 @@
 
 #include "uve/logging/assert_uve.h"
 #include "uve/math/quaternion_uve.h"
+#include "uve/math/trs_uve.h"
 #include "uve/math/vector3_uve.h"
 #include "uve/platform/platform_uve.h"
 #include "uve/component/hierarchy_component_uve.h"
@@ -476,11 +477,13 @@ void SceneGraphUVE::UpdateUVE(IEntityManagerUVE& entityManager) {
                 } else {
                     const WorldTransformComponentUVE& parentWorld =
                         entityManager.GetComponentUVE<WorldTransformComponentUVE>(item.parent);
-                    candidate.worldScale = parentWorld.worldScale * local.localScale;
-                    candidate.worldRotation = Math::MultiplyUVE(parentWorld.worldRotation, local.localRotation);
-                    candidate.worldPosition =
-                        parentWorld.worldPosition + Math::RotateVectorUVE(parentWorld.worldRotation,
-                                                                            parentWorld.worldScale * local.localPosition);
+                    const Math::TrsUVE composed = Math::ComposeUVE(
+                        Math::TrsUVE{parentWorld.worldPosition, parentWorld.worldRotation,
+                                     parentWorld.worldScale},
+                        Math::TrsUVE{local.localPosition, local.localRotation, local.localScale});
+                    candidate.worldPosition = composed.translation;
+                    candidate.worldRotation = composed.rotation;
+                    candidate.worldScale = composed.scale;
                 }
                 publishedValid = IsFiniteWorldTransformUVE(candidate);
                 if (publishedValid) {
