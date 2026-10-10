@@ -265,6 +265,10 @@ struct VulkanRenderDeviceUVE::ImplUVE {
     // VkFormatProperties. Record the exact feature bits enabled on the logical device so the
     // RHI only advertises compressed targets that it may legally create and sample.
     bool textureCompressionBCEnabled = false;
+    // Tier 2.2: standalone sampler state. maxSamplerAnisotropy is the physical device limit
+    // (queried once at init); samplerAnisotropyEnabled mirrors the optional device feature.
+    float maxSamplerAnisotropy = 1.0F;
+    bool samplerAnisotropyEnabled = false;
     bool textureCompressionETC2Enabled = false;
     bool textureCompressionASTCLdrEnabled = false;
 
@@ -581,6 +585,9 @@ struct VulkanRenderDeviceUVE::ImplUVE {
         std::map<std::string, VkDescriptorSet> cachedTextureSets;
         std::map<std::string, std::vector<std::uint32_t>> cachedTextureTextures;
         std::map<std::string, std::vector<std::uint32_t>> cachedStorageBuffers;
+        // Tier 2.2: the tuple's per-slot sampler values (0 = device default) — DestroySamplerUVE
+        // searches this exactly like DestroyTextureUVE searches cachedTextureTextures.
+        std::map<std::string, std::vector<std::uint32_t>> cachedTextureSamplers;
     };
     // M2c: texture records live in DEVICE_LOCAL images, uploaded through a HOST_VISIBLE
     // staging buffer + one-shot transfer submission (upload-time queueWaitIdle keeps every
@@ -614,6 +621,14 @@ struct VulkanRenderDeviceUVE::ImplUVE {
     };
     std::unordered_map<std::uint32_t, TextureRecordUVE> textures;
     std::uint32_t fallbackTextureValue = 0U; // 1x1 opaque-white; used for unbound/destroyed slots
+
+    /// Tier 2.2: standalone sampler objects bound per texture slot (BindSamplerUVE). Shares the
+    /// one nextHandleValue domain with every other kind (0 stays never-live, like textures).
+    struct SamplerRecordUVE {
+        VkSampler sampler = VK_NULL_HANDLE;
+        SamplerDescUVE desc{};
+    };
+    std::unordered_map<std::uint32_t, SamplerRecordUVE> samplers;
 
     // --- M2d dynamic-rendering pass helpers (used only when useDynamicRendering) ---------
     // Opens the swapchain rendering instance for the frame's acquired image; the very first
@@ -681,6 +696,9 @@ struct VulkanRenderDeviceUVE::ImplUVE {
     static constexpr std::uint32_t kWarnedStorageImageTransitionUVE = 1U << 22U; // M5b
     static constexpr std::uint32_t kWarnedIndirectBufferUVE = 1U << 23U; // CS7
     static constexpr std::uint32_t kWarnedStorageImageCompressedUVE = 1U << 24U; // texture compression
+    static constexpr std::uint32_t kWarnedUnknownSamplerUVE = 1U << 25U; // Tier 2.2
+    static constexpr std::uint32_t kWarnedSamplerSlotOobUVE = 1U << 26U; // Tier 2.2
+    static constexpr std::uint32_t kWarnedSamplerAnisoClampedUVE = 1U << 27U; // Tier 2.2
     std::uint32_t replayWarningsEmitted = 0U;
 
     // Replay-local pipeline binding state (valid only inside PresentUVE()'s record window).
@@ -1489,9 +1507,12 @@ bool VulkanRenderDeviceUVE::ImplUVE::InitializeUVE() {
     enabledFeatures.textureCompressionBC = availableFeatures.textureCompressionBC;
     enabledFeatures.textureCompressionETC2 = availableFeatures.textureCompressionETC2;
     enabledFeatures.textureCompressionASTC_LDR = availableFeatures.textureCompressionASTC_LDR;
+    enabledFeatures.samplerAnisotropy = availableFeatures.samplerAnisotropy;
     textureCompressionBCEnabled = enabledFeatures.textureCompressionBC == VK_TRUE;
     textureCompressionETC2Enabled = enabledFeatures.textureCompressionETC2 == VK_TRUE;
     textureCompressionASTCLdrEnabled = enabledFeatures.textureCompressionASTC_LDR == VK_TRUE;
+    samplerAnisotropyEnabled = enabledFeatures.samplerAnisotropy == VK_TRUE;
+    maxSamplerAnisotropy = deviceProperties.limits.maxSamplerAnisotropy;
 
     // M2d probe: is core dynamic rendering available on this physical device+instance?
     // (Instance apiVersion was already clamped at 1.3 above; the feature query needs the
@@ -1953,6 +1974,11 @@ void VulkanRenderDeviceUVE::ImplUVE::DestroyAllResourcesUVE() {
         vk.vkDestroySampler(device, fixedSampler, nullptr);
         fixedSampler = VK_NULL_HANDLE;
     }
+    for (auto& [samplerValue, samplerRecord] : samplers) {
+        static_cast<void>(samplerValue);
+        vk.vkDestroySampler(device, samplerRecord.sampler, nullptr);
+    }
+    samplers.clear();
     if (fallbackStorageBuffer != VK_NULL_HANDLE) {
         vk.vkDestroyBuffer(device, fallbackStorageBuffer, nullptr);
         fallbackStorageBuffer = VK_NULL_HANDLE;
@@ -2169,6 +2195,9 @@ public:
     }
     void BindTextureUVE(const TextureHandleUVE texture, const std::uint32_t slot) override {
         m_commands.emplace_back(BindTextureCommandUVE{texture, slot});
+    }
+    void BindSamplerUVE(const SamplerHandleUVE sampler, const std::uint32_t slot) override {
+        m_commands.emplace_back(BindSamplerCommandUVE{sampler, slot});
     }
     void BindUniformBufferUVE(const BufferHandleUVE buffer, const std::uint32_t slot) override {
         m_commands.emplace_back(BindUniformBufferCommandUVE{buffer, slot});
@@ -2917,6 +2946,74 @@ TextureHandleUVE VulkanRenderDeviceUVE::CreateTextureUVE(const TextureDescUVE& d
     return TextureHandleUVE{handleValue};
 }
 
+SamplerHandleUVE VulkanRenderDeviceUVE::CreateSamplerUVE(const SamplerDescUVE& desc) {
+    ImplUVE& impl = *m_impl;
+    if (!impl.usable) {
+        UVE_WARNING("VulkanRenderDeviceUVE::CreateSamplerUVE: device is not usable");
+        return kInvalidSamplerHandleUVE;
+    }
+    if (!IsSamplerDescValidUVE(desc)) {
+        UVE_WARNING("VulkanRenderDeviceUVE::CreateSamplerUVE: malformed sampler descriptor");
+        return kInvalidSamplerHandleUVE;
+    }
+    // Anisotropy resolves here, once: unsupported devices and above-limit requests both land
+    // on a clamped value (warn-once), never a creation failure — the interface contract.
+    float anisotropy = 1.0F;
+    if (desc.maxAnisotropy > 1.0F) {
+        if (!impl.samplerAnisotropyEnabled) {
+            impl.WarnOnceUVE(ImplUVE::kWarnedSamplerAnisoClampedUVE,
+                "CreateSamplerUVE: device lacks samplerAnisotropy; anisotropy clamps to 1.0");
+        } else {
+            anisotropy = std::min(desc.maxAnisotropy, impl.maxSamplerAnisotropy);
+            if (anisotropy < desc.maxAnisotropy) {
+                impl.WarnOnceUVE(ImplUVE::kWarnedSamplerAnisoClampedUVE,
+                    "CreateSamplerUVE: anisotropy above the device limit; clamped");
+            }
+        }
+    }
+    const auto toFilter = [](const SamplerFilterUVE filter) noexcept {
+        return filter == SamplerFilterUVE::Point ? VK_FILTER_NEAREST : VK_FILTER_LINEAR;
+    };
+    const auto toWrap = [](const SamplerWrapUVE wrap) noexcept {
+        switch (wrap) {
+            case SamplerWrapUVE::Repeat:         return VK_SAMPLER_ADDRESS_MODE_REPEAT;
+            case SamplerWrapUVE::MirroredRepeat: return VK_SAMPLER_ADDRESS_MODE_MIRRORED_REPEAT;
+            case SamplerWrapUVE::ClampToEdge:    return VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
+        }
+        return VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE; // unreachable; desc was validated
+    };
+    VkSamplerCreateInfo samplerInfo{};
+    samplerInfo.sType = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO;
+    samplerInfo.magFilter = toFilter(desc.magFilter);
+    samplerInfo.minFilter = toFilter(desc.minFilter);
+    samplerInfo.mipmapMode = desc.mipMode == SamplerMipModeUVE::Point
+        ? VK_SAMPLER_MIPMAP_MODE_NEAREST
+        : VK_SAMPLER_MIPMAP_MODE_LINEAR;
+    samplerInfo.addressModeU = toWrap(desc.wrapU);
+    samplerInfo.addressModeV = toWrap(desc.wrapV);
+    samplerInfo.addressModeW = toWrap(desc.wrapW);
+    samplerInfo.mipLodBias = 0.0F;
+    samplerInfo.anisotropyEnable = anisotropy > 1.0F ? VK_TRUE : VK_FALSE;
+    samplerInfo.maxAnisotropy = anisotropy;
+    samplerInfo.compareEnable = VK_FALSE;
+    samplerInfo.minLod = 0.0F;
+    // MipMode::None pins level 0 (Vulkan has no "no mips" mode — maxLod 0 selects it); a bound
+    // sampler never knows its textures' chain lengths, so anything else takes the same wide
+    // ceiling as the M2f fixed sampler.
+    samplerInfo.maxLod = desc.mipMode == SamplerMipModeUVE::None ? 0.0F : 32.0F;
+    samplerInfo.borderColor = VK_BORDER_COLOR_FLOAT_OPAQUE_WHITE; // no border knob in v1 (see SamplerWrapUVE)
+    samplerInfo.unnormalizedCoordinates = VK_FALSE;
+    VkSampler sampler = VK_NULL_HANDLE;
+    if (impl.vk.vkCreateSampler(impl.device, &samplerInfo, nullptr, &sampler) != VK_SUCCESS ||
+        sampler == VK_NULL_HANDLE) {
+        UVE_WARNING("VulkanRenderDeviceUVE::CreateSamplerUVE: vkCreateSampler failed");
+        return kInvalidSamplerHandleUVE;
+    }
+    const std::uint32_t handleValue = impl.nextHandleValue++;
+    impl.samplers.emplace(handleValue, ImplUVE::SamplerRecordUVE{sampler, desc});
+    return SamplerHandleUVE{handleValue};
+}
+
 bool VulkanRenderDeviceUVE::SupportsTextureFormatUVE(const TextureFormatUVE format,
                                                       const TextureColorSpaceUVE colorSpace) const noexcept {
     if (m_impl == nullptr || !m_impl->usable || m_impl->physicalDevice == VK_NULL_HANDLE ||
@@ -3046,6 +3143,38 @@ void VulkanRenderDeviceUVE::DestroyTextureUVE(const TextureHandleUVE texture) {
     impl.vk.vkDestroyImage(impl.device, found->second.image, nullptr);
     impl.vk.vkFreeMemory(impl.device, found->second.memory, nullptr);
     impl.textures.erase(found);
+}
+
+void VulkanRenderDeviceUVE::DestroySamplerUVE(const SamplerHandleUVE sampler) {
+    ImplUVE& impl = *m_impl;
+    const auto found = impl.samplers.find(sampler.value);
+    if (found == impl.samplers.end()) {
+        // Safe no-op for invalid/already-destroyed handles, matching the interface contract
+        // and the GL backend's logged-but-tolerant destruction policy.
+        return;
+    }
+    const std::uint32_t destroyedValue = sampler.value;
+    (void)impl.vk.vkQueueWaitIdle(impl.presentQueue); // replay may still reference it
+    // Same invalidation DestroyTextureUVE runs: cached sets mentioning this sampler dangle
+    // after vkDestroySampler, so they are freed (FREE bit is set) and rebuilt on next use.
+    for (auto& [pipelineValue, record] : impl.pipelines) {
+        (void)pipelineValue;
+        for (auto cacheIt = record.cachedTextureSets.begin();
+             cacheIt != record.cachedTextureSets.end();) {
+            const auto mentioned = record.cachedTextureSamplers.find(cacheIt->first);
+            if (mentioned != record.cachedTextureSamplers.end() &&
+                std::find(mentioned->second.begin(), mentioned->second.end(), destroyedValue) !=
+                    mentioned->second.end()) {
+                (void)impl.vk.vkFreeDescriptorSets(impl.device, impl.descriptorPool, 1U,
+                                                   &cacheIt->second);
+                cacheIt = record.cachedTextureSets.erase(cacheIt);
+            } else {
+                ++cacheIt;
+            }
+        }
+    }
+    impl.vk.vkDestroySampler(impl.device, found->second.sampler, nullptr);
+    impl.samplers.erase(found);
 }
 
 ShaderHandleUVE VulkanRenderDeviceUVE::CreateShaderUVE(const ShaderDescUVE& desc,
@@ -4078,6 +4207,9 @@ void VulkanRenderDeviceUVE::ReplayRecordedCommandsUVE(const std::vector<Recorded
     // BindTextureUVE mirrors glActiveTexture+glBindTexture — program-independent. A pipeline's
     // i-th reflected sampler binding reads slot i at draw time.
     std::map<std::uint32_t, std::uint32_t> currentTextureValues;
+    // Tier 2.2: replay-local sampler binds, the per-slot sampling state paired with
+    // currentTextureValues (unbound/destroyed slots resolve to 0 = device default).
+    std::map<std::uint32_t, std::uint32_t> currentSamplerValues;
     // M2f: replay-local storage-buffer binds, the SSBO analogue of currentTextureValues
     // (GL shader-storage binding-point semantics; validated at the command handler below).
     std::map<std::uint32_t, std::uint32_t> currentStorageValues;
@@ -4181,7 +4313,8 @@ void VulkanRenderDeviceUVE::ReplayRecordedCommandsUVE(const std::vector<Recorded
     };
 
     const auto flushStateForActivePipelineUVE =
-        [&impl, &currentTextureValues, &currentStorageValues, &ensureStorageImageGeneralUVE]() -> bool {
+        [&impl, &currentTextureValues, &currentSamplerValues, &currentStorageValues,
+         &ensureStorageImageGeneralUVE]() -> bool {
         const auto found = impl.pipelines.find(impl.activePipelineValue);
         if (found == impl.pipelines.end()) {
             return true; // no pipeline bound by this replay: nothing to flush
@@ -4292,6 +4425,34 @@ void VulkanRenderDeviceUVE::ReplayRecordedCommandsUVE(const std::vector<Recorded
                 tupleRecords.push_back(&impl.textures.at(value));
                 tupleKey.append(std::to_string(value)).push_back('#');
             }
+            // Tier 2.2: sampler section of the tuple key ('p'-prefixed like the 's' storage
+            // section below). Covers every slot a bound sampler can feed: combined-image
+            // sampler slots AND standalone M2f SAMPLER bindings. 0 is never a live handle —
+            // an unbound (or destroyed-after-bind) slot resolves to the device default at
+            // write time (the texture's own sampler for combined slots, the fixed sampler
+            // for standalone ones).
+            static thread_local std::vector<const ImplUVE::SamplerRecordUVE*> tupleSamplerRecords;
+            tupleSamplerRecords.clear();
+            std::vector<std::uint32_t> tupleSamplerValues;
+            const std::size_t tupleSamplerSlotCount =
+                std::max(record.textureSlots.size(), record.samplerBindings.size());
+            tupleSamplerValues.reserve(tupleSamplerSlotCount);
+            tupleSamplerRecords.reserve(tupleSamplerSlotCount);
+            for (std::size_t slotIndex = 0; slotIndex < tupleSamplerSlotCount; ++slotIndex) {
+                std::uint32_t samplerValue = 0U;
+                const auto samplerBound =
+                    currentSamplerValues.find(static_cast<std::uint32_t>(slotIndex));
+                if (samplerBound != currentSamplerValues.end() &&
+                    impl.samplers.find(samplerBound->second) != impl.samplers.end()) {
+                    samplerValue = samplerBound->second;
+                }
+                tupleSamplerValues.push_back(samplerValue);
+                tupleSamplerRecords.push_back(
+                    samplerValue != 0U ? &impl.samplers.at(samplerValue) : nullptr);
+                tupleKey.push_back('p');
+                tupleKey.append(std::to_string(samplerValue));
+                tupleKey.push_back('#');
+            }
             // M2f: storage-buffer section of the tuple key ('s'-prefixed so the concatenated
             // key stays unambiguous next to the texture section). 0 is never a live handle
             // (nextHandleValue starts at 1): an unbound — or destroyed-after-bind — slot
@@ -4380,7 +4541,9 @@ void VulkanRenderDeviceUVE::ReplayRecordedCommandsUVE(const std::vector<Recorded
                     imageInfo.sampler =
                         (storageImageSlot || record.textureSlots[index].separateSampler)
                             ? VK_NULL_HANDLE
-                            : tupleRecords[index]->sampler;
+                            : (tupleSamplerRecords[index] != nullptr
+                                   ? tupleSamplerRecords[index]->sampler
+                                   : tupleRecords[index]->sampler);
                     // M5b fix: storage descriptors take the rgba8-qualified alias view when
                     // the swapchain-format policy aliased the image into the B,G,R,A or sRGB
                     // family (the sampled view's format has no matching SPIR-V storage
@@ -4415,7 +4578,9 @@ void VulkanRenderDeviceUVE::ReplayRecordedCommandsUVE(const std::vector<Recorded
                 for (std::size_t index = 0; index < record.samplerBindings.size(); ++index) {
                     VkDescriptorImageInfo& samplerInfo = samplerInfos[index];
                     samplerInfo = {};
-                    samplerInfo.sampler = impl.fixedSampler;
+                    samplerInfo.sampler = tupleSamplerRecords[index] != nullptr
+                        ? tupleSamplerRecords[index]->sampler
+                        : impl.fixedSampler;
                     samplerInfo.imageView = VK_NULL_HANDLE; // ignored for SAMPLER-type writes
                     samplerInfo.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
                     VkWriteDescriptorSet write{};
@@ -4451,6 +4616,7 @@ void VulkanRenderDeviceUVE::ReplayRecordedCommandsUVE(const std::vector<Recorded
                 record.cachedTextureSets.emplace(tupleKey, freshSet);
                 record.cachedTextureTextures.emplace(tupleKey, std::move(tupleValues));
                 record.cachedStorageBuffers.emplace(tupleKey, std::move(tupleStorageValues));
+                record.cachedTextureSamplers.emplace(tupleKey, std::move(tupleSamplerValues));
                 setToBind = freshSet;
             }
         }
@@ -4826,6 +4992,29 @@ void VulkanRenderDeviceUVE::ReplayRecordedCommandsUVE(const std::vector<Recorded
                             "submit replay: BindTextureUVE slot exceeds the bound pipeline's "
                             "reflected sampler count; the bind is recorded (GL texture-unit "
                             "semantics) but no sampler reads it in this pipeline");
+                    }
+                }
+            } else if constexpr (std::is_same_v<OpT, BindSamplerCommandUVE>) {
+                if (impl.samplers.find(op.sampler.value) == impl.samplers.end()) {
+                    impl.WarnOnceUVE(VulkanRenderDeviceUVE::ImplUVE::kWarnedUnknownSamplerUVE,
+                        "submit replay: unknown sampler handle; that BindSamplerUVE call is "
+                        "dropped (affected slots keep the device-default sampling instead)");
+                } else {
+                    currentSamplerValues[op.slot] = op.sampler.value;
+                    const auto activePipeline = impl.pipelines.find(impl.activePipelineValue);
+                    if (activePipeline != impl.pipelines.end()) {
+                        // A sampler slot feeds combined-image slots AND standalone M2f
+                        // SAMPLER bindings — out-of-bounds means beyond both.
+                        const std::size_t samplerSlotCount =
+                            std::max(activePipeline->second.textureSlots.size(),
+                                     activePipeline->second.samplerBindings.size());
+                        if (op.slot >= samplerSlotCount) {
+                            impl.WarnOnceUVE(
+                                VulkanRenderDeviceUVE::ImplUVE::kWarnedSamplerSlotOobUVE,
+                                "submit replay: BindSamplerUVE slot exceeds the bound pipeline's "
+                                "reflected sampler count; the bind is recorded (GL texture-unit "
+                                "semantics) but no sampler reads it in this pipeline");
+                        }
                     }
                 }
             } else if constexpr (std::is_same_v<OpT, BindUniformBufferCommandUVE>) {

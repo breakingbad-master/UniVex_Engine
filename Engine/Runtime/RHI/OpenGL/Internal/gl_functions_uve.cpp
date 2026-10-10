@@ -105,6 +105,15 @@ GlFunctionsUVE LoadGlFunctionsUVE(void* (*getProcAddress)(const char*)) {
     functions.glGetProgramBinary = LoadOneUVE<PFNGLGETPROGRAMBINARYPROC>(getProcAddress, "glGetProgramBinary");
     functions.glProgramBinary = LoadOneUVE<PFNGLPROGRAMBINARYPROC>(getProcAddress, "glProgramBinary");
 
+    functions.glGenSamplers = LoadOneUVE<PFNGLGENSAMPLERSPROC>(getProcAddress, "glGenSamplers");
+    functions.glDeleteSamplers = LoadOneUVE<PFNGLDELETESAMPLERSPROC>(getProcAddress, "glDeleteSamplers");
+    functions.glBindSampler = LoadOneUVE<PFNGLBINDSAMPLERPROC>(getProcAddress, "glBindSampler");
+    functions.glSamplerParameteri =
+        LoadOneUVE<PFNGLSAMPLERPARAMETERIPROC>(getProcAddress, "glSamplerParameteri");
+    functions.glSamplerParameterf =
+        LoadOneUVE<PFNGLSAMPLERPARAMETERFPROC>(getProcAddress, "glSamplerParameterf");
+    functions.glGetStringi = LoadOneUVE<PFNGLGETSTRINGIPROC>(getProcAddress, "glGetStringi");
+
     functions.glDebugMessageCallback =
         LoadOneUVE<PFNGLDEBUGMESSAGECALLBACKPROC>(getProcAddress, "glDebugMessageCallback");
 

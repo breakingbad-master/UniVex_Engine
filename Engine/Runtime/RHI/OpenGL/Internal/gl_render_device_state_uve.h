@@ -85,6 +85,19 @@ struct GlDeviceStateUVE {
     std::unordered_map<std::uint32_t, TextureRecordUVE> textures;
     std::uint32_t nextTextureHandle = 1;
 
+    struct SamplerRecordUVE {
+        GLuint glSampler = 0;
+        SamplerDescUVE desc;
+    };
+    std::unordered_map<std::uint32_t, SamplerRecordUVE> samplers;
+    std::uint32_t nextSamplerHandle = 1;
+
+    /// Tier 2.2 anisotropy capability, probed once at init from the extension string.
+    bool samplerAnisotropySupported = false;
+    float maxSamplerAnisotropy = 1.0F;
+    /// Warn-once latch for anisotropy clamps (this backend has no VK-style bitmask infra).
+    bool warnedSamplerAnisotropyClamped = false;
+
     /// Cached FBO names keyed by the pair of UVE texture handles attached to them. The render
     /// device invalidates entries when a dependent texture is destroyed; the cache itself owns no
     /// texture lifetime and is released while the GL context is still current.

@@ -1366,6 +1366,123 @@ TEST_F(VulkanRenderDeviceUVETest, DepthTestWorksInColorOnlyOffscreenPass) {
     device->DestroyShaderUVE(quadFS);
 }
 
+TEST_F(VulkanRenderDeviceUVETest, CreateSamplerUVE_MalformedDesc_ReturnsInvalid) {
+    SamplerDescUVE desc;
+    desc.wrapW = static_cast<SamplerWrapUVE>(0xFFU);
+    EXPECT_EQ(device->CreateSamplerUVE(desc), kInvalidSamplerHandleUVE);
+
+    SamplerDescUVE anisoDesc;
+    anisoDesc.maxAnisotropy = 0.0F;
+    EXPECT_EQ(device->CreateSamplerUVE(anisoDesc), kInvalidSamplerHandleUVE);
+
+    const SamplerHandleUVE sampler = device->CreateSamplerUVE(SamplerDescUVE{});
+    EXPECT_NE(sampler, kInvalidSamplerHandleUVE);
+    device->DestroySamplerUVE(sampler);
+    device->DestroySamplerUVE(sampler); // double-destroy: safe no-op
+}
+
+TEST_F(VulkanRenderDeviceUVETest, BoundSamplerSelectsPointFiltering) {
+    // Tier 2.2 proof that BindSamplerUVE reaches the Vulkan descriptors: a 2x2 texture with a
+    // VERTICAL red/blue split (both rows identical, so the GL-bottom-up vs Vulkan-top-down row
+    // order cannot matter) sampled through a point sampler at U=0.4/0.6 — far enough from the
+    // texel centers (0.25/0.75) that linear filtering would visibly blend, firmly inside each
+    // texel so point sampling reads the exact color.
+    const std::uint8_t splitPixels[16] = {
+        255U, 0U, 0U, 255U,  0U, 0U, 255U, 255U,
+        255U, 0U, 0U, 255U,  0U, 0U, 255U, 255U,
+    };
+    TextureDescUVE splitDesc{};
+    splitDesc.width = 2U;
+    splitDesc.height = 2U;
+    splitDesc.format = TextureFormatUVE::RGBA8Unorm;
+    const TextureHandleUVE splitTexture = device->CreateTextureUVE(splitDesc,
+        std::span<const std::byte>(reinterpret_cast<const std::byte*>(splitPixels),
+                                   sizeof(splitPixels)));
+    ASSERT_NE(splitTexture, kInvalidTextureHandleUVE);
+
+    SamplerDescUVE pointDesc;
+    pointDesc.magFilter = SamplerFilterUVE::Point;
+    pointDesc.minFilter = SamplerFilterUVE::Point;
+    pointDesc.mipMode = SamplerMipModeUVE::None;
+    const SamplerHandleUVE pointSampler = device->CreateSamplerUVE(pointDesc);
+    ASSERT_NE(pointSampler, kInvalidSamplerHandleUVE);
+
+    ShaderHandleUVE quadVS{}, quadFS{};
+    const PipelineHandleUVE texturedPipeline = CreateTexturedPipelineUVE(*device, &quadVS, &quadFS);
+    ASSERT_NE(texturedPipeline, kInvalidPipelineHandleUVE);
+
+    const float quadVertices[30] = {
+        -1.0F, -1.0F, 0.0F,  0.0F, 0.0F,
+         1.0F, -1.0F, 0.0F,  1.0F, 0.0F,
+        -1.0F,  1.0F, 0.0F,  0.0F, 1.0F,
+         1.0F, -1.0F, 0.0F,  1.0F, 0.0F,
+         1.0F,  1.0F, 0.0F,  1.0F, 1.0F,
+        -1.0F,  1.0F, 0.0F,  0.0F, 1.0F,
+    };
+    BufferDescUVE quadBufferDesc{};
+    quadBufferDesc.sizeBytes = sizeof(quadVertices);
+    quadBufferDesc.usage = BufferUsageUVE::Vertex;
+    const BufferHandleUVE quadBuffer = device->CreateBufferUVE(quadBufferDesc,
+        std::span<const std::byte>(reinterpret_cast<const std::byte*>(quadVertices),
+                                   sizeof(quadVertices)));
+    ASSERT_NE(quadBuffer, kInvalidBufferHandleUVE);
+
+    {
+        auto commandBuffer = device->CreateCommandBufferUVE();
+        RenderPassDescUVE passDesc{};
+        passDesc.colorLoadOp = LoadOpUVE::Clear;
+        passDesc.clearColor = {0.0F, 0.0F, 0.0F, 1.0F};
+        passDesc.depthLoadOp = LoadOpUVE::Clear;
+        commandBuffer->BeginRenderPassUVE(passDesc);
+        commandBuffer->BindPipelineUVE(texturedPipeline);
+        commandBuffer->BindVertexBufferUVE(quadBuffer);
+        commandBuffer->BindTextureUVE(splitTexture, 0U);
+        commandBuffer->BindSamplerUVE(pointSampler, 0U);
+        commandBuffer->DrawUVE(6U);
+        commandBuffer->EndRenderPassUVE();
+        device->SubmitUVE(std::move(commandBuffer));
+    }
+    device->PresentUVE();
+    ASSERT_TRUE(device->IsUsableUVE());
+
+    std::vector<std::byte> pixels(1280U * 720U * 4U);
+    std::uint32_t width = 0;
+    std::uint32_t height = 0;
+    ASSERT_TRUE(device->ReadbackLatestPresentedImageUVE(pixels, width, height));
+    if (width == 0U || height == 0U) {
+        GTEST_SKIP() << "driver reported a zero-sized extent; coverage math needs pixels";
+    }
+
+    const std::string_view name = device->GetBackendNameUVE();
+    if (name == "Vulkan (M2c textures+staging)") {
+        const auto center = ChannelAtNdcUVE(pixels, width, height, 0.0F, 0.0F);
+        EXPECT_GT(center[0], 240); // fallback white, frame intact
+        EXPECT_GT(center[1], 240);
+        EXPECT_GT(center[2], 240);
+    } else {
+        // NDC x=-0.2 → U=0.4 (red texel); x=+0.2 → U=0.6 (blue texel). Linear filtering at
+        // these points would read ~(178,0,76) / ~(76,0,178) — the bounds below only pass for
+        // unblended texels.
+        const auto left = ChannelAtNdcUVE(pixels, width, height, -0.2F, 0.0F);
+        EXPECT_GT(left[0], 200);
+        EXPECT_LT(left[1], 60);
+        EXPECT_LT(left[2], 60) << "point sampling must read the exact red texel at U=0.4 - "
+            "got (" << left[0] << "," << left[1] << "," << left[2] << ")";
+        const auto right = ChannelAtNdcUVE(pixels, width, height, 0.2F, 0.0F);
+        EXPECT_LT(right[0], 60);
+        EXPECT_LT(right[1], 60);
+        EXPECT_GT(right[2], 200) << "point sampling must read the exact blue texel at U=0.6 - "
+            "got (" << right[0] << "," << right[1] << "," << right[2] << ")";
+    }
+
+    device->DestroyBufferUVE(quadBuffer);
+    device->DestroyTextureUVE(splitTexture);
+    device->DestroyPipelineUVE(texturedPipeline);
+    device->DestroySamplerUVE(pointSampler);
+    device->DestroyShaderUVE(quadVS);
+    device->DestroyShaderUVE(quadFS);
+}
+
 TEST_F(VulkanRenderDeviceUVETest, DepthCompareSelectsTheCoplanarWinner) {
     // Tier 2.1 proof that PipelineDescUVE::depthCompare threads into the Vulkan pipeline: two
     // pipelines identical except the compare op each render GREEN-then-RED at the SAME depth

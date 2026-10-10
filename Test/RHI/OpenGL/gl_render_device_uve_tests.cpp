@@ -288,6 +288,83 @@ TEST_F(GlRenderDeviceUVETest, CreatePipelineFromBinaryUVE_UnknownBlendMode_Retur
     EXPECT_EQ(renderDevice->GetLiveResourceCountUVE(), 0U);
 }
 
+TEST_F(GlRenderDeviceUVETest, CreateSamplerUVE_UnknownMagFilter_ReturnsInvalidBeforeAllocation) {
+    SamplerDescUVE invalidDesc;
+    invalidDesc.magFilter = static_cast<SamplerFilterUVE>(0xFFU);
+    EXPECT_EQ(renderDevice->CreateSamplerUVE(invalidDesc), kInvalidSamplerHandleUVE);
+    EXPECT_EQ(renderDevice->GetLiveResourceCountUVE(), 0U);
+
+    invalidDesc.magFilter = SamplerFilterUVE::Point;
+    const SamplerHandleUVE validSampler = renderDevice->CreateSamplerUVE(invalidDesc);
+    EXPECT_NE(validSampler, kInvalidSamplerHandleUVE);
+    EXPECT_EQ(renderDevice->GetLiveResourceCountUVE(), 1U);
+    renderDevice->DestroySamplerUVE(validSampler);
+    EXPECT_EQ(renderDevice->GetLiveResourceCountUVE(), 0U);
+}
+
+TEST_F(GlRenderDeviceUVETest, CreateSamplerUVE_UnknownMinFilter_ReturnsInvalidBeforeAllocation) {
+    SamplerDescUVE invalidDesc;
+    invalidDesc.minFilter = static_cast<SamplerFilterUVE>(0xFFU);
+    EXPECT_EQ(renderDevice->CreateSamplerUVE(invalidDesc), kInvalidSamplerHandleUVE);
+    EXPECT_EQ(renderDevice->GetLiveResourceCountUVE(), 0U);
+
+    invalidDesc.minFilter = SamplerFilterUVE::Point;
+    const SamplerHandleUVE validSampler = renderDevice->CreateSamplerUVE(invalidDesc);
+    EXPECT_NE(validSampler, kInvalidSamplerHandleUVE);
+    EXPECT_EQ(renderDevice->GetLiveResourceCountUVE(), 1U);
+    renderDevice->DestroySamplerUVE(validSampler);
+    EXPECT_EQ(renderDevice->GetLiveResourceCountUVE(), 0U);
+}
+
+TEST_F(GlRenderDeviceUVETest, CreateSamplerUVE_UnknownMipMode_ReturnsInvalidBeforeAllocation) {
+    SamplerDescUVE invalidDesc;
+    invalidDesc.mipMode = static_cast<SamplerMipModeUVE>(0xFFU);
+    EXPECT_EQ(renderDevice->CreateSamplerUVE(invalidDesc), kInvalidSamplerHandleUVE);
+    EXPECT_EQ(renderDevice->GetLiveResourceCountUVE(), 0U);
+
+    invalidDesc.mipMode = SamplerMipModeUVE::None;
+    const SamplerHandleUVE validSampler = renderDevice->CreateSamplerUVE(invalidDesc);
+    EXPECT_NE(validSampler, kInvalidSamplerHandleUVE);
+    EXPECT_EQ(renderDevice->GetLiveResourceCountUVE(), 1U);
+    renderDevice->DestroySamplerUVE(validSampler);
+    EXPECT_EQ(renderDevice->GetLiveResourceCountUVE(), 0U);
+}
+
+TEST_F(GlRenderDeviceUVETest, CreateSamplerUVE_UnknownWrap_ReturnsInvalidBeforeAllocation) {
+    SamplerDescUVE invalidDesc;
+    invalidDesc.wrapU = static_cast<SamplerWrapUVE>(0xFFU);
+    EXPECT_EQ(renderDevice->CreateSamplerUVE(invalidDesc), kInvalidSamplerHandleUVE);
+    EXPECT_EQ(renderDevice->GetLiveResourceCountUVE(), 0U);
+
+    invalidDesc.wrapU = SamplerWrapUVE::Repeat;
+    const SamplerHandleUVE validSampler = renderDevice->CreateSamplerUVE(invalidDesc);
+    EXPECT_NE(validSampler, kInvalidSamplerHandleUVE);
+    EXPECT_EQ(renderDevice->GetLiveResourceCountUVE(), 1U);
+    renderDevice->DestroySamplerUVE(validSampler);
+    EXPECT_EQ(renderDevice->GetLiveResourceCountUVE(), 0U);
+}
+
+TEST_F(GlRenderDeviceUVETest, CreateSamplerUVE_NonDefaults_SucceedsAndCounts) {
+    SamplerDescUVE desc;
+    desc.magFilter = SamplerFilterUVE::Point;
+    desc.minFilter = SamplerFilterUVE::Point;
+    desc.mipMode = SamplerMipModeUVE::None;
+    desc.wrapU = SamplerWrapUVE::Repeat;
+    desc.wrapV = SamplerWrapUVE::MirroredRepeat;
+    desc.maxAnisotropy = 4.0F; // clamped to the device limit when lower, never a failure
+    const SamplerHandleUVE sampler = renderDevice->CreateSamplerUVE(desc);
+    EXPECT_NE(sampler, kInvalidSamplerHandleUVE);
+    EXPECT_EQ(renderDevice->GetLiveResourceCountUVE(), 1U);
+    renderDevice->DestroySamplerUVE(sampler);
+    EXPECT_EQ(renderDevice->GetLiveResourceCountUVE(), 0U);
+}
+
+TEST_F(GlRenderDeviceUVETest, DestroySamplerUVE_UnknownHandle_IsSafeNoOp) {
+    renderDevice->DestroySamplerUVE(kInvalidSamplerHandleUVE);
+    renderDevice->DestroySamplerUVE(SamplerHandleUVE{999});
+    EXPECT_EQ(renderDevice->GetLiveResourceCountUVE(), 0U);
+}
+
 TEST_F(GlRenderDeviceUVETest, CreatePipelineUVE_UnknownCullMode_ReturnsInvalidBeforeAllocation) {
     const ShaderHandleUVE vertexShader =
         renderDevice->CreateShaderUVE(ShaderDescUVE{ShaderStageUVE::Vertex, std::string(kValidVertexShaderSource)});

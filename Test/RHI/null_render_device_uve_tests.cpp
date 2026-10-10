@@ -987,6 +987,129 @@ TEST(NullRenderDeviceUVETest, PipelineDescs_DefaultRasterizerState_MatchesPreTie
     EXPECT_EQ(binaryDesc.depthCompare, DepthCompareUVE::Less);
 }
 
+TEST(NullRenderDeviceUVETest, SamplerDescUVE_Defaults_MatchPreTier22Behavior) {
+    const SamplerDescUVE desc;
+    EXPECT_EQ(desc.magFilter, SamplerFilterUVE::Linear);
+    EXPECT_EQ(desc.minFilter, SamplerFilterUVE::Linear);
+    EXPECT_EQ(desc.mipMode, SamplerMipModeUVE::Linear);
+    EXPECT_EQ(desc.wrapU, SamplerWrapUVE::ClampToEdge);
+    EXPECT_EQ(desc.wrapV, SamplerWrapUVE::ClampToEdge);
+    EXPECT_EQ(desc.wrapW, SamplerWrapUVE::ClampToEdge);
+    EXPECT_FLOAT_EQ(desc.maxAnisotropy, 1.0F);
+    EXPECT_TRUE(IsSamplerDescValidUVE(desc));
+}
+
+TEST(NullRenderDeviceUVETest, CreateSamplerUVE_InvalidMagFilter_ReturnsInvalid) {
+    NullRenderDeviceUVE device;
+    SamplerDescUVE desc;
+    desc.magFilter = static_cast<SamplerFilterUVE>(0xFFU);
+    EXPECT_EQ(device.CreateSamplerUVE(desc), kInvalidSamplerHandleUVE);
+    EXPECT_EQ(device.GetLiveResourceCountUVE(), 0U);
+}
+
+TEST(NullRenderDeviceUVETest, CreateSamplerUVE_InvalidMinFilter_ReturnsInvalid) {
+    NullRenderDeviceUVE device;
+    SamplerDescUVE desc;
+    desc.minFilter = static_cast<SamplerFilterUVE>(0xFFU);
+    EXPECT_EQ(device.CreateSamplerUVE(desc), kInvalidSamplerHandleUVE);
+    EXPECT_EQ(device.GetLiveResourceCountUVE(), 0U);
+}
+
+TEST(NullRenderDeviceUVETest, CreateSamplerUVE_InvalidMipMode_ReturnsInvalid) {
+    NullRenderDeviceUVE device;
+    SamplerDescUVE desc;
+    desc.mipMode = static_cast<SamplerMipModeUVE>(0xFFU);
+    EXPECT_EQ(device.CreateSamplerUVE(desc), kInvalidSamplerHandleUVE);
+    EXPECT_EQ(device.GetLiveResourceCountUVE(), 0U);
+}
+
+TEST(NullRenderDeviceUVETest, CreateSamplerUVE_InvalidWrap_ReturnsInvalid) {
+    NullRenderDeviceUVE device;
+    SamplerDescUVE desc;
+    desc.wrapV = static_cast<SamplerWrapUVE>(0xFFU);
+    EXPECT_EQ(device.CreateSamplerUVE(desc), kInvalidSamplerHandleUVE);
+    EXPECT_EQ(device.GetLiveResourceCountUVE(), 0U);
+}
+
+TEST(NullRenderDeviceUVETest, CreateSamplerUVE_BadAnisotropy_ReturnsInvalid) {
+    NullRenderDeviceUVE device;
+    SamplerDescUVE desc;
+    desc.maxAnisotropy = 0.5F;
+    EXPECT_EQ(device.CreateSamplerUVE(desc), kInvalidSamplerHandleUVE);
+    desc.maxAnisotropy = std::numeric_limits<float>::quiet_NaN();
+    EXPECT_EQ(device.CreateSamplerUVE(desc), kInvalidSamplerHandleUVE);
+    desc.maxAnisotropy = std::numeric_limits<float>::infinity();
+    EXPECT_EQ(device.CreateSamplerUVE(desc), kInvalidSamplerHandleUVE);
+    EXPECT_EQ(device.GetLiveResourceCountUVE(), 0U);
+
+    // Null has no device limit — any finite >= 1.0 is accepted (real backends clamp).
+    desc.maxAnisotropy = 1.0e30F;
+    EXPECT_NE(device.CreateSamplerUVE(desc), kInvalidSamplerHandleUVE);
+}
+
+TEST(NullRenderDeviceUVETest, CreateSamplerUVE_NonDefaults_RoundTripThroughLiveDescs) {
+    NullRenderDeviceUVE device;
+    SamplerDescUVE desc;
+    desc.magFilter = SamplerFilterUVE::Point;
+    desc.minFilter = SamplerFilterUVE::Point;
+    desc.mipMode = SamplerMipModeUVE::None;
+    desc.wrapU = SamplerWrapUVE::Repeat;
+    desc.wrapV = SamplerWrapUVE::MirroredRepeat;
+    desc.maxAnisotropy = 4.0F;
+    const SamplerHandleUVE sampler = device.CreateSamplerUVE(desc);
+    ASSERT_NE(sampler, kInvalidSamplerHandleUVE);
+
+    const std::vector<SamplerDescUVE> liveDescs = device.GetLiveSamplerDescsUVE();
+    ASSERT_EQ(liveDescs.size(), 1U);
+    EXPECT_EQ(liveDescs[0].magFilter, SamplerFilterUVE::Point);
+    EXPECT_EQ(liveDescs[0].minFilter, SamplerFilterUVE::Point);
+    EXPECT_EQ(liveDescs[0].mipMode, SamplerMipModeUVE::None);
+    EXPECT_EQ(liveDescs[0].wrapU, SamplerWrapUVE::Repeat);
+    EXPECT_EQ(liveDescs[0].wrapV, SamplerWrapUVE::MirroredRepeat);
+    EXPECT_FLOAT_EQ(liveDescs[0].maxAnisotropy, 4.0F);
+}
+
+TEST(NullRenderDeviceUVETest, BindSamplerUVE_RecordedWithSlotOnSubmit) {
+    NullRenderDeviceUVE device;
+    const SamplerHandleUVE sampler = device.CreateSamplerUVE(SamplerDescUVE{});
+    ASSERT_NE(sampler, kInvalidSamplerHandleUVE);
+
+    std::unique_ptr<ICommandBufferUVE> commandBuffer = device.CreateCommandBufferUVE();
+    commandBuffer->BeginRenderPassUVE(RenderPassDescUVE{});
+    commandBuffer->BindSamplerUVE(sampler, 3U);
+    commandBuffer->EndRenderPassUVE();
+    device.SubmitUVE(std::move(commandBuffer));
+
+    const std::vector<RecordedCommandUVE>& recorded = device.GetLastSubmittedCommandsUVE();
+    ASSERT_EQ(recorded.size(), 3U);
+    const auto* bind = std::get_if<BindSamplerCommandUVE>(&recorded[1]);
+    ASSERT_NE(bind, nullptr);
+    EXPECT_EQ(bind->sampler, sampler);
+    EXPECT_EQ(bind->slot, 3U);
+}
+
+TEST(NullRenderDeviceUVETest, CreateSamplerUVE_CountsTowardLiveResourcesUntilDestroyed) {
+    NullRenderDeviceUVE device;
+    EXPECT_EQ(device.GetLiveResourceCountUVE(), 0U);
+    const SamplerHandleUVE sampler = device.CreateSamplerUVE(SamplerDescUVE{});
+    ASSERT_NE(sampler, kInvalidSamplerHandleUVE);
+    EXPECT_EQ(device.GetLiveResourceCountUVE(), 1U);
+    EXPECT_TRUE(device.GetLiveSamplerDescsUVE().empty() == false);
+    device.DestroySamplerUVE(sampler);
+    EXPECT_EQ(device.GetLiveResourceCountUVE(), 0U);
+    EXPECT_TRUE(device.GetLiveSamplerDescsUVE().empty());
+}
+
+TEST(NullRenderDeviceUVETest, DestroySamplerUVE_UnknownHandle_IsSafeNoOp) {
+    NullRenderDeviceUVE device;
+    const SamplerHandleUVE sampler = device.CreateSamplerUVE(SamplerDescUVE{});
+    ASSERT_NE(sampler, kInvalidSamplerHandleUVE);
+    device.DestroySamplerUVE(sampler);
+    device.DestroySamplerUVE(sampler); // double-destroy: logged, no crash
+    device.DestroySamplerUVE(kInvalidSamplerHandleUVE);
+    EXPECT_EQ(device.GetLiveResourceCountUVE(), 0U);
+}
+
 #if UVE_DEBUG
 TEST(NullRenderDeviceUVEDeathTest, CommandBuffer_DispatchInsideRenderPass_Asserts) {
     NullRenderDeviceUVE device;

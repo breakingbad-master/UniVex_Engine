@@ -83,6 +83,12 @@ void NullCommandBufferUVE::BindTextureUVE(TextureHandleUVE texture, std::uint32_
     m_commands.emplace_back(BindTextureCommandUVE{texture, slot});
 }
 
+void NullCommandBufferUVE::BindSamplerUVE(SamplerHandleUVE sampler, std::uint32_t slot) {
+    // Ungated exactly like BindTextureUVE above: sampler binds pair with texture binds, and
+    // the executing backends keep the real kind-aware rules.
+    m_commands.emplace_back(BindSamplerCommandUVE{sampler, slot});
+}
+
 void NullCommandBufferUVE::BindUniformBufferUVE(BufferHandleUVE buffer, std::uint32_t slot) {
     if (!RequireInsideRenderPassUVE(m_insideRenderPass, "BindUniformBufferUVE")) {
         return;

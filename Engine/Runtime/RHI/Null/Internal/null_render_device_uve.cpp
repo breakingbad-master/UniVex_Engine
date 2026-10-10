@@ -28,6 +28,8 @@ struct NullRenderDeviceUVE::ImplUVE {
     std::uint32_t nextBufferHandle = 1;
     std::unordered_map<std::uint32_t, TextureDescUVE> textures;
     std::uint32_t nextTextureHandle = 1;
+    std::unordered_map<std::uint32_t, SamplerDescUVE> samplers;
+    std::uint32_t nextSamplerHandle = 1;
     std::uint64_t textureCreateAttemptCount = 0;
     std::unordered_map<std::uint32_t, ShaderDescUVE> shaders;
     std::uint32_t nextShaderHandle = 1;
@@ -145,6 +147,23 @@ void NullRenderDeviceUVE::DestroyTextureUVE(TextureHandleUVE texture) {
     if (m_impl->textures.erase(texture.value) == 0) {
         UVE_ERROR("NullRenderDeviceUVE: DestroyTextureUVE called with an unknown or already-destroyed handle ({})",
                    texture.value);
+    }
+}
+
+SamplerHandleUVE NullRenderDeviceUVE::CreateSamplerUVE(const SamplerDescUVE& desc) {
+    if (!IsSamplerDescValidUVE(desc)) {
+        UVE_ERROR("NullRenderDeviceUVE: CreateSamplerUVE received an invalid sampler descriptor");
+        return kInvalidSamplerHandleUVE;
+    }
+    const std::uint32_t handleValue = m_impl->nextSamplerHandle++;
+    m_impl->samplers.emplace(handleValue, desc);
+    return SamplerHandleUVE{handleValue};
+}
+
+void NullRenderDeviceUVE::DestroySamplerUVE(SamplerHandleUVE sampler) {
+    if (m_impl->samplers.erase(sampler.value) == 0) {
+        UVE_ERROR("NullRenderDeviceUVE: DestroySamplerUVE called with an unknown or already-destroyed handle ({})",
+                   sampler.value);
     }
 }
 
@@ -327,7 +346,7 @@ const std::vector<RecordedCommandUVE>& NullRenderDeviceUVE::GetLastSubmittedComm
 }
 
 std::size_t NullRenderDeviceUVE::GetLiveResourceCountUVE() const noexcept {
-    return m_impl->buffers.size() + m_impl->textures.size() + m_impl->shaders.size() +
+    return m_impl->buffers.size() + m_impl->textures.size() + m_impl->samplers.size() + m_impl->shaders.size() +
            m_impl->pipelines.size() + m_impl->computePipelines.size();
 }
 
@@ -335,6 +354,16 @@ std::vector<TextureDescUVE> NullRenderDeviceUVE::GetLiveTextureDescsUVE() const 
     std::vector<TextureDescUVE> descriptors;
     descriptors.reserve(m_impl->textures.size());
     for (const auto& [handle, desc] : m_impl->textures) {
+        static_cast<void>(handle);
+        descriptors.push_back(desc);
+    }
+    return descriptors;
+}
+
+std::vector<SamplerDescUVE> NullRenderDeviceUVE::GetLiveSamplerDescsUVE() const {
+    std::vector<SamplerDescUVE> descriptors;
+    descriptors.reserve(m_impl->samplers.size());
+    for (const auto& [handle, desc] : m_impl->samplers) {
         static_cast<void>(handle);
         descriptors.push_back(desc);
     }

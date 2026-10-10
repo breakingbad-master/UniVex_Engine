@@ -5,6 +5,7 @@
 
 #include <algorithm>
 #include <array>
+#include <cstring>
 #include <limits>
 #include <string>
 
@@ -18,6 +19,13 @@
 #endif
 
 #include "gl_command_buffer_uve.h"
+
+// The anisotropy enums live in glext.h on desktop GL; this fallback keeps exotic platform
+// headers (Android NDK configurations without the EXT declaration) compiling — the value is
+// the registered 0x84FE on every API.
+#if !defined(GL_TEXTURE_MAX_ANISOTROPY_EXT)
+#define GL_TEXTURE_MAX_ANISOTROPY_EXT 0x84FE
+#endif
 #include "gl_error_check_uve.h"
 #include "gl_render_device_state_uve.h"
 #include "uve/logging/assert_uve.h"
@@ -328,6 +336,29 @@ GlRenderDeviceUVE::GlRenderDeviceUVE(Window::IWindowManagerUVE& windowManager)
     } else {
         glGetIntegerv(GL_MAX_COMBINED_TEXTURE_IMAGE_UNITS, &m_impl->state.maxCombinedTextureImageUnits);
         glGetIntegerv(GL_MAX_UNIFORM_BUFFER_BINDINGS, &m_impl->state.maxUniformBufferBindings);
+        // Tier 2.2 anisotropy probe: GL_EXT_texture_filter_anisotropic is an EXTENSION on every
+        // API (never core), so support is a string scan, not a version check. glGetStringi is
+        // core since GL 3.0 — the desktop baseline — and equally present on GLES 3.0.
+        if (m_impl->state.gl.glGetStringi != nullptr) {
+            GLint extensionCount = 0;
+            glGetIntegerv(GL_NUM_EXTENSIONS, &extensionCount);
+            for (GLint extensionIndex = 0; extensionIndex < extensionCount; ++extensionIndex) {
+                const char* const extensionName = reinterpret_cast<const char*>(
+                    m_impl->state.gl.glGetStringi(GL_EXTENSIONS, static_cast<GLuint>(extensionIndex)));
+                if (extensionName != nullptr &&
+                    std::strcmp(extensionName, "GL_EXT_texture_filter_anisotropic") == 0) {
+                    m_impl->state.samplerAnisotropySupported = true;
+                    break;
+                }
+            }
+            if (m_impl->state.samplerAnisotropySupported) {
+                GLfloat maxAnisotropy = 1.0F;
+                glGetFloatv(GL_MAX_TEXTURE_MAX_ANISOTROPY_EXT, &maxAnisotropy);
+                if (maxAnisotropy >= 1.0F) {
+                    m_impl->state.maxSamplerAnisotropy = maxAnisotropy;
+                }
+            }
+        }
         glGetIntegerv(GL_MAX_VERTEX_ATTRIBS, &m_impl->state.maxVertexAttribs);
         GLint compressedFormatCount = 0;
         glGetIntegerv(kGlNumCompressedTextureFormatsUVE, &compressedFormatCount);
@@ -390,6 +421,13 @@ GlRenderDeviceUVE::~GlRenderDeviceUVE() {
         glDeleteTextures(1, &record.glTexture);
     }
     m_impl->state.textures.clear();
+    for (const auto& [handle, record] : m_impl->state.samplers) {
+        static_cast<void>(handle);
+        // glDeleteSamplers is non-null whenever this map is non-empty: CreateSamplerUVE fails
+        // closed without the entry points, so a sampler record implies a loaded deleter.
+        m_impl->state.gl.glDeleteSamplers(1, &record.glSampler);
+    }
+    m_impl->state.samplers.clear();
 }
 
 BufferHandleUVE GlRenderDeviceUVE::CreateBufferUVE(const BufferDescUVE& desc, std::span<const std::byte> initialData) {
@@ -639,6 +677,81 @@ void GlRenderDeviceUVE::DestroyTextureUVE(TextureHandleUVE texture) {
         }
     }
     m_impl->state.textures.erase(it);
+}
+
+SamplerHandleUVE GlRenderDeviceUVE::CreateSamplerUVE(const SamplerDescUVE& desc) {
+    if (!IsSamplerDescValidUVE(desc)) {
+        UVE_ERROR("GlRenderDeviceUVE: CreateSamplerUVE received an invalid sampler descriptor");
+        return kInvalidSamplerHandleUVE;
+    }
+    if (m_impl->state.gl.glGenSamplers == nullptr || m_impl->state.gl.glDeleteSamplers == nullptr ||
+        m_impl->state.gl.glBindSampler == nullptr || m_impl->state.gl.glSamplerParameteri == nullptr ||
+        m_impl->state.gl.glSamplerParameterf == nullptr) {
+        UVE_ERROR("GlRenderDeviceUVE: CreateSamplerUVE needs GL 3.3+ sampler objects, "
+                  "unavailable on this context");
+        return kInvalidSamplerHandleUVE;
+    }
+    const auto toWrap = [](const SamplerWrapUVE wrap) noexcept {
+        switch (wrap) {
+            case SamplerWrapUVE::Repeat:         return GL_REPEAT;
+            case SamplerWrapUVE::MirroredRepeat: return GL_MIRRORED_REPEAT;
+            case SamplerWrapUVE::ClampToEdge:    return GL_CLAMP_TO_EDGE;
+        }
+        return GL_CLAMP_TO_EDGE; // unreachable; desc was validated
+    };
+    // GL's MIN_FILTER fuses minification and mip blending into one enum; the desc keeps them
+    // separate (Vulkan's shape), so the fusion happens here.
+    GLint minFilter = GL_LINEAR_MIPMAP_LINEAR;
+    if (desc.mipMode == SamplerMipModeUVE::None) {
+        minFilter = desc.minFilter == SamplerFilterUVE::Point ? GL_NEAREST : GL_LINEAR;
+    } else if (desc.minFilter == SamplerFilterUVE::Point) {
+        minFilter = desc.mipMode == SamplerMipModeUVE::Point ? GL_NEAREST_MIPMAP_NEAREST
+                                                             : GL_NEAREST_MIPMAP_LINEAR;
+    } else {
+        minFilter = desc.mipMode == SamplerMipModeUVE::Point ? GL_LINEAR_MIPMAP_NEAREST
+                                                             : GL_LINEAR_MIPMAP_LINEAR;
+    }
+    GLuint glSampler = 0;
+    m_impl->state.gl.glGenSamplers(1, &glSampler);
+    m_impl->state.gl.glSamplerParameteri(glSampler, GL_TEXTURE_MIN_FILTER, minFilter);
+    m_impl->state.gl.glSamplerParameteri(
+        glSampler, GL_TEXTURE_MAG_FILTER,
+        desc.magFilter == SamplerFilterUVE::Point ? GL_NEAREST : GL_LINEAR);
+    m_impl->state.gl.glSamplerParameteri(glSampler, GL_TEXTURE_WRAP_S, toWrap(desc.wrapU));
+    m_impl->state.gl.glSamplerParameteri(glSampler, GL_TEXTURE_WRAP_T, toWrap(desc.wrapV));
+    m_impl->state.gl.glSamplerParameteri(glSampler, GL_TEXTURE_WRAP_R, toWrap(desc.wrapW));
+    if (desc.maxAnisotropy > 1.0F) {
+        if (!m_impl->state.samplerAnisotropySupported) {
+            if (!m_impl->state.warnedSamplerAnisotropyClamped) {
+                m_impl->state.warnedSamplerAnisotropyClamped = true;
+                UVE_WARNING("GlRenderDeviceUVE: CreateSamplerUVE without GL_EXT_texture_filter_anisotropic; "
+                            "anisotropy clamps to 1.0");
+            }
+        } else {
+            m_impl->state.gl.glSamplerParameterf(
+                glSampler, GL_TEXTURE_MAX_ANISOTROPY_EXT,
+                std::min(desc.maxAnisotropy, m_impl->state.maxSamplerAnisotropy));
+        }
+    }
+    UVE_GL_CHECK_ERROR_UVE("CreateSamplerUVE sampler state");
+
+    const std::uint32_t handleValue = m_impl->state.nextSamplerHandle++;
+    m_impl->state.samplers.emplace(handleValue,
+                                   Detail::GlDeviceStateUVE::SamplerRecordUVE{glSampler, desc});
+    return SamplerHandleUVE{handleValue};
+}
+
+void GlRenderDeviceUVE::DestroySamplerUVE(SamplerHandleUVE sampler) {
+    const auto it = m_impl->state.samplers.find(sampler.value);
+    if (it == m_impl->state.samplers.end()) {
+        UVE_ERROR("GlRenderDeviceUVE: DestroySamplerUVE called with an unknown or already-destroyed handle ({})",
+                   sampler.value);
+        return;
+    }
+    // A sampler deleted while bound is implicitly unbound from every unit by the driver
+    // (core GL 3.3 semantics) — no unit bookkeeping to repair here.
+    m_impl->state.gl.glDeleteSamplers(1, &it->second.glSampler);
+    m_impl->state.samplers.erase(it);
 }
 
 ShaderHandleUVE GlRenderDeviceUVE::CreateShaderUVE(const ShaderDescUVE& desc, std::string* outInfoLog) {
@@ -1044,8 +1157,8 @@ bool GlRenderDeviceUVE::IsUsableUVE() const noexcept {
 }
 
 std::size_t GlRenderDeviceUVE::GetLiveResourceCountUVE() const noexcept {
-    return m_impl->state.buffers.size() + m_impl->state.textures.size() + m_impl->state.shaders.size() +
-           m_impl->state.pipelines.size();
+    return m_impl->state.buffers.size() + m_impl->state.textures.size() + m_impl->state.samplers.size() +
+           m_impl->state.shaders.size() + m_impl->state.pipelines.size();
 }
 
 std::uint32_t GlRenderDeviceUVE::GetNativeTextureIdUVE(const TextureHandleUVE texture) const noexcept {

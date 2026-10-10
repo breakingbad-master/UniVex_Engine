@@ -671,6 +671,12 @@ void DestroyTextureIfValidUVE(IRenderDeviceUVE& renderDevice, const TextureHandl
     }
 }
 
+void DestroySamplerIfValidUVE(IRenderDeviceUVE& renderDevice, const SamplerHandleUVE sampler) {
+    if (sampler != kInvalidSamplerHandleUVE) {
+        renderDevice.DestroySamplerUVE(sampler);
+    }
+}
+
 void DestroyBufferIfValidUVE(IRenderDeviceUVE& renderDevice, const BufferHandleUVE buffer) {
     if (buffer != kInvalidBufferHandleUVE) {
         renderDevice.DestroyBufferUVE(buffer);
@@ -809,6 +815,12 @@ struct Renderer3DUVE::ImplUVE {
     /// (Increment 26) — unlike depthTarget above (the main pass's own depth buffer, written and
     /// never sampled), this is later bound as a sampled texture input during the main color pass.
     std::array<TextureHandleUVE, kShadowCascadeCountUVE> shadowMapTargets{};
+
+    /// Tier 2.2 point sampler bound alongside every shadow cascade (see BindMaterialTexturesUVE):
+    /// manual PCF taps texel centers, so point sampling is the CORRECT filter — the pre-2.2
+    /// linear default double-filtered (each tap pre-blurred, then averaged). Invalid when the
+    /// backend cannot make sampler objects (pre-3.3 GL) — binds are skipped, keeping linear.
+    SamplerHandleUVE shadowPointSampler{};
 
     /// The built-in shadow-depth vertex+fragment program (engine/render/shader/built_in/
     /// shadow_depth.glsl), compiled once via shaderManager at construction — not tied to any
@@ -2262,6 +2274,14 @@ struct Renderer3DUVE::ImplUVE {
                     shadowMapTargets[cascadeIndex],
                     kShadowCascadeFirstTextureSlotUVE + static_cast<std::uint32_t>(cascadeIndex));
             }
+            if (shadowPointSampler != kInvalidSamplerHandleUVE) {
+                commandBuffer.BindSamplerUVE(shadowPointSampler, kShadowMapTextureSlotUVE);
+                for (std::size_t cascadeIndex = 0; cascadeIndex < kShadowCascadeCountUVE; ++cascadeIndex) {
+                    commandBuffer.BindSamplerUVE(
+                        shadowPointSampler,
+                        kShadowCascadeFirstTextureSlotUVE + static_cast<std::uint32_t>(cascadeIndex));
+                }
+            }
         }
         commandBuffer.BindTextureUVE(materialResources.albedoTexture, kAlbedoTextureSlotUVE);
         commandBuffer.BindTextureUVE(materialResources.normalTexture, kNormalTextureSlotUVE);
@@ -2718,6 +2738,14 @@ Renderer3DUVE::Renderer3DUVE(IRenderDeviceUVE& renderDevice, IRenderSystemUVE& r
             TextureDescUVE{shadowMapResolution, shadowMapResolution, TextureFormatUVE::Depth32Float, 1});
     }
 
+    // Tier 2.2: the shadow sampler — point/point, no mips (single-level depth targets), clamp.
+    // Creation failure is non-fatal (invalid handle ⇒ binds skipped ⇒ legacy linear taps).
+    SamplerDescUVE shadowSamplerDesc;
+    shadowSamplerDesc.magFilter = SamplerFilterUVE::Point;
+    shadowSamplerDesc.minFilter = SamplerFilterUVE::Point;
+    shadowSamplerDesc.mipMode = SamplerMipModeUVE::None;
+    m_impl->shadowPointSampler = renderDevice.CreateSamplerUVE(shadowSamplerDesc);
+
     Shader::ShaderProgramDescUVE shadowProgramDesc;
     shadowProgramDesc.virtualFilePath = std::string(Shader::BuiltIn::kShadowDepthVirtualPath);
     shadowProgramDesc.embeddedFallbackSourceCode = std::string(Shader::BuiltIn::kShadowDepthSource);
@@ -2936,6 +2964,7 @@ Renderer3DUVE::~Renderer3DUVE() {
     for (const TextureHandleUVE shadowMapTarget : m_impl->shadowMapTargets) {
         DestroyTextureIfValidUVE(m_impl->renderDevice, shadowMapTarget);
     }
+    DestroySamplerIfValidUVE(m_impl->renderDevice, m_impl->shadowPointSampler);
     DestroyBufferIfValidUVE(m_impl->renderDevice, m_impl->particleVertexBuffer);
     DestroyBufferIfValidUVE(m_impl->renderDevice, m_impl->uiVertexBuffer);
     DestroyTextureIfValidUVE(m_impl->renderDevice, m_impl->uiFontAtlasTexture);

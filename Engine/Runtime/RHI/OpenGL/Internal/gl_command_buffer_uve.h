@@ -33,6 +33,7 @@ public:
     void BindVertexBufferUVE(BufferHandleUVE buffer, std::uint32_t slot) override;
     void BindIndexBufferUVE(BufferHandleUVE buffer) override;
     void BindTextureUVE(TextureHandleUVE texture, std::uint32_t slot) override;
+    void BindSamplerUVE(SamplerHandleUVE sampler, std::uint32_t slot) override;
     void BindUniformBufferUVE(BufferHandleUVE buffer, std::uint32_t slot) override;
     void BindStorageBufferUVE(BufferHandleUVE buffer, std::uint32_t slot) override;
     void SetUniformFloatUVE(std::string_view name, float value) override;
@@ -78,6 +79,7 @@ private:
     BufferHandleUVE m_boundIndexBuffer = kInvalidBufferHandleUVE;
     std::uint32_t m_currentVertexStride = 0;
     std::unordered_map<std::uint32_t, TextureHandleUVE> m_boundTextures;
+    std::unordered_map<std::uint32_t, SamplerHandleUVE> m_boundSamplers;
 };
 
 } // namespace UVE::Render

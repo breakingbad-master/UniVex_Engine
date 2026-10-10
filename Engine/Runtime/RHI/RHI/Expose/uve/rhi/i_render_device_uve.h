@@ -15,6 +15,7 @@
 #include "uve/rhi/i_command_buffer_uve.h"
 #include "uve/rhi/pipeline_handle_uve.h"
 #include "uve/rhi/render_resource_descs_uve.h"
+#include "uve/rhi/sampler_handle_uve.h"
 #include "uve/rhi/shader_handle_uve.h"
 #include "uve/rhi/texture_handle_uve.h"
 #include "uve/rhi/uniform_reflection_uve.h"
@@ -86,6 +87,15 @@ public:
 
     /// Destroys `texture`.  A handle already destroyed (or never valid) is a safe no-op (logged).
     virtual void DestroyTextureUVE(TextureHandleUVE texture) = 0;
+
+    /// Creates a sampler object per `desc` (Tier 2.2). The backend rejects malformed descs
+    /// (see IsSamplerDescValidUVE) with kInvalidSamplerHandleUVE; above-limit anisotropy is
+    /// clamped to the device maximum (warn-once), never a creation failure. Valid creation
+    /// never returns kInvalidSamplerHandleUVE.
+    [[nodiscard]] virtual SamplerHandleUVE CreateSamplerUVE(const SamplerDescUVE& desc) = 0;
+
+    /// Destroys `sampler`. A handle already destroyed (or never valid) is a safe no-op (logged).
+    virtual void DestroySamplerUVE(SamplerHandleUVE sampler) = 0;
 
     /// Creates a shader per `desc`. Never returns kInvalidShaderHandleUVE on success. If
     /// `outInfoLog` is non-null, the backend's raw compile info log is written to it regardless

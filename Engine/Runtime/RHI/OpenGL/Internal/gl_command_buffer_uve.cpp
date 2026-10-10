@@ -567,6 +567,32 @@ void GlCommandBufferUVE::BindTextureUVE(TextureHandleUVE texture, std::uint32_t 
     }
 }
 
+void GlCommandBufferUVE::BindSamplerUVE(SamplerHandleUVE sampler, std::uint32_t slot) {
+    // Same compute-aware gate as BindTextureUVE: sampler binds pair with texture binds.
+    if (!m_insideRenderPass && !ActivePipelineIsComputeUVE()) {
+        (void)RequireInsideRenderPassUVE(m_insideRenderPass, "BindSamplerUVE");
+        return;
+    }
+    if (m_state->maxCombinedTextureImageUnits <= 0 ||
+        slot >= static_cast<std::uint32_t>(m_state->maxCombinedTextureImageUnits)) {
+        UVE_ERROR("GlCommandBufferUVE: BindSamplerUVE sampler slot exceeds GL texture-unit limits");
+        return;
+    }
+    const auto samplerIt = m_state->samplers.find(sampler.value);
+    if (samplerIt == m_state->samplers.end()) {
+        UVE_ERROR("GlCommandBufferUVE: BindSamplerUVE referenced an unknown sampler handle");
+        return;
+    }
+    const auto boundSamplerIt = m_boundSamplers.find(slot);
+    const bool alreadyBoundToSlot =
+        boundSamplerIt != m_boundSamplers.end() && boundSamplerIt->second == sampler;
+    if (!alreadyBoundToSlot) {
+        // NOTE: glBindSampler takes the unit INDEX (unlike glActiveTexture's GL_TEXTURE0+n).
+        m_state->gl.glBindSampler(slot, samplerIt->second.glSampler);
+        m_boundSamplers[slot] = sampler;
+    }
+}
+
 void GlCommandBufferUVE::BindUniformBufferUVE(BufferHandleUVE buffer, std::uint32_t slot) {
     if (!RequireInsideRenderPassUVE(m_insideRenderPass, "BindUniformBufferUVE")) {
         return;

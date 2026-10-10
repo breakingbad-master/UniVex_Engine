@@ -4,6 +4,7 @@
 #pragma once
 
 #include <array>
+#include <cmath>
 #include <cstddef>
 #include <cstdint>
 #include <limits>
@@ -172,6 +173,73 @@ struct TextureDescUVE {
     // Appended after existing members to preserve aggregate initialization of legacy descriptors.
     TextureColorSpaceUVE colorSpace = TextureColorSpaceUVE::Linear;
 };
+
+/// How a sampler reads within one mip level. Shared by magnification and minification: GL and
+/// Vulkan both take the same NEAREST/LINEAR choice on each axis, so one enum serves both.
+enum class SamplerFilterUVE : std::uint8_t { Point, Linear };
+
+[[nodiscard]] constexpr bool IsSamplerFilterValidUVE(const SamplerFilterUVE filter) noexcept {
+    switch (filter) {
+        case SamplerFilterUVE::Point:
+        case SamplerFilterUVE::Linear:
+            return true;
+    }
+    return false;
+}
+
+/// How a sampler blends (or refuses to blend) between mip levels. `None` pins sampling to
+/// level 0 — the honest choice for single-level textures like shadow maps and render targets.
+enum class SamplerMipModeUVE : std::uint8_t { None, Point, Linear };
+
+[[nodiscard]] constexpr bool IsSamplerMipModeValidUVE(const SamplerMipModeUVE mode) noexcept {
+    switch (mode) {
+        case SamplerMipModeUVE::None:
+        case SamplerMipModeUVE::Point:
+        case SamplerMipModeUVE::Linear:
+            return true;
+    }
+    return false;
+}
+
+/// How a sampler resolves UVs outside [0, 1]. No clamp-to-border in v1: a border needs a
+/// border-COLOR knob the RHI was deliberately not given (follow-up alongside 2.3 cubemaps,
+/// whose seams are the first real border consumer).
+enum class SamplerWrapUVE : std::uint8_t { ClampToEdge, Repeat, MirroredRepeat };
+
+[[nodiscard]] constexpr bool IsSamplerWrapValidUVE(const SamplerWrapUVE wrap) noexcept {
+    switch (wrap) {
+        case SamplerWrapUVE::ClampToEdge:
+        case SamplerWrapUVE::Repeat:
+        case SamplerWrapUVE::MirroredRepeat:
+            return true;
+    }
+    return false;
+}
+
+/// Describes a sampler object to create via IRenderDeviceUVE::CreateSamplerUVE(). Filtering,
+/// mip blending, wrapping, and anisotropy live here — NOT on the texture — so one texture can
+/// be sampled differently from different slots (a shadow map point-sampled by the PCF pass
+/// while a debug view linear-samples the same target). Defaults reproduce the pre-2.2
+/// hardcoded behavior (linear/trilinear/clamp), so pipelines that never bind a sampler render
+/// byte-identical pixels to before.
+struct SamplerDescUVE {
+    SamplerFilterUVE magFilter = SamplerFilterUVE::Linear;
+    SamplerFilterUVE minFilter = SamplerFilterUVE::Linear;
+    SamplerMipModeUVE mipMode = SamplerMipModeUVE::Linear;
+    SamplerWrapUVE wrapU = SamplerWrapUVE::ClampToEdge;
+    SamplerWrapUVE wrapV = SamplerWrapUVE::ClampToEdge;
+    SamplerWrapUVE wrapW = SamplerWrapUVE::ClampToEdge;
+    /// Maximum anisotropy; 1.0 disables. Must be finite and >= 1.0 — backends clamp values
+    /// above their device limit (with a warn-once), but below-1.0/NaN is a malformed desc.
+    float maxAnisotropy = 1.0F;
+};
+
+[[nodiscard]] inline bool IsSamplerDescValidUVE(const SamplerDescUVE& desc) noexcept {
+    return IsSamplerFilterValidUVE(desc.magFilter) && IsSamplerFilterValidUVE(desc.minFilter) &&
+           IsSamplerMipModeValidUVE(desc.mipMode) && IsSamplerWrapValidUVE(desc.wrapU) &&
+           IsSamplerWrapValidUVE(desc.wrapV) && IsSamplerWrapValidUVE(desc.wrapW) &&
+           std::isfinite(desc.maxAnisotropy) && desc.maxAnisotropy >= 1.0F;
+}
 
 struct TextureMipExtentUVE {
     std::uint32_t width = 0U;

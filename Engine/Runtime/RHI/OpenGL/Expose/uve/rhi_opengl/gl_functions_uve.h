@@ -106,6 +106,18 @@ struct GlFunctionsUVE {
     PFNGLGETPROGRAMBINARYPROC glGetProgramBinary = nullptr;
     PFNGLPROGRAMBINARYPROC glProgramBinary = nullptr;
 
+    // Tier 2.2 sampler objects (core since desktop GL 3.3 / GLES 3.0). Optional like the
+    // program-binary entry points above: CreateSamplerUVE fails closed when getProcAddress
+    // cannot supply them (a pre-3.3 context), and IsCompleteUVE() deliberately ignores them.
+    PFNGLGENSAMPLERSPROC glGenSamplers = nullptr;
+    PFNGLDELETESAMPLERSPROC glDeleteSamplers = nullptr;
+    PFNGLBINDSAMPLERPROC glBindSampler = nullptr;
+    PFNGLSAMPLERPARAMETERIPROC glSamplerParameteri = nullptr;
+    PFNGLSAMPLERPARAMETERFPROC glSamplerParameterf = nullptr;
+    // Extension-string query for the anisotropy probe (core since GL 3.0, so present on every
+    // context this backend initializes — but still null-checked like every loaded pointer).
+    PFNGLGETSTRINGIPROC glGetStringi = nullptr;
+
     // GL_KHR_debug (core since desktop GL 4.3; a common but not universally guaranteed GLES
     // extension - this engine's Android baseline is a fixed GLES 3.0 context, so this is expected
     // to stay null there). Deliberately excluded from IsCompleteUVE() below, matching
