@@ -102,6 +102,7 @@
 #include "uve/component/animation_graph_component_uve.h"
 #include "uve/component/animation_sequencer_component_uve.h"
 #include "uve/component/hierarchy_component_uve.h"
+#include "uve/component/name_component_uve.h"
 #include "uve/component/mesh_component_uve.h"
 #include "uve/component/process_component_uve.h"
 #include "uve/objects/3d/animation_sequencer_uve.h"
@@ -1433,6 +1434,16 @@ void EngineCoreUVE::SyncUVScriptsUVE(const bool simulationPaused) {
         static_cast<void>(instance.RaiseEventUVE("tick", args));
         instance.AdvanceUVE(dt);
     }
+
+    // Collision transitions computed earlier this frame reach scripts now that every script has
+    // ticked: raising during SyncCollisionLifecycleUVE would drop frame-1 enters (slots do not
+    // exist before the first tick). Exactly-once per Update - the report is recomputed every
+    // Update, so there is nothing to clear and no stale double-raise while paused.
+    for (const Physics::CollisionTransitionUVE& transition : m_collisionLifecycleReport.transitions) {
+        RaiseContactScriptEventUVE(
+            transition.pair.first, transition.pair.second,
+            transition.kind == Physics::CollisionTransitionKindUVE::Entered ? "collision_enter" : "collision_exit");
+    }
 }
 
 std::optional<std::size_t> EngineCoreUVE::WriteNativeUVScriptsUVE(const std::filesystem::path& directory) const {
@@ -1840,6 +1851,27 @@ void EngineCoreUVE::SyncProjectile3DObjectsUVE(const float fixedDeltaTimeSeconds
 void EngineCoreUVE::SyncCollisionLifecycleUVE() {
     const std::vector<Physics::CollisionPairUVE> pairs = m_collisionSystem->DetectCollisionsUVE(*m_entityManager);
     m_collisionLifecycleReport = m_collisionLifecycleTracker.UpdateUVE(pairs);
+}
+
+void EngineCoreUVE::RaiseContactScriptEventUVE(const Scene::EntityUVE first, const Scene::EntityUVE second,
+                                               const std::string_view event) {
+    const Scene::EntityUVE listeners[] = {first, second};
+    const Scene::EntityUVE others[] = {second, first};
+    for (std::size_t i = 0U; i < 2U; ++i) {
+        if (listeners[i] == Scene::kInvalidEntityUVE || !m_entityManager->IsAliveUVE(listeners[i])) {
+            continue;
+        }
+        const auto slot = m_uvScripts.find(listeners[i]);
+        if (slot == m_uvScripts.end() || slot->second.instance == nullptr) {
+            continue;
+        }
+        const bool otherNamed = others[i] != Scene::kInvalidEntityUVE && m_entityManager->IsAliveUVE(others[i]) &&
+                                m_entityManager->HasComponentUVE<Scene::NameComponentUVE>(others[i]);
+        const UVScript::ValueUVE args[] = {UVScript::ValueUVE{
+            otherNamed ? m_entityManager->GetComponentUVE<Scene::NameComponentUVE>(others[i]).name
+                       : std::string{}}};
+        static_cast<void>(slot->second.instance->RaiseEventUVE(event, args));
+    }
 }
 
 void EngineCoreUVE::SyncRayCast3DObjectsUVE() {
@@ -3029,6 +3061,10 @@ void EngineCoreUVE::PublishAreaOverlapLifecycleEventsUVE() {
         } else {
             m_eventSystem->QueueEvent(Physics::AreaOverlapExitedEventUVE{transition.pair});
         }
+        // LateUpdate runs after scripts ticked, so slots exist even on frame 1 - no drain needed.
+        RaiseContactScriptEventUVE(
+            transition.pair.area, transition.pair.other,
+            transition.kind == Physics::AreaOverlapTransitionKindUVE::Entered ? "overlap_enter" : "overlap_exit");
     }
 
     // Triggers author what the edges MEAN: one-shot, every-enter and while-occupied fire

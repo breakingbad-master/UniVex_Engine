@@ -549,8 +549,15 @@ private:
     /// Diffs a fresh Physics::ICollisionSystemUVE::DetectCollisionsUVE() snapshot against the
     /// previous tick's via m_collisionLifecycleTracker, storing the resulting enter/exit
     /// transitions in m_collisionLifecycleReport, before scripts run so they see this tick's
-    /// results.
+    /// results. The stored report is drained to scripts after the tick loop (see
+    /// SyncUVScriptsUVE), never here: slots do not exist before the first tick, so raising here
+    /// would drop every frame-1 enter.
     void SyncCollisionLifecycleUVE();
+    /// Raises one contact event to both parties' scripts - each hears the other object's name.
+    /// Dead or scriptless parties are skipped silently; the report keeps its transitions (the
+    /// GetLastCollisionLifecycleReportUVE hook reads them after the frame).
+    void RaiseContactScriptEventUVE(Scene::EntityUVE first, Scene::EntityUVE second,
+                                    std::string_view event);
 
     /// Casts a real ray for every live, enabled RayCast3DComponentUVE entity (that also has a
     /// WorldTransformComponentUVE) through IRaycastSystemUVE, writing the closest result back into

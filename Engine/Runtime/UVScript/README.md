@@ -117,7 +117,8 @@ primary     := NUMBER UNIT? | STRING | 'true' | 'false' | 'none' | IDENT | '(' e
    - `EngineCoreUVE` compiles it once per path against `UVScriptNodeHostUVE`; errors are logged with
      `file:line:column` once, not every frame;
    - `ready` runs once, then `tick(dt)` every frame, in process-priority order, and paused with the
-     rest of the simulation;
+     rest of the simulation; contact edges arrive as `collision_enter/exit` and
+     `overlap_enter/exit`, each carrying the other object's name;
    - the host gives `name`, `position`, `scale`, and on a character body `velocity` and
      `grounded`, plus `input.pressed/held/released/axis`; a rigid body adds its own
      `velocity` and `physics.apply_force/apply_impulse/apply_torque(vec3)`; an audio source

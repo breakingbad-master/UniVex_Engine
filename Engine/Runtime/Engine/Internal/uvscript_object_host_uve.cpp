@@ -103,6 +103,13 @@ std::optional<std::vector<TypeUVE>> UVScriptObjectHostUVE::DescribeEventUVE(cons
     if (event == "animation_event") {
         return std::vector<TypeUVE>{TypeUVE::StrUVE()};
     }
+    // Contact edges: both parties' scripts hear, each with the other object's name ("" when the
+    // other has no Name component). Scripts predate neither party - a contact already active when
+    // a script starts surfaces no enter, though its exit still fires.
+    if (event == "collision_enter" || event == "collision_exit" || event == "overlap_enter" ||
+        event == "overlap_exit") {
+        return std::vector<TypeUVE>{TypeUVE::StrUVE()};
+    }
     return std::nullopt;
 }
 
