@@ -66,7 +66,8 @@ void FirePassedKeysUVE(const CinematicComponentUVE& cinematic, const double from
                     });
     CollectTrackUVE(cinematic.audioKeys, fromExclusive, toInclusive, result.firedAudioCues,
                     [](const CinematicAudioKeyUVE& key) {
-                        return CinematicAudioCueUVE{key.audioAssetPath, key.volume};
+                        return CinematicAudioCueUVE{key.audioAssetPath, key.volume, key.spatial,
+                                                    key.position, key.minDistance, key.maxDistance};
                     });
 }
 
@@ -109,7 +110,11 @@ bool IsCinematicComponentValidUVE(const CinematicComponentUVE& value) noexcept {
     for (const CinematicAudioKeyUVE& key : value.audioKeys) {
         if (key.audioAssetPath.empty() ||
             key.audioAssetPath.size() > kMaximumCinematicAudioPathBytesUVE ||
-            !std::isfinite(key.volume) || key.volume < 0.0F) {
+            !std::isfinite(key.volume) || key.volume < 0.0F ||
+            !std::isfinite(key.minDistance) || key.minDistance <= 0.0F ||
+            !std::isfinite(key.maxDistance) || key.maxDistance <= key.minDistance ||
+            !std::isfinite(key.position.x) || !std::isfinite(key.position.y) ||
+            !std::isfinite(key.position.z)) {
             return false;
         }
     }
@@ -223,16 +228,24 @@ bool RemoveCinematicAnimationKeyUVE(CinematicComponentUVE& cinematic, const std:
 
 bool AddCinematicAudioKeyUVE(CinematicComponentUVE& cinematic, const double timeSeconds,
                              std::string audioAssetPath, const float volume) {
-    if (audioAssetPath.empty() || audioAssetPath.size() > kMaximumCinematicAudioPathBytesUVE ||
-        !std::isfinite(volume) || volume < 0.0F ||
-        !IsValidKeyTimeUVE(timeSeconds, cinematic.durationSeconds) ||
-        cinematic.audioKeys.size() >= kMaximumCinematicAudioKeysUVE) {
-        return false;
-    }
     CinematicAudioKeyUVE key;
     key.timeSeconds = timeSeconds;
     key.audioAssetPath = std::move(audioAssetPath);
     key.volume = volume;
+    return AddCinematicAudioKeyUVE(cinematic, std::move(key));
+}
+
+bool AddCinematicAudioKeyUVE(CinematicComponentUVE& cinematic, CinematicAudioKeyUVE key) {
+    if (key.audioAssetPath.empty() || key.audioAssetPath.size() > kMaximumCinematicAudioPathBytesUVE ||
+        !std::isfinite(key.volume) || key.volume < 0.0F ||
+        !std::isfinite(key.minDistance) || key.minDistance <= 0.0F ||
+        !std::isfinite(key.maxDistance) || key.maxDistance <= key.minDistance ||
+        !std::isfinite(key.position.x) || !std::isfinite(key.position.y) ||
+        !std::isfinite(key.position.z) || !IsValidKeyTimeUVE(key.timeSeconds, cinematic.durationSeconds) ||
+        cinematic.audioKeys.size() >= kMaximumCinematicAudioKeysUVE) {
+        return false;
+    }
+    const double timeSeconds = key.timeSeconds;
     const auto slot = std::upper_bound(
         cinematic.audioKeys.begin(), cinematic.audioKeys.end(), timeSeconds,
         [](const double time, const CinematicAudioKeyUVE& existing) { return time < existing.timeSeconds; });
@@ -313,7 +326,9 @@ CinematicPlayResultUVE PlayCinematicUVE(CinematicComponentUVE& cinematic) noexce
         if (key.timeSeconds > 0.0) {
             break;
         }
-        fired.audioCues.push_back(CinematicAudioCueUVE{key.audioAssetPath, key.volume});
+        fired.audioCues.push_back(CinematicAudioCueUVE{key.audioAssetPath, key.volume, key.spatial,
+                                                               key.position, key.minDistance,
+                                                               key.maxDistance});
     }
     return fired;
 }

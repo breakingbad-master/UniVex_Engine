@@ -399,4 +399,69 @@ TEST(CinematicUVETest, Validity_RejectsBrokenCueTracks) {
     EXPECT_FALSE(IsCinematicComponentValidUVE(unsorted));
 }
 
+
+TEST(CinematicUVETest, Add_SpatialFormValidatesDistancesAndPosition) {
+    CinematicComponentUVE cinematic = MakeCinematicUVE();
+    CinematicAudioKeyUVE spatial;
+    spatial.timeSeconds = 2.0;
+    spatial.audioAssetPath = "sfx/door.uvaudio";
+    spatial.volume = 0.8F;
+    spatial.spatial = true;
+    spatial.position = Math::Vector3UVE{1.0F, 2.0F, 3.0F};
+    spatial.minDistance = 2.0F;
+    spatial.maxDistance = 40.0F;
+    ASSERT_TRUE(AddCinematicAudioKeyUVE(cinematic, spatial));
+    EXPECT_EQ(cinematic.audioKeys.front(), spatial);
+
+    CinematicAudioKeyUVE flatMin = spatial;
+    flatMin.minDistance = 0.0F;
+    EXPECT_FALSE(AddCinematicAudioKeyUVE(cinematic, flatMin));
+
+    CinematicAudioKeyUVE inverted = spatial;
+    inverted.maxDistance = inverted.minDistance;
+    EXPECT_FALSE(AddCinematicAudioKeyUVE(cinematic, inverted));
+
+    CinematicAudioKeyUVE lost = spatial;
+    lost.position = Math::Vector3UVE{std::numeric_limits<float>::quiet_NaN(), 0.0F, 0.0F};
+    EXPECT_FALSE(AddCinematicAudioKeyUVE(cinematic, lost));
+
+    // The short form stays 2D with the default band.
+    ASSERT_TRUE(AddCinematicAudioKeyUVE(cinematic, 4.0, "sfx/ui.uvaudio", 1.0F));
+    EXPECT_FALSE(cinematic.audioKeys.back().spatial);
+    EXPECT_FLOAT_EQ(cinematic.audioKeys.back().maxDistance, 25.0F);
+}
+
+TEST(CinematicUVETest, Step_CarriesSpatialCueFields) {
+    CinematicComponentUVE cinematic = MakeCinematicUVE();
+    CinematicAudioKeyUVE spatial;
+    spatial.timeSeconds = 2.0;
+    spatial.audioAssetPath = "sfx/door.uvaudio";
+    spatial.volume = 0.8F;
+    spatial.spatial = true;
+    spatial.position = Math::Vector3UVE{1.0F, 2.0F, 3.0F};
+    spatial.minDistance = 2.0F;
+    spatial.maxDistance = 40.0F;
+    ASSERT_TRUE(AddCinematicAudioKeyUVE(cinematic, spatial));
+    static_cast<void>(PlayCinematicUVE(cinematic));
+    const CinematicStepResultUVE result = StepCinematicUVE(cinematic, 2.5F);
+    ASSERT_EQ(result.firedAudioCues.size(), 1U);
+    const CinematicAudioCueUVE& cue = result.firedAudioCues.front();
+    EXPECT_TRUE(cue.spatial);
+    EXPECT_EQ(cue.position, Math::Vector3UVE(1.0F, 2.0F, 3.0F));
+    EXPECT_FLOAT_EQ(cue.minDistance, 2.0F);
+    EXPECT_FLOAT_EQ(cue.maxDistance, 40.0F);
+}
+
+TEST(CinematicUVETest, Validity_RejectsBadDistanceBands) {
+    CinematicComponentUVE badMin = MakeCinematicUVE();
+    badMin.audioKeys.push_back(CinematicAudioKeyUVE{1.0, "sfx/a.uvaudio", 1.0F, true,
+                                                    Math::Vector3UVE{}, 0.0F, 25.0F});
+    EXPECT_FALSE(IsCinematicComponentValidUVE(badMin));
+
+    CinematicComponentUVE inverted = MakeCinematicUVE();
+    inverted.audioKeys.push_back(CinematicAudioKeyUVE{1.0, "sfx/a.uvaudio", 1.0F, true,
+                                                      Math::Vector3UVE{}, 10.0F, 10.0F});
+    EXPECT_FALSE(IsCinematicComponentValidUVE(inverted));
+}
+
 } // namespace UVE::Scene::Tests

@@ -1993,10 +1993,15 @@ void EngineCoreUVE::SyncCinematicUVE(const float deltaSeconds) {
                 Audio::AudioSourceDescUVE desc;
                 desc.audioAssetPath = cue.audioAssetPath;
                 desc.volume = cue.volume;
-                desc.spatial = false;
+                desc.spatial = cue.spatial;
+                desc.minDistance = cue.minDistance;
+                desc.maxDistance = cue.maxDistance;
                 const Audio::VoiceHandleUVE voice = m_audioSystem->CreateSourceUVE(desc);
                 if (voice == Audio::kInvalidVoiceHandleUVE) {
                     continue;
+                }
+                if (cue.spatial) {
+                    m_audioSystem->SetSourcePositionUVE(voice, cue.position);
                 }
                 if (!m_audioSystem->PlayUVE(voice)) {
                     m_audioSystem->DestroySourceUVE(voice);

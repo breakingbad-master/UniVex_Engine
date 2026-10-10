@@ -36,7 +36,8 @@ namespace UVE::Scene {
 // Animation and audio keys are edge-triggered like events: passing one fires a cue (a target
 // player to start, a one-shot to play), and Play fires the ones sitting at 0.0. An animation cue
 // names a player plus an optional clip override - an invalid guid plays the player's own clip.
-// Audio cues are fire-and-forget 2D one-shots; the engine tracks their voices in liveOneShots and
+// Audio cues are fire-and-forget one-shots - 2D, or spatial at a baked world position; the engine
+// tracks their voices in liveOneShots and
 // sweeps the stopped ones every frame. Those are bare handle values, not VoiceHandleUVE:
 // gameplay cannot link uve_audio, which would cycle back through uve_scene.
 
@@ -95,10 +96,15 @@ struct CinematicAnimationCueUVE final {
     [[nodiscard]] bool operator==(const CinematicAnimationCueUVE&) const = default;
 };
 
-/// Edge cue: play a 2D one-shot of `audioAssetPath` at `volume`.
+/// Edge cue: play a one-shot of `audioAssetPath` at `volume` - 2D, or spatial at `position`
+/// (baked when fired; one-shots never move) inside `minDistance`..`maxDistance`.
 struct CinematicAudioCueUVE final {
     std::string audioAssetPath;
     float volume = 1.0F;
+    bool spatial = false;
+    Math::Vector3UVE position{};
+    float minDistance = 1.0F;
+    float maxDistance = 25.0F;
 
     [[nodiscard]] bool operator==(const CinematicAudioCueUVE&) const = default;
 };
@@ -115,6 +121,10 @@ struct CinematicAudioKeyUVE final {
     double timeSeconds = 0.0;
     std::string audioAssetPath;
     float volume = 1.0F;
+    bool spatial = false;
+    Math::Vector3UVE position{};
+    float minDistance = 1.0F;
+    float maxDistance = 25.0F;
 
     [[nodiscard]] bool operator==(const CinematicAudioKeyUVE&) const = default;
 };
@@ -143,7 +153,8 @@ struct CinematicComponentUVE final {
 /// Finite positive duration and speed, key times inside [0, duration], usable event ids, valid
 /// cut cameras, both lists sorted by time and within their caps, plus a sorted camera-key track
 /// whose positions are finite and whose rotations are finite unit quaternions. Animation keys
-/// name valid targets; audio keys name usable paths at finite non-negative volume.
+/// name valid targets; audio keys name usable paths at finite non-negative volume with valid
+/// distance bands and finite positions.
 [[nodiscard]] bool IsCinematicComponentValidUVE(const CinematicComponentUVE& value) noexcept;
 
 /// Inserts an event key keeping time order (equal times keep insertion order). False for a bad
@@ -175,10 +186,15 @@ struct CinematicComponentUVE final {
                                                EntityUVE target, Asset::AssetGuidUVE clip);
 /// Removes the animation key at `index`. False when out of range.
 [[nodiscard]] bool RemoveCinematicAnimationKeyUVE(CinematicComponentUVE& cinematic, std::size_t index);
-/// Inserts an audio key keeping time order. False for an empty or overlong path, a non-finite or
-/// negative volume, a time outside [0, duration], or a full track.
+/// Inserts a 2D audio key keeping time order: non-spatial, default distance band. False for an
+/// empty or overlong path, a non-finite or negative volume, a time outside [0, duration], or a
+/// full track.
 [[nodiscard]] bool AddCinematicAudioKeyUVE(CinematicComponentUVE& cinematic, double timeSeconds,
                                            std::string audioAssetPath, float volume);
+/// Inserts a fully-specified audio key (spatial cues included) keeping time order. False when any
+/// field is unusable: bad path, volume, distance band (finite, min above zero, max above min), or
+/// position, a time outside [0, duration], or a full track.
+[[nodiscard]] bool AddCinematicAudioKeyUVE(CinematicComponentUVE& cinematic, CinematicAudioKeyUVE key);
 /// Removes the audio key at `index`. False when out of range.
 [[nodiscard]] bool RemoveCinematicAudioKeyUVE(CinematicComponentUVE& cinematic, std::size_t index);
 

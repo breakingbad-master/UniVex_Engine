@@ -101,6 +101,9 @@ TEST_F(GameplaySerializationUVETest, Cinematic_RoundTripThroughCaptureRestore) {
                                          Math::QuaternionUVE{}));
     ASSERT_TRUE(AddCinematicAnimationKeyUVE(cinematic, 2.0, actor, Asset::AssetGuidUVE{12345U}));
     ASSERT_TRUE(AddCinematicAudioKeyUVE(cinematic, 3.0, "sfx/boom.uvaudio", 0.5F));
+    ASSERT_TRUE(AddCinematicAudioKeyUVE(
+        cinematic, CinematicAudioKeyUVE{4.0, "sfx/door.uvaudio", 0.8F, true,
+                                        Math::Vector3UVE{1.0F, 2.0F, 3.0F}, 2.0F, 40.0F}));
     entityManager.AddComponentUVE<CinematicComponentUVE>(source, cinematic);
 
     const std::optional<SceneSnapshotUVE> snapshot =

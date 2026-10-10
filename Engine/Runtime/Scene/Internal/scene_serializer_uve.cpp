@@ -313,7 +313,11 @@ namespace {
     for (const CinematicAudioKeyUVE& key : component.audioKeys) {
         audioKeys.push_back({{"timeSeconds", key.timeSeconds},
                              {"audioAssetPath", key.audioAssetPath},
-                             {"volume", key.volume}});
+                             {"volume", key.volume},
+                             {"spatial", key.spatial},
+                             {"position", ToJsonUVE(key.position)},
+                             {"minDistance", key.minDistance},
+                             {"maxDistance", key.maxDistance}});
     }
     // Player state (isPlaying, finished, currentTime) is deliberately not written: a loaded
     // cinematic reseeds parked at zero, the same rule as Decal3D and Health.
@@ -378,6 +382,12 @@ namespace {
             key.timeSeconds = entry.value("timeSeconds", 0.0);
             key.audioAssetPath = entry.value("audioAssetPath", std::string{});
             key.volume = entry.value("volume", 1.0F);
+            key.spatial = entry.value("spatial", false);
+            if (const auto position = entry.find("position"); position != entry.end()) {
+                key.position = Vector3FromJsonUVE(*position);
+            }
+            key.minDistance = entry.value("minDistance", 1.0F);
+            key.maxDistance = entry.value("maxDistance", 25.0F);
             value.audioKeys.push_back(std::move(key));
         }
     }
