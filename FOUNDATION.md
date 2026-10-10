@@ -844,7 +844,7 @@ call sites are already allocating from the wrong place.
 | 2.3 | Texture dimensionality — array layers, cubemaps | `RHI/RHI` + backends | image-based lighting; cascade arrays | a cubemap is created and sampled |
 | 2.4 | Multiple render targets on `RenderPassDescUVE` | `RHI/RHI` + backends | any deferred/G-buffer path | a two-attachment pass records and replays |
 | 2.5 | `StoreOpUVE` to pair with `LoadOpUVE` | `RHI/RHI` + backends | tiler efficiency; explicit resolve/discard | every pass declares both |
-| 2.6 | Per-joint animation channels in `AnimationClipAssetUVE` + a skeleton asset | `Asset` | the entire skeletal animation pipeline, and four data-only nodes | a glTF skinned mesh animates |
+| 2.6 | Per-joint animation channels in `AnimationClipAssetUVE` + a skeleton asset | `Asset` | the entire skeletal animation pipeline, and four data-only nodes | a glTF skinned mesh animates — parts landed (AnimationAssetBoneTrackUVE, skeleton_asset_uve, renderer skinning of posed skeletons); confirm the literal glTF eyeball on a GL run |
 | 2.7 | Remaining PBR texture slots on `MaterialAssetUVE` | `Asset` | full PBR materials | metallic/roughness/emissive maps render |
 | 2.8 | Debug line/shape renderer | `RHI/RenderSystems` | visualising bounds, frusta, contacts — pays for itself on the first spatial bug | a bounding box can be drawn from one call |
 
@@ -855,7 +855,7 @@ consumer. They are cheap relative to how large they look.
 
 | # | Item | Blocked on | Note |
 |---|---|---|---|
-| 3.1 | Animation runtime — clip sampler, skinning pass, engine tick | 2.6 | The evaluators, pose buffers and time contracts already exist and are tested |
+| 3.1 | Animation runtime — clip sampler, skinning pass, engine tick | 2.6 | Landed (verified Oct 2026 by source read): step fns in Objects/Animation for sequencer + authored graph, SyncAnimationUVE ticks every frame and physics step, renderer_3d CPU-skins posed skeletons to the GPU. GPU compute skin (mesh_skin_compute + mesh_skin.glsl) built but unwired: perf follow-up, GL-side. |
 | 3.2 | Parallel gameplay systems | Tier 0 containers | `ThreadPoolUVE`, `JobGraphUVE` and `FrameSchedulerUVE` are built and unused by gameplay |
 | 3.3 | Audio mixer routing | — | `AudioMixerGroupUVE` exists; voices simply do not route through it |
 | 3.4 | Script bytecode execution | — | The IR and bytecode encoder/decoder exist; the VM walks the graph instead. Decide whether to execute the bytecode or delete the pipeline |

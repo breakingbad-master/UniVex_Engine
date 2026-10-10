@@ -43,7 +43,7 @@ void ApplyAnimationSequencerObjectDefinitionUVE(IEntityManagerUVE& entityManager
 
 // ---- Playback ------------------------------------------------------------------------------------
 // Pure functions over the component, the clip and the target's transform, so the whole behaviour
-// is testable without an engine. EngineCoreUVE::SyncAnimationSequencersUVE drives them.
+// is testable without an engine. EngineCoreUVE::SyncAnimationUVE drives them.
 
 /// Starts playback from `startOffsetSeconds` (from the end when speed is negative), remembering
 /// the target's current pose for the blend-in, relative playback and Return To Start.
