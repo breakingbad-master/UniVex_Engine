@@ -101,6 +101,13 @@ GlFunctionsUVE LoadGlFunctionsUVE(void* (*getProcAddress)(const char*)) {
         LoadOneUVE<PFNGLCOMPRESSEDTEXIMAGE3DPROC>(getProcAddress, "glCompressedTexImage3D");
     functions.glFramebufferTextureLayer = LoadOneUVE<PFNGLFRAMEBUFFERTEXTURELAYERPROC>(
         getProcAddress, "glFramebufferTextureLayer");
+    // Tier 2.4/2.5 MRT entries (kept out of IsCompleteUVE: optional capability).
+    functions.glDrawBuffers =
+        LoadOneUVE<PFNGLDRAWBUFFERSPROC>(getProcAddress, "glDrawBuffers");
+    functions.glClearBufferfv =
+        LoadOneUVE<PFNGLCLEARBUFFERFVPROC>(getProcAddress, "glClearBufferfv");
+    functions.glInvalidateFramebuffer =
+        LoadOneUVE<PFNGLINVALIDATEFRAMEBUFFERPROC>(getProcAddress, "glInvalidateFramebuffer");
 
     functions.glGetUniformLocation = LoadOneUVE<PFNGLGETUNIFORMLOCATIONPROC>(getProcAddress, "glGetUniformLocation");
     functions.glUniform1f = LoadOneUVE<PFNGLUNIFORM1FPROC>(getProcAddress, "glUniform1f");

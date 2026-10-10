@@ -129,6 +129,16 @@ VKAPI_ATTR VkBool32 VKAPI_CALL VulkanValidationMessageCallbackUVE(
     return VK_ATTACHMENT_LOAD_OP_CLEAR; // unreachable; constexpr-safe default
 }
 
+/// Tier 2.5: LoadOp's store twin. Same contract — invalid enums fall back to the safe
+/// value (STORE keeps content; a discard default could lose a pass silently).
+[[nodiscard]] constexpr VkAttachmentStoreOp ToVkStoreOpUVE(const StoreOpUVE storeOp) noexcept {
+    switch (storeOp) {
+        case StoreOpUVE::Store:   return VK_ATTACHMENT_STORE_OP_STORE;
+        case StoreOpUVE::DontCare: return VK_ATTACHMENT_STORE_OP_DONT_CARE;
+    }
+    return VK_ATTACHMENT_STORE_OP_STORE; // unreachable; constexpr-safe default
+}
+
 /// Tier 2.1: explicit RHI → Vulkan rasterizer mappings. Every switch covers all enumerators and
 /// ends in a constexpr-safe default reproducing the pre-2.1 hardcoded value — an invalid enum
 /// can never produce an undefined `Vk*` value.
@@ -272,6 +282,7 @@ struct VulkanRenderDeviceUVE::ImplUVE {
     // Tier 2.3: array/cubemap caps, queried once at init; CreateTextureUVE rejects above them.
     std::uint32_t maxTextureArrayLayers = 1U;
     std::uint32_t maxCubemapSize = 0U;
+    std::uint32_t maxColorAttachments = 1U; // Tier 2.4: limits.maxColorAttachments
     bool textureCompressionETC2Enabled = false;
     bool textureCompressionASTCLdrEnabled = false;
 
@@ -321,6 +332,12 @@ struct VulkanRenderDeviceUVE::ImplUVE {
         // SHADER_READ_ONLY at CloseCurrentPassDynamicUVE() alongside the color image so the
         // depth texture's rest invariant stays "sampleable between passes".
         TextureRecordUVE* openOffscreenDepthRecord = nullptr;
+        // Tier 2.4: locations 1..3 of the open offscreen pass (count-validated prefix, no
+        // gaps — remembered alongside location 0 so the storage-transition reopen replays
+        // the same attachments with Load/Store semantics).
+        std::array<TextureRecordUVE*, kExtraColorAttachmentCountUVE> openExtraColorRecords{};
+        std::array<std::uint32_t, kExtraColorAttachmentCountUVE> openExtraColorLayers{};
+        std::uint32_t openExtraColorCount = 0U;
     };
     FramePassStateUVE framePassState;
 
@@ -639,6 +656,18 @@ struct VulkanRenderDeviceUVE::ImplUVE {
     };
     std::unordered_map<std::uint32_t, SamplerRecordUVE> samplers;
 
+    // Tier 2.4: one resolved extra color attachment (locations 1..3) for
+    // BeginOffscreenPassDynamicUVE. Validation resolves handles to records; the pass replays
+    // from records exactly like location 0.
+    struct ExtraColorAttachmentUVE {
+        TextureRecordUVE* record = nullptr;
+        std::uint32_t layer = 0U;
+        LoadOpUVE loadOp = LoadOpUVE::Clear;
+        StoreOpUVE storeOp = StoreOpUVE::Store;
+        std::array<float, 4> clearColor{0.0F, 0.0F, 0.0F, 1.0F};
+    };
+    using ExtraColorAttachmentArrayUVE =
+        std::array<ExtraColorAttachmentUVE, kExtraColorAttachmentCountUVE>;
     // --- M2d dynamic-rendering pass helpers (used only when useDynamicRendering) ---------
     // Opens the swapchain rendering instance for the frame's acquired image; the very first
     // open of a frame runs the UNDEFINED-entry barriers, every reopened instance resumes
@@ -657,7 +686,15 @@ struct VulkanRenderDeviceUVE::ImplUVE {
                                                     LoadOpUVE colorLoadOp,
                                                     LoadOpUVE depthLoadOp,
                                                     std::uint32_t colorLayer,
-                                                    std::uint32_t depthLayer);
+                                                    std::uint32_t depthLayer,
+                                                    StoreOpUVE colorStoreOp,
+                                                    StoreOpUVE depthStoreOp,
+                                                    const ExtraColorAttachmentArrayUVE& extras,
+                                                    std::uint32_t extraCount);
+    // Tier 2.4: true when `record` feeds locations 1..3 of the open offscreen pass (the
+    // feedback guard compares location 0/depth inline; extras ride this helper so the
+    // condition stays readable).
+    [[nodiscard]] bool IsRecordAnOpenExtraColorUVE(const TextureRecordUVE* record) const;
     // Closes whichever rendering instance is open (if any) and restores offscreen layouts.
     void CloseCurrentPassDynamicUVE();
     // Scratch depth lookup-or-allocate for one extent. Null on failure (logged once).
@@ -910,11 +947,23 @@ VkImageView VulkanRenderDeviceUVE::ImplUVE::GetOrCreateLayerAttachmentViewUVE(
     return layerView;
 }
 
+bool VulkanRenderDeviceUVE::ImplUVE::IsRecordAnOpenExtraColorUVE(
+    const TextureRecordUVE* record) const {
+    for (std::uint32_t i = 0U; i < framePassState.openExtraColorCount; ++i) {
+        if (framePassState.openExtraColorRecords[i] == record) {
+            return true;
+        }
+    }
+    return false;
+}
+
 bool VulkanRenderDeviceUVE::ImplUVE::BeginOffscreenPassDynamicUVE(
     TextureRecordUVE& color, TextureRecordUVE* depth, const VkExtent2D extent,
     const std::array<float, 4>& clearColor, const float clearDepth,
     const LoadOpUVE colorLoadOp, const LoadOpUVE depthLoadOp,
-    const std::uint32_t colorLayer, const std::uint32_t depthLayer) {
+    const std::uint32_t colorLayer, const std::uint32_t depthLayer,
+    const StoreOpUVE colorStoreOp, const StoreOpUVE depthStoreOp,
+    const ExtraColorAttachmentArrayUVE& extras, const std::uint32_t extraCount) {
     FramePassStateUVE& state = framePassState;
     DepthScratchUVE* scratch = nullptr;
     if (depth == nullptr) {
@@ -926,7 +975,8 @@ bool VulkanRenderDeviceUVE::ImplUVE::BeginOffscreenPassDynamicUVE(
 
     // Entry transitions: the color image leaves its invariant SHADER_READ_ONLY (previous
     // sampled reads ordered by the fragment-shader source scope), depth enters attachment.
-    VkImageMemoryBarrier entryBarriers[2]{};
+    // Tier 2.4: location 0 + extras + depth (only the 1 + extraCount + 1 prefix submits).
+    VkImageMemoryBarrier entryBarriers[1U + kExtraColorAttachmentCountUVE + 1U]{};
     for (VkImageMemoryBarrier& barrier : entryBarriers) {
         barrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
         barrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
@@ -940,21 +990,32 @@ bool VulkanRenderDeviceUVE::ImplUVE::BeginOffscreenPassDynamicUVE(
     // Tier 2.3: only the rendered layer enters the attachment layout (untouched layers keep
     // the record's tracked rest layout, so the next pass's oldLayout stays truthful).
     entryBarriers[0].subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0U, 1U, colorLayer, 1U};
-    entryBarriers[1].srcAccessMask = 0U;
-    entryBarriers[1].dstAccessMask = VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT;
-    if (depth != nullptr) {
-        entryBarriers[1].oldLayout = depth->currentLayout; // SHADER_READ_ONLY by M2e invariant
-    } else {
-        entryBarriers[1].oldLayout = VK_IMAGE_LAYOUT_UNDEFINED; // scratch: content never kept
+    // Tier 2.4: extras enter the attachment layout exactly like location 0 (per-layer ranges).
+    for (std::uint32_t i = 0U; i < extraCount; ++i) {
+        VkImageMemoryBarrier& extraBarrier = entryBarriers[1U + i];
+        extraBarrier.srcAccessMask = VK_ACCESS_SHADER_READ_BIT;
+        extraBarrier.dstAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
+        extraBarrier.oldLayout = extras[i].record->currentLayout;
+        extraBarrier.newLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+        extraBarrier.image = extras[i].record->image;
+        extraBarrier.subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0U, 1U, extras[i].layer, 1U};
     }
-    entryBarriers[1].newLayout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
-    entryBarriers[1].image = depth != nullptr ? depth->image : scratch->image;
-    entryBarriers[1].subresourceRange = {VK_IMAGE_ASPECT_DEPTH_BIT, 0U, 1U,
-                                          depth != nullptr ? depthLayer : 0U, 1U};
+    VkImageMemoryBarrier& depthBarrier = entryBarriers[1U + extraCount];
+    depthBarrier.srcAccessMask = 0U;
+    depthBarrier.dstAccessMask = VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT;
+    if (depth != nullptr) {
+        depthBarrier.oldLayout = depth->currentLayout; // SHADER_READ_ONLY by M2e invariant
+    } else {
+        depthBarrier.oldLayout = VK_IMAGE_LAYOUT_UNDEFINED; // scratch: content never kept
+    }
+    depthBarrier.newLayout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
+    depthBarrier.image = depth != nullptr ? depth->image : scratch->image;
+    depthBarrier.subresourceRange = {VK_IMAGE_ASPECT_DEPTH_BIT, 0U, 1U,
+                                     depth != nullptr ? depthLayer : 0U, 1U};
     vk.vkCmdPipelineBarrier(commandBuffer, VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
                             VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT |
                                 VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT,
-                            0U, 0U, nullptr, 0U, nullptr, 2U, entryBarriers);
+                            0U, 0U, nullptr, 0U, nullptr, 2U + extraCount, entryBarriers);
 
     // M2e: real load ops. The entry barriers above are layout transitions only and already
     // preserve content (oldLayout = the record's tracked layout — never UNDEFINED-discard for
@@ -971,7 +1032,7 @@ bool VulkanRenderDeviceUVE::ImplUVE::BeginOffscreenPassDynamicUVE(
     }
     colorAttachmentInfo.imageLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
     colorAttachmentInfo.loadOp = ToVkLoadOpUVE(colorLoadOp);
-    colorAttachmentInfo.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
+    colorAttachmentInfo.storeOp = ToVkStoreOpUVE(colorStoreOp);
     colorAttachmentInfo.clearValue.color.float32[0] = clearColor[0];
     colorAttachmentInfo.clearValue.color.float32[1] = clearColor[1];
     colorAttachmentInfo.clearValue.color.float32[2] = clearColor[2];
@@ -985,14 +1046,34 @@ bool VulkanRenderDeviceUVE::ImplUVE::BeginOffscreenPassDynamicUVE(
     }
     depthAttachmentInfo.imageLayout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
     depthAttachmentInfo.loadOp = ToVkLoadOpUVE(depthLoadOp);
-    depthAttachmentInfo.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
+    depthAttachmentInfo.storeOp = ToVkStoreOpUVE(depthStoreOp);
     depthAttachmentInfo.clearValue.depthStencil = {clearDepth, 0U};
+    // Tier 2.4: locations 1..3 ride alongside location 0 in one color array (equal dims were
+    // enforced at validation — the GL FBO completeness rule, mirrored for determinism).
+    std::array<VkRenderingAttachmentInfo, 1U + kExtraColorAttachmentCountUVE> allColorInfos{};
+    allColorInfos[0] = colorAttachmentInfo;
+    for (std::uint32_t i = 0U; i < extraCount; ++i) {
+        VkRenderingAttachmentInfo& extraInfo = allColorInfos[1U + i];
+        extraInfo.sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO;
+        extraInfo.imageView =
+            GetOrCreateLayerAttachmentViewUVE(*extras[i].record, extras[i].layer);
+        if (extraInfo.imageView == VK_NULL_HANDLE) {
+            return false;
+        }
+        extraInfo.imageLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+        extraInfo.loadOp = ToVkLoadOpUVE(extras[i].loadOp);
+        extraInfo.storeOp = ToVkStoreOpUVE(extras[i].storeOp);
+        extraInfo.clearValue.color.float32[0] = extras[i].clearColor[0];
+        extraInfo.clearValue.color.float32[1] = extras[i].clearColor[1];
+        extraInfo.clearValue.color.float32[2] = extras[i].clearColor[2];
+        extraInfo.clearValue.color.float32[3] = extras[i].clearColor[3];
+    }
     VkRenderingInfo renderingInfo{};
     renderingInfo.sType = VK_STRUCTURE_TYPE_RENDERING_INFO;
     renderingInfo.renderArea = {{0, 0}, extent};
     renderingInfo.layerCount = 1U;
-    renderingInfo.colorAttachmentCount = 1U;
-    renderingInfo.pColorAttachments = &colorAttachmentInfo;
+    renderingInfo.colorAttachmentCount = 1U + extraCount;
+    renderingInfo.pColorAttachments = allColorInfos.data();
     renderingInfo.pDepthAttachment = &depthAttachmentInfo;
     vk.vkCmdBeginRendering(commandBuffer, &renderingInfo);
 
@@ -1014,6 +1095,11 @@ bool VulkanRenderDeviceUVE::ImplUVE::BeginOffscreenPassDynamicUVE(
     state.openOffscreenColorImage = color.image;
     state.openOffscreenColorRecord = &color;
     state.openOffscreenDepthRecord = depth; // restored to SHADER_READ_ONLY at pass close
+    state.openExtraColorCount = extraCount;
+    for (std::uint32_t i = 0U; i < extraCount; ++i) {
+        state.openExtraColorRecords[i] = extras[i].record;
+        state.openExtraColorLayers[i] = extras[i].layer;
+    }
     return true;
 }
 
@@ -1047,6 +1133,32 @@ void VulkanRenderDeviceUVE::ImplUVE::CloseCurrentPassDynamicUVE() {
                                 VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT, 0U, 0U, nullptr, 0U,
                                 nullptr, 1U, &backToSample);
     }
+    // Tier 2.4: extras restore exactly like location 0 (per-layer ranges, GENERAL rest for
+    // storage-pinned records). StoreOp DontCare still transitions back — the layout must be
+    // defined for the next use; only the CONTENTS are discarded.
+    for (std::uint32_t i = 0U; i < state.openExtraColorCount; ++i) {
+        TextureRecordUVE* extraRecord = state.openExtraColorRecords[i];
+        if (extraRecord == nullptr) {
+            continue;
+        }
+        VkImageMemoryBarrier extraToSample{};
+        extraToSample.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+        extraToSample.srcAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
+        extraToSample.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
+        extraToSample.oldLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+        extraToSample.newLayout = extraRecord->pinnedGeneral
+                                      ? VK_IMAGE_LAYOUT_GENERAL
+                                      : VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+        extraToSample.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+        extraToSample.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+        extraToSample.image = extraRecord->image;
+        extraToSample.subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0U, 1U,
+                                           state.openExtraColorLayers[i], 1U};
+        vk.vkCmdPipelineBarrier(commandBuffer, VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
+                                VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT, 0U, 0U, nullptr, 0U,
+                                nullptr, 1U, &extraToSample);
+        extraRecord->currentLayout = extraToSample.newLayout;
+    }
     if (!state.openPassIsSwapchain && state.openOffscreenDepthRecord != nullptr) {
         // M2e symmetric restore: caller depth textures return to their sampleable rest
         // layout, so a later pass/shader can bind them. (Scratch depth is excluded: its
@@ -1073,6 +1185,8 @@ void VulkanRenderDeviceUVE::ImplUVE::CloseCurrentPassDynamicUVE() {
     state.openOffscreenColorImage = VK_NULL_HANDLE;
     state.openOffscreenColorRecord = nullptr;
     state.openOffscreenDepthRecord = nullptr;
+    state.openExtraColorRecords.fill(nullptr);
+    state.openExtraColorCount = 0U;
 }
 
 void VulkanRenderDeviceUVE::ImplUVE::DestroySwapchainResourcesUVE() {
@@ -1576,6 +1690,10 @@ bool VulkanRenderDeviceUVE::ImplUVE::InitializeUVE() {
     maxSamplerAnisotropy = deviceProperties.limits.maxSamplerAnisotropy;
     maxTextureArrayLayers = deviceProperties.limits.maxImageArrayLayers;
     maxCubemapSize = deviceProperties.limits.maxImageDimensionCube;
+    maxColorAttachments = // Tier 2.4: fail closed past the device's color limit
+        deviceProperties.limits.maxColorAttachments > 0U
+            ? deviceProperties.limits.maxColorAttachments
+            : 1U;
 
     // M2d probe: is core dynamic rendering available on this physical device+instance?
     // (Instance apiVersion was already clamped at 1.3 above; the feature query needs the
@@ -4367,6 +4485,16 @@ void VulkanRenderDeviceUVE::ReplayRecordedCommandsUVE(const std::vector<Recorded
         const bool wasSwapchain = impl.framePassState.openPassIsSwapchain;
         ImplUVE::TextureRecordUVE* colorRecord = impl.framePassState.openOffscreenColorRecord;
         ImplUVE::TextureRecordUVE* depthRecord = impl.framePassState.openOffscreenDepthRecord;
+        // Tier 2.4: snapshot the extras BEFORE the close below clears them — the reopen replays
+        // the same attachments with Load/Store (content must survive the interruption).
+        ImplUVE::ExtraColorAttachmentArrayUVE reopenExtras{};
+        const std::uint32_t reopenExtraCount = impl.framePassState.openExtraColorCount;
+        for (std::uint32_t i = 0U; i < reopenExtraCount; ++i) {
+            reopenExtras[i].record = impl.framePassState.openExtraColorRecords[i];
+            reopenExtras[i].layer = impl.framePassState.openExtraColorLayers[i];
+            reopenExtras[i].loadOp = LoadOpUVE::Load;
+            reopenExtras[i].storeOp = StoreOpUVE::Store;
+        }
         if (passWasOpen) {
             impl.CloseCurrentPassDynamicUVE(); // layout barriers are illegal inside an instance
         }
@@ -4405,7 +4533,8 @@ void VulkanRenderDeviceUVE::ReplayRecordedCommandsUVE(const std::vector<Recorded
                            VkExtent2D{colorRecord->desc.width, colorRecord->desc.height},
                            {0.0F, 0.0F, 0.0F, 0.0F}, 1.0F, LoadOpUVE::Load, LoadOpUVE::Load,
                            impl.framePassState.openColorLayer,
-                           impl.framePassState.openDepthLayer));
+                           impl.framePassState.openDepthLayer, StoreOpUVE::Store,
+                           StoreOpUVE::Store, reopenExtras, reopenExtraCount));
             if (!reopened) {
                 impl.WarnOnceUVE(VulkanRenderDeviceUVE::ImplUVE::kWarnedStorageImageTransitionUVE,
                     "replay: reopening the rendering instance after a storage-image layout "
@@ -4522,7 +4651,8 @@ void VulkanRenderDeviceUVE::ReplayRecordedCommandsUVE(const std::vector<Recorded
                     }
                 } else if (impl.framePassState.passOpen && !impl.framePassState.openPassIsSwapchain &&
                            (&slotRecord == impl.framePassState.openOffscreenDepthRecord ||
-                            slotRecord.image == impl.framePassState.openOffscreenColorImage)) {
+                            slotRecord.image == impl.framePassState.openOffscreenColorImage ||
+                            impl.IsRecordAnOpenExtraColorUVE(&slotRecord))) {
                     // M2e feedback guard: sampling OR storage-writing a texture WHILE it is
                     // attached to the open pass is the Vulkan-illegal/GL-undefined feedback
                     // loop. Keep the frame deterministic: use the kind-matched fallback once,
@@ -4857,9 +4987,19 @@ void VulkanRenderDeviceUVE::ReplayRecordedCommandsUVE(const std::vector<Recorded
                     // the command stream with its own layout transitions. Re-entering the
                     // ALREADY-open kind is a no-op marker (matches GL's coalesced FBO reuse);
                     // switching kinds closes the previous instance first.
+                    // Tier 2.4: extras alone make a pass offscreen (they ride the offscreen
+                    // branch's validation — a swapchain pass must not silently drop them).
+                    bool hasExtraAttachments = false;
+                    for (const ColorAttachmentUVE& extra : op.desc.extraColorAttachments) {
+                        if (extra.target != kInvalidTextureHandleUVE) {
+                            hasExtraAttachments = true;
+                            break;
+                        }
+                    }
                     const bool isOffscreen =
                         (op.desc.colorAttachment != kInvalidTextureHandleUVE ||
-                         op.desc.depthAttachment != kInvalidTextureHandleUVE);
+                         op.desc.depthAttachment != kInvalidTextureHandleUVE ||
+                         hasExtraAttachments);
                     if (!isOffscreen) {
                         if (impl.framePassState.passOpen &&
                             !impl.framePassState.openPassIsSwapchain) {
@@ -4878,11 +5018,19 @@ void VulkanRenderDeviceUVE::ReplayRecordedCommandsUVE(const std::vector<Recorded
                         // Offscreen target: validate the contract, then swap instances.
                         passActiveForThisList = false;
                         if (op.desc.colorAttachment == kInvalidTextureHandleUVE) {
-                            impl.WarnOnceUVE(
-                                VulkanRenderDeviceUVE::ImplUVE::kWarnedOffscreenPassUVE,
-                                "BeginRenderPassUVE: depth-only offscreen passes are not "
-                                "supported (attach an RGBA8 color texture, or omit the depth "
-                                "attachment for a color pass; submission's draws are skipped)");
+                            if (hasExtraAttachments) {
+                                impl.WarnOnceUVE(
+                                    VulkanRenderDeviceUVE::ImplUVE::kWarnedOffscreenUnsupportedUVE,
+                                    "BeginRenderPassUVE: extra color attachments need location 0 "
+                                    "(a pass with extras but no colorAttachment is malformed; "
+                                    "submission's draws are skipped)");
+                            } else {
+                                impl.WarnOnceUVE(
+                                    VulkanRenderDeviceUVE::ImplUVE::kWarnedOffscreenPassUVE,
+                                    "BeginRenderPassUVE: depth-only offscreen passes are not "
+                                    "supported (attach an RGBA8 color texture, or omit the depth "
+                                    "attachment for a color pass; submission's draws are skipped)");
+                            }
                         } else {
                             const auto foundColor =
                                 impl.textures.find(op.desc.colorAttachment.value);
@@ -4954,6 +5102,114 @@ void VulkanRenderDeviceUVE::ReplayRecordedCommandsUVE(const std::vector<Recorded
                                     skipPass = true;
                                 }
                             }
+                            // Tier 2.4: locations 1..3 resolve here — a contiguous prefix under
+                            // the same contract as location 0 (known color-format handle,
+                            // matching dims, layer in range), pairwise distinct from location 0,
+                            // the depth, and each other (one image may not feed two attachments).
+                            ImplUVE::ExtraColorAttachmentArrayUVE extras{};
+                            std::uint32_t extraCount = 0U;
+                            if (!skipPass) {
+                                bool gapSeen = false;
+                                for (const ColorAttachmentUVE& slot :
+                                     op.desc.extraColorAttachments) {
+                                    if (slot.target == kInvalidTextureHandleUVE) {
+                                        gapSeen = true;
+                                        continue;
+                                    }
+                                    if (gapSeen) {
+                                        impl.WarnOnceUVE(
+                                            VulkanRenderDeviceUVE::ImplUVE::
+                                                kWarnedOffscreenUnsupportedUVE,
+                                            "BeginRenderPassUVE: extra color attachments must be "
+                                            "a contiguous prefix (a gap is malformed; the "
+                                            "submission's draws are skipped)");
+                                        skipPass = true;
+                                        break;
+                                    }
+                                    const auto foundExtra =
+                                        impl.textures.find(slot.target.value);
+                                    if (foundExtra == impl.textures.end()) {
+                                        impl.WarnOnceUVE(
+                                            VulkanRenderDeviceUVE::ImplUVE::kWarnedUnknownHandleUVE,
+                                            "BeginRenderPassUVE: unknown extra color texture "
+                                            "handle; the submission's draws are skipped");
+                                        skipPass = true;
+                                        break;
+                                    }
+                                    if (IsTextureFormatCompressedUVE(
+                                            foundExtra->second.desc.format) ||
+                                        foundExtra->second.vkFormat != impl.swapchainFormat) {
+                                        impl.WarnOnceUVE(
+                                            VulkanRenderDeviceUVE::ImplUVE::
+                                                kWarnedOffscreenUnsupportedUVE,
+                                            "BeginRenderPassUVE: an extra color attachment is not "
+                                            "attachable (same rule as location 0 — an RGBA8Unorm "
+                                            "texture in the swapchain's format; the submission's "
+                                            "draws are skipped)");
+                                        skipPass = true;
+                                        break;
+                                    }
+                                    if (foundExtra->second.desc.width !=
+                                            foundColor->second.desc.width ||
+                                        foundExtra->second.desc.height !=
+                                            foundColor->second.desc.height) {
+                                        impl.WarnOnceUVE(
+                                            VulkanRenderDeviceUVE::ImplUVE::
+                                                kWarnedOffscreenUnsupportedUVE,
+                                            "BeginRenderPassUVE: every color attachment must "
+                                            "match location 0's dimensions (the GL FBO "
+                                            "completeness rule, enforced for cross-backend "
+                                            "determinism; the submission's draws are skipped)");
+                                        skipPass = true;
+                                        break;
+                                    }
+                                    if (slot.layer >= foundExtra->second.desc.arrayLayers) {
+                                        impl.WarnOnceUVE(
+                                            VulkanRenderDeviceUVE::ImplUVE::
+                                                kWarnedOffscreenUnsupportedUVE,
+                                            "BeginRenderPassUVE: an extra color layer exceeds its "
+                                            "attachment's layer count; the submission's draws "
+                                            "are skipped");
+                                        skipPass = true;
+                                        break;
+                                    }
+                                    bool alreadyAttached =
+                                        slot.target.value == op.desc.colorAttachment.value ||
+                                        slot.target.value == op.desc.depthAttachment.value;
+                                    for (std::uint32_t j = 0U;
+                                         j < extraCount && !alreadyAttached; ++j) {
+                                        alreadyAttached = op.desc.extraColorAttachments[j].target
+                                                              .value == slot.target.value;
+                                    }
+                                    if (alreadyAttached) {
+                                        impl.WarnOnceUVE(
+                                            VulkanRenderDeviceUVE::ImplUVE::
+                                                kWarnedOffscreenUnsupportedUVE,
+                                            "BeginRenderPassUVE: one texture may not feed two "
+                                            "attachments of the same pass; the submission's "
+                                            "draws are skipped");
+                                        skipPass = true;
+                                        break;
+                                    }
+                                    ImplUVE::ExtraColorAttachmentUVE resolved{};
+                                    resolved.record = &foundExtra->second;
+                                    resolved.layer = slot.layer;
+                                    resolved.loadOp = slot.loadOp;
+                                    resolved.storeOp = slot.storeOp;
+                                    resolved.clearColor = slot.clearColor;
+                                    extras[extraCount] = resolved;
+                                    ++extraCount;
+                                }
+                                if (!skipPass && 1U + extraCount > impl.maxColorAttachments) {
+                                    impl.WarnOnceUVE(
+                                        VulkanRenderDeviceUVE::ImplUVE::
+                                            kWarnedOffscreenUnsupportedUVE,
+                                        "BeginRenderPassUVE: the pass names more color attachments "
+                                        "than the device offers; the submission's draws are "
+                                        "skipped");
+                                    skipPass = true;
+                                }
+                            }
                             if (!skipPass) {
                                 const ImplUVE::TextureRecordUVE& color = foundColor->second;
                                 // M2e: offscreen loadOps are REAL (Clear/Load/DontCare map to
@@ -4967,7 +5223,9 @@ void VulkanRenderDeviceUVE::ReplayRecordedCommandsUVE(const std::vector<Recorded
                                         VkExtent2D{color.desc.width, color.desc.height},
                                         op.desc.clearColor, op.desc.clearDepth,
                                         op.desc.colorLoadOp, op.desc.depthLoadOp,
-                                        op.desc.colorLayer, op.desc.depthLayer)) {
+                                        op.desc.colorLayer, op.desc.depthLayer,
+                                        op.desc.colorStoreOp, op.desc.depthStoreOp, extras,
+                                        extraCount)) {
                                     passActiveForThisList = true;
                                     if (op.desc.viewportOverride.has_value()) {
                                         applyViewportOverrideUVE(*op.desc.viewportOverride,
@@ -4979,8 +5237,15 @@ void VulkanRenderDeviceUVE::ReplayRecordedCommandsUVE(const std::vector<Recorded
                     }
                 } else {
                     // ------------- classic M1-M2c pass scheduling (unchanged) -------------
+                    bool classicHasExtras = false;
+                    for (const ColorAttachmentUVE& extra : op.desc.extraColorAttachments) {
+                        if (extra.target != kInvalidTextureHandleUVE) {
+                            classicHasExtras = true;
+                            break;
+                        }
+                    }
                     if (op.desc.colorAttachment != kInvalidTextureHandleUVE ||
-                        op.desc.depthAttachment != kInvalidTextureHandleUVE) {
+                        op.desc.depthAttachment != kInvalidTextureHandleUVE || classicHasExtras) {
                         impl.WarnOnceUVE(VulkanRenderDeviceUVE::ImplUVE::kWarnedOffscreenPassUVE,
                             "BeginRenderPassUVE targeting actual texture attachments requires "
                             "core 1.3 dynamic rendering, which this device/instance does not "
@@ -5430,6 +5695,8 @@ void VulkanRenderDeviceUVE::PresentUVE() {
         state.openPassIsSwapchain = true;
         state.openOffscreenColorImage = VK_NULL_HANDLE;
         state.openOffscreenColorRecord = nullptr;
+        state.openExtraColorRecords.fill(nullptr);
+        state.openExtraColorCount = 0U;
     }
 
     // Replay every submitted recorded command buffer in submission order, inside THIS pass —

@@ -100,6 +100,13 @@ struct GlFunctionsUVE {
     PFNGLTEXIMAGE3DPROC glTexImage3D = nullptr;
     PFNGLCOMPRESSEDTEXIMAGE3DPROC glCompressedTexImage3D = nullptr;
     PFNGLFRAMEBUFFERTEXTURELAYERPROC glFramebufferTextureLayer = nullptr;
+    // Tier 2.4/2.5: MRT draw routing (GL 2.0 / GLES 3.0 core), per-slot clears (GL 3.0 /
+    // GLES 3.0 core), and DontCare discard hints (GL 4.3 / GLES 3.0 core). Optional like the
+    // Tier 2.3 entries above — IsCompleteUVE() ignores them; MRT passes fail closed when the
+    // routing/clear entries are absent, while a missing discard entry only skips the hint.
+    PFNGLDRAWBUFFERSPROC glDrawBuffers = nullptr;
+    PFNGLCLEARBUFFERFVPROC glClearBufferfv = nullptr;
+    PFNGLINVALIDATEFRAMEBUFFERPROC glInvalidateFramebuffer = nullptr;
 
     // Uniform-related (Increment 21: ShaderManagerUVE's reflection + ICommandBufferUVE's
     // SetUniform*UVE calls) and program-binary-cache (Increment 21's on-disk shader cache).

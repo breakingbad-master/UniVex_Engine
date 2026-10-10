@@ -3,6 +3,7 @@
 
 #pragma once
 
+#include <array>
 #include <cstddef>
 #include <cstdint>
 #include <functional>
@@ -108,9 +109,14 @@ struct GlDeviceStateUVE {
         std::uint32_t depth = 0U;
         std::uint32_t colorLayer = 0U;
         std::uint32_t depthLayer = 0U;
+        // Tier 2.4: locations 1..3 ride the key (handles AND layers — one cached FBO per
+        // attachment set, same as the 2.3 layer rule; unused slots stay 0).
+        std::array<std::uint32_t, kExtraColorAttachmentCountUVE> extraColors{};
+        std::array<std::uint32_t, kExtraColorAttachmentCountUVE> extraColorLayers{};
         bool operator==(const FramebufferKeyUVE& other) const noexcept {
             return color == other.color && depth == other.depth &&
-                   colorLayer == other.colorLayer && depthLayer == other.depthLayer;
+                   colorLayer == other.colorLayer && depthLayer == other.depthLayer &&
+                   extraColors == other.extraColors && extraColorLayers == other.extraColorLayers;
         }
     };
     struct FramebufferKeyHashUVE {
@@ -119,6 +125,12 @@ struct GlDeviceStateUVE {
             hash = hash * 31U + std::hash<std::uint32_t>{}(key.depth);
             hash = hash * 31U + std::hash<std::uint32_t>{}(key.colorLayer);
             hash = hash * 31U + std::hash<std::uint32_t>{}(key.depthLayer);
+            for (const std::uint32_t extra : key.extraColors) {
+                hash = hash * 31U + std::hash<std::uint32_t>{}(extra);
+            }
+            for (const std::uint32_t extraLayer : key.extraColorLayers) {
+                hash = hash * 31U + std::hash<std::uint32_t>{}(extraLayer);
+            }
             return hash;
         }
     };

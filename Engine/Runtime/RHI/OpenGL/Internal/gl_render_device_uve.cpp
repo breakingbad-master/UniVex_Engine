@@ -750,7 +750,16 @@ void GlRenderDeviceUVE::DestroyTextureUVE(TextureHandleUVE texture) {
          framebufferIt != m_impl->state.framebufferCache.end();) {
         const std::uint32_t colorHandle = framebufferIt->first.color;
         const std::uint32_t depthHandle = framebufferIt->first.depth;
-        if (colorHandle == texture.value || depthHandle == texture.value) {
+        // Tier 2.4: extras pin their FBOs too — a destroyed extra must evict the cache entry
+        // (unused slots hold 0, which no live handle takes, so they never match).
+        bool extraMatches = false;
+        for (const std::uint32_t extraHandle : framebufferIt->first.extraColors) {
+            if (extraHandle == texture.value) {
+                extraMatches = true;
+                break;
+            }
+        }
+        if (colorHandle == texture.value || depthHandle == texture.value || extraMatches) {
             m_impl->state.gl.glDeleteFramebuffers(1, &framebufferIt->second);
             framebufferIt = m_impl->state.framebufferCache.erase(framebufferIt);
         } else {

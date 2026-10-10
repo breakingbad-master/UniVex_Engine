@@ -668,6 +668,22 @@ enum class LoadOpUVE : std::uint8_t { Clear, Load, DontCare };
     return false;
 }
 
+/// What happens to a render pass attachment's contents at the END of the pass (Tier 2.5).
+/// `Store` keeps the rendered bits for later sampling — the only pre-2.5 behavior, since every
+/// backend stored unconditionally. `DontCare` lets the driver discard them (tiler efficiency);
+/// the contents become undefined. There is deliberately no Resolve option: multisampled
+/// textures do not exist in the RHI yet.
+enum class StoreOpUVE : std::uint8_t { Store, DontCare };
+
+[[nodiscard]] constexpr bool IsStoreOpValidUVE(const StoreOpUVE storeOp) noexcept {
+    switch (storeOp) {
+        case StoreOpUVE::Store:
+        case StoreOpUVE::DontCare:
+            return true;
+    }
+    return false;
+}
+
 /// Describes one BeginRenderPassUVE() call: which color/depth textures are rendered into and how
 /// they're cleared. `depthAttachment` may be `kInvalidTextureHandleUVE` for a color-only pass.
 /// `colorAttachment` itself may also be `kInvalidTextureHandleUVE`, meaning "render into the
@@ -683,6 +699,24 @@ enum class LoadOpUVE : std::uint8_t { Clear, Load, DontCare };
 /// favour of the one shared integer-rect type. Position/size are signed now; backends reject
 /// a negative or zero-size rect through the same viewport fit-check as an out-of-bounds one.
 using ViewportRectUVE = Math::RectIntUVE;
+
+/// How many color locations past location 0 a pass may target (Tier 2.4): locations 1..3, so
+/// four total — inside every GL (MAX_DRAW_BUFFERS >= 8) and Vulkan (maxColorAttachments, queried
+/// at init) device, and no G-buffer needs more.
+inline constexpr std::uint32_t kExtraColorAttachmentCountUVE = 3U;
+
+/// One of locations 1..3 of a multi-target pass (Tier 2.4). Location 0 keeps the legacy
+/// top-level fields below (colorAttachment/colorLoadOp/clearColor/...), so single-target passes
+/// — every pass that exists today — compile and behave exactly as before. An extra slot whose
+/// target is invalid is simply unused, and gaps are NOT allowed: location 2 set while location 1
+/// is invalid is malformed, and backends reject it like any other malformed pass descriptor.
+struct ColorAttachmentUVE {
+    TextureHandleUVE target;
+    std::uint32_t layer = 0;
+    LoadOpUVE loadOp = LoadOpUVE::Clear;
+    StoreOpUVE storeOp = StoreOpUVE::Store;
+    std::array<float, 4> clearColor{0.0F, 0.0F, 0.0F, 1.0F};
+};
 
 struct RenderPassDescUVE {
     TextureHandleUVE colorAttachment;
@@ -702,6 +736,12 @@ struct RenderPassDescUVE {
     // pass descriptor. Defaults preserve the only pre-2.3 behavior (layer 0 of a 2D target).
     std::uint32_t colorLayer = 0;
     std::uint32_t depthLayer = 0;
+    // Tier 2.5: end-of-pass behavior for location 0 and depth. Defaults preserve the only
+    // pre-2.5 behavior (everything stored).
+    StoreOpUVE colorStoreOp = StoreOpUVE::Store;
+    StoreOpUVE depthStoreOp = StoreOpUVE::Store;
+    // Tier 2.4: locations 1..3 (see ColorAttachmentUVE). Empty by default: a single target.
+    std::array<ColorAttachmentUVE, kExtraColorAttachmentCountUVE> extraColorAttachments{};
 };
 
 } // namespace UVE::Render

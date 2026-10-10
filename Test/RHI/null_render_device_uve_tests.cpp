@@ -1362,5 +1362,152 @@ TEST(NullCommandBufferUVERuntimeTest, CommandBufferLifecycleMisuseIsSafeNoOpInRe
 }
 #endif
 
+
+TEST(NullCommandBufferUVETest, BeginRenderPassUVE_UnknownStoreOp_DoesNotRecordOrEnterPass) {
+    // Tier 2.5 mirror of UnknownLoadOp: a garbage store enum is a malformed pass on every
+    // backend, so Null refuses to record or enter it (both slots covered, then a valid pass
+    // proves the device is unaffected).
+    NullRenderDeviceUVE device;
+    std::unique_ptr<ICommandBufferUVE> badColorStore = device.CreateCommandBufferUVE();
+    RenderPassDescUVE badColorDesc;
+    badColorDesc.colorStoreOp = static_cast<StoreOpUVE>(0xFFU);
+    badColorStore->BeginRenderPassUVE(badColorDesc);
+    device.SubmitUVE(std::move(badColorStore));
+    EXPECT_TRUE(device.GetLastSubmittedCommandsUVE().empty());
+
+    std::unique_ptr<ICommandBufferUVE> badDepthStore = device.CreateCommandBufferUVE();
+    RenderPassDescUVE badDepthDesc;
+    badDepthDesc.depthStoreOp = static_cast<StoreOpUVE>(0xFFU);
+    badDepthStore->BeginRenderPassUVE(badDepthDesc);
+    device.SubmitUVE(std::move(badDepthStore));
+    EXPECT_TRUE(device.GetLastSubmittedCommandsUVE().empty());
+
+    std::unique_ptr<ICommandBufferUVE> validCommandBuffer = device.CreateCommandBufferUVE();
+    validCommandBuffer->BeginRenderPassUVE(RenderPassDescUVE{});
+    validCommandBuffer->EndRenderPassUVE();
+    device.SubmitUVE(std::move(validCommandBuffer));
+    EXPECT_EQ(device.GetLastSubmittedCommandsUVE().size(), 2U);
+}
+
+TEST(NullCommandBufferUVETest, BeginRenderPassUVE_ExtrasRoundTrip_RecordsSlotsVerbatim) {
+    // Tier 2.4/2.5: a two-extra prefix plus non-default store ops records opaquely and reads
+    // back verbatim. The defaults pinned first are the zero-behavior-change contract (the
+    // renderer's 73 pass sites never set these fields).
+    const RenderPassDescUVE defaults;
+    EXPECT_EQ(defaults.colorStoreOp, StoreOpUVE::Store);
+    EXPECT_EQ(defaults.depthStoreOp, StoreOpUVE::Store);
+    for (const ColorAttachmentUVE& slot : defaults.extraColorAttachments) {
+        EXPECT_EQ(slot.target, kInvalidTextureHandleUVE);
+    }
+
+    NullRenderDeviceUVE device;
+    const TextureHandleUVE color = device.CreateTextureUVE(TextureDescUVE{4U, 4U});
+    ASSERT_NE(color, kInvalidTextureHandleUVE);
+    const TextureHandleUVE depth =
+        device.CreateTextureUVE(TextureDescUVE{4U, 4U, TextureFormatUVE::Depth32Float, 1U});
+    ASSERT_NE(depth, kInvalidTextureHandleUVE);
+    const TextureHandleUVE extra0 = device.CreateTextureUVE(TextureDescUVE{4U, 4U});
+    ASSERT_NE(extra0, kInvalidTextureHandleUVE);
+    const TextureHandleUVE extra1 = device.CreateTextureUVE(TextureDescUVE{4U, 4U});
+    ASSERT_NE(extra1, kInvalidTextureHandleUVE);
+
+    auto commandBuffer = device.CreateCommandBufferUVE();
+    RenderPassDescUVE passDesc;
+    passDesc.colorAttachment = color;
+    passDesc.depthAttachment = depth;
+    passDesc.colorStoreOp = StoreOpUVE::Store;
+    passDesc.depthStoreOp = StoreOpUVE::DontCare;
+    passDesc.extraColorAttachments[0].target = extra0;
+    passDesc.extraColorAttachments[0].layer = 1U;
+    passDesc.extraColorAttachments[0].loadOp = LoadOpUVE::Load;
+    passDesc.extraColorAttachments[0].storeOp = StoreOpUVE::DontCare;
+    passDesc.extraColorAttachments[0].clearColor = {0.25F, 0.5F, 0.75F, 1.0F};
+    passDesc.extraColorAttachments[1].target = extra1;
+    passDesc.extraColorAttachments[1].layer = 0U;
+    passDesc.extraColorAttachments[1].loadOp = LoadOpUVE::Clear;
+    passDesc.extraColorAttachments[1].storeOp = StoreOpUVE::Store;
+    passDesc.extraColorAttachments[1].clearColor = {1.0F, 0.0F, 0.0F, 1.0F};
+    commandBuffer->BeginRenderPassUVE(passDesc);
+    commandBuffer->EndRenderPassUVE();
+    device.SubmitUVE(std::move(commandBuffer));
+
+    const std::vector<RecordedCommandUVE>& recorded = device.GetLastSubmittedCommandsUVE();
+    ASSERT_EQ(recorded.size(), 2U);
+    ASSERT_TRUE(std::holds_alternative<BeginRenderPassCommandUVE>(recorded[0]));
+    const RenderPassDescUVE& roundTripped = std::get<BeginRenderPassCommandUVE>(recorded[0]).desc;
+    EXPECT_EQ(roundTripped.colorAttachment, color);
+    EXPECT_EQ(roundTripped.depthAttachment, depth);
+    EXPECT_EQ(roundTripped.colorStoreOp, StoreOpUVE::Store);
+    EXPECT_EQ(roundTripped.depthStoreOp, StoreOpUVE::DontCare);
+    EXPECT_EQ(roundTripped.extraColorAttachments[0].target, extra0);
+    EXPECT_EQ(roundTripped.extraColorAttachments[0].layer, 1U);
+    EXPECT_EQ(roundTripped.extraColorAttachments[0].loadOp, LoadOpUVE::Load);
+    EXPECT_EQ(roundTripped.extraColorAttachments[0].storeOp, StoreOpUVE::DontCare);
+    EXPECT_FLOAT_EQ(roundTripped.extraColorAttachments[0].clearColor[0], 0.25F);
+    EXPECT_FLOAT_EQ(roundTripped.extraColorAttachments[0].clearColor[1], 0.5F);
+    EXPECT_FLOAT_EQ(roundTripped.extraColorAttachments[0].clearColor[2], 0.75F);
+    EXPECT_FLOAT_EQ(roundTripped.extraColorAttachments[0].clearColor[3], 1.0F);
+    EXPECT_EQ(roundTripped.extraColorAttachments[1].target, extra1);
+    EXPECT_EQ(roundTripped.extraColorAttachments[1].layer, 0U);
+    EXPECT_EQ(roundTripped.extraColorAttachments[1].loadOp, LoadOpUVE::Clear);
+    EXPECT_EQ(roundTripped.extraColorAttachments[1].storeOp, StoreOpUVE::Store);
+    EXPECT_EQ(roundTripped.extraColorAttachments[2].target, kInvalidTextureHandleUVE);
+
+    device.DestroyTextureUVE(color);
+    device.DestroyTextureUVE(depth);
+    device.DestroyTextureUVE(extra0);
+    device.DestroyTextureUVE(extra1);
+}
+
+TEST(NullCommandBufferUVETest, BeginRenderPassUVE_GappyExtras_DoesNotRecordOrEnterPass) {
+    // Tier 2.4: location 2 set while 1 is empty is malformed on every backend — Null refuses
+    // to record or enter it, then proves the device is unaffected with a valid prefix.
+    NullRenderDeviceUVE device;
+    const TextureHandleUVE extra = device.CreateTextureUVE(TextureDescUVE{4U, 4U});
+    ASSERT_NE(extra, kInvalidTextureHandleUVE);
+
+    std::unique_ptr<ICommandBufferUVE> gappyCommandBuffer = device.CreateCommandBufferUVE();
+    RenderPassDescUVE gappyDesc;
+    gappyDesc.extraColorAttachments[0].target = extra;
+    gappyDesc.extraColorAttachments[2].target = extra;
+    gappyCommandBuffer->BeginRenderPassUVE(gappyDesc);
+    device.SubmitUVE(std::move(gappyCommandBuffer));
+    EXPECT_TRUE(device.GetLastSubmittedCommandsUVE().empty());
+
+    std::unique_ptr<ICommandBufferUVE> validCommandBuffer = device.CreateCommandBufferUVE();
+    RenderPassDescUVE validDesc;
+    validDesc.extraColorAttachments[0].target = extra;
+    validCommandBuffer->BeginRenderPassUVE(validDesc);
+    validCommandBuffer->EndRenderPassUVE();
+    device.SubmitUVE(std::move(validCommandBuffer));
+    EXPECT_EQ(device.GetLastSubmittedCommandsUVE().size(), 2U);
+
+    device.DestroyTextureUVE(extra);
+}
+
+TEST(NullCommandBufferUVETest, BeginRenderPassUVE_UnknownExtraStoreOp_DoesNotRecordOrEnterPass) {
+    // Tier 2.4/2.5: per-slot ops validate like the location-0 ops — a garbage extra store enum
+    // refuses to record or enter.
+    NullRenderDeviceUVE device;
+    const TextureHandleUVE extra = device.CreateTextureUVE(TextureDescUVE{4U, 4U});
+    ASSERT_NE(extra, kInvalidTextureHandleUVE);
+
+    std::unique_ptr<ICommandBufferUVE> invalidCommandBuffer = device.CreateCommandBufferUVE();
+    RenderPassDescUVE invalidDesc;
+    invalidDesc.extraColorAttachments[0].target = extra;
+    invalidDesc.extraColorAttachments[0].storeOp = static_cast<StoreOpUVE>(0xFFU);
+    invalidCommandBuffer->BeginRenderPassUVE(invalidDesc);
+    device.SubmitUVE(std::move(invalidCommandBuffer));
+    EXPECT_TRUE(device.GetLastSubmittedCommandsUVE().empty());
+
+    std::unique_ptr<ICommandBufferUVE> validCommandBuffer = device.CreateCommandBufferUVE();
+    validCommandBuffer->BeginRenderPassUVE(RenderPassDescUVE{});
+    validCommandBuffer->EndRenderPassUVE();
+    device.SubmitUVE(std::move(validCommandBuffer));
+    EXPECT_EQ(device.GetLastSubmittedCommandsUVE().size(), 2U);
+
+    device.DestroyTextureUVE(extra);
+}
+
 } // namespace
 } // namespace UVE::Render::Tests

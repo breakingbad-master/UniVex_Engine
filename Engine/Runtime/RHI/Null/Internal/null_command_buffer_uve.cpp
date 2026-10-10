@@ -39,6 +39,33 @@ void NullCommandBufferUVE::BeginRenderPassUVE(const RenderPassDescUVE& renderPas
         UVE_ERROR("NullCommandBufferUVE: BeginRenderPassUVE received an unknown load operation");
         return;
     }
+    // Tier 2.5: store ops validate like load ops (Null records opaquely, but a garbage enum is
+    // still a malformed pass on every backend).
+    if (!IsStoreOpValidUVE(renderPassDesc.colorStoreOp) || !IsStoreOpValidUVE(renderPassDesc.depthStoreOp)) {
+        UVE_ERROR("NullCommandBufferUVE: BeginRenderPassUVE received an unknown store operation");
+        return;
+    }
+    // Tier 2.4: the extras prefix rule is structural (no handle lookups — Null never resolves
+    // handles), so it enforces here: contiguous prefix, valid per-slot ops.
+    {
+        bool gapSeen = false;
+        for (const ColorAttachmentUVE& slot : renderPassDesc.extraColorAttachments) {
+            if (slot.target == kInvalidTextureHandleUVE) {
+                gapSeen = true;
+                continue;
+            }
+            if (gapSeen) {
+                UVE_ERROR("NullCommandBufferUVE: extra color attachments must be a contiguous "
+                          "prefix (a gap is malformed)");
+                return;
+            }
+            if (!IsLoadOpValidUVE(slot.loadOp) || !IsStoreOpValidUVE(slot.storeOp)) {
+                UVE_ERROR("NullCommandBufferUVE: BeginRenderPassUVE received an unknown extra "
+                          "attachment load or store operation");
+                return;
+            }
+        }
+    }
     m_insideRenderPass = true;
     m_commands.emplace_back(BeginRenderPassCommandUVE{renderPassDesc});
 }

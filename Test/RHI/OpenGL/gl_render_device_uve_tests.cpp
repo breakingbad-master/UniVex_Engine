@@ -3354,4 +3354,192 @@ TEST_F(GlRenderDeviceUVETest, BindTextureUVE_ArrayTexture_LeavesComputeImageUnit
     renderDevice->DestroyTextureUVE(array);
 }
 
+
+TEST_F(GlRenderDeviceUVETest, BeginRenderPassUVE_TwoColorAttachments_ClearEachToItsOwnColor) {
+    // Tier 2.4 pixel proof for MRT: one pass clears location 0 green and location 1 red —
+    // each texture must hold exactly its own clear color (glClear would paint both one color).
+    GLint glMajor = 0;
+    glGetIntegerv(GL_MAJOR_VERSION, &glMajor);
+    const TextureHandleUVE target0 = renderDevice->CreateTextureUVE(TextureDescUVE{4U, 4U});
+    ASSERT_NE(target0, kInvalidTextureHandleUVE);
+    const TextureHandleUVE target1 = renderDevice->CreateTextureUVE(TextureDescUVE{4U, 4U});
+    ASSERT_NE(target1, kInvalidTextureHandleUVE);
+    if (glMajor < 3) {
+        renderDevice->DestroyTextureUVE(target0);
+        renderDevice->DestroyTextureUVE(target1);
+        GTEST_SKIP() << "per-slot clears need glClearBufferfv (GL 3.0+)";
+    }
+
+    std::unique_ptr<ICommandBufferUVE> commandBuffer = renderDevice->CreateCommandBufferUVE();
+    ASSERT_NE(commandBuffer, nullptr);
+    RenderPassDescUVE passDesc;
+    passDesc.colorAttachment = target0;
+    passDesc.colorLoadOp = LoadOpUVE::Clear;
+    passDesc.clearColor = {0.0F, 1.0F, 0.0F, 1.0F};
+    passDesc.extraColorAttachments[0].target = target1;
+    passDesc.extraColorAttachments[0].loadOp = LoadOpUVE::Clear;
+    passDesc.extraColorAttachments[0].clearColor = {1.0F, 0.0F, 0.0F, 1.0F};
+    commandBuffer->BeginRenderPassUVE(passDesc);
+    GLint mrtFramebuffer = 0;
+    glGetIntegerv(GL_FRAMEBUFFER_BINDING, &mrtFramebuffer);
+    EXPECT_NE(mrtFramebuffer, 0);
+    commandBuffer->EndRenderPassUVE();
+    renderDevice->SubmitUVE(std::move(commandBuffer));
+
+    const auto readbackTexture = [&](const TextureHandleUVE target) {
+        const GLuint native = static_cast<GLuint>(renderDevice->GetNativeTextureIdUVE(target));
+        glBindTexture(GL_TEXTURE_2D, native);
+        std::array<std::uint8_t, 4U * 4U * 4U> pixels{};
+        glGetTexImage(GL_TEXTURE_2D, 0, GL_RGBA, GL_UNSIGNED_BYTE, pixels.data());
+        EXPECT_EQ(glGetError(), GL_NO_ERROR);
+        return pixels;
+    };
+    const auto green = readbackTexture(target0);
+    const auto red = readbackTexture(target1);
+    for (std::uint32_t texel = 0U; texel < 16U; ++texel) {
+        const std::size_t base = texel * 4U;
+        EXPECT_EQ(green[base], 0U);
+        EXPECT_EQ(green[base + 1U], 255U);
+        EXPECT_EQ(green[base + 2U], 0U);
+        EXPECT_EQ(red[base], 255U);
+        EXPECT_EQ(red[base + 1U], 0U);
+        EXPECT_EQ(red[base + 2U], 0U);
+    }
+    renderDevice->DestroyTextureUVE(target0);
+    renderDevice->DestroyTextureUVE(target1);
+}
+
+TEST_F(GlRenderDeviceUVETest, BeginRenderPassUVE_MalformedExtras_LeavesFramebufferUnchanged) {
+    // Tier 2.4 mirror of LayerBeyondAttachmentLayerCount: malformed extras reject before any
+    // FBO work. Load ops stay Load so the routing check needs no clear-capable context.
+    const TextureHandleUVE target0 = renderDevice->CreateTextureUVE(TextureDescUVE{4U, 4U});
+    ASSERT_NE(target0, kInvalidTextureHandleUVE);
+    const TextureHandleUVE target1 = renderDevice->CreateTextureUVE(TextureDescUVE{4U, 4U});
+    ASSERT_NE(target1, kInvalidTextureHandleUVE);
+    const TextureHandleUVE small = renderDevice->CreateTextureUVE(TextureDescUVE{2U, 2U});
+    ASSERT_NE(small, kInvalidTextureHandleUVE);
+    std::unique_ptr<ICommandBufferUVE> commandBuffer = renderDevice->CreateCommandBufferUVE();
+    ASSERT_NE(commandBuffer, nullptr);
+
+    const auto assertFramebufferUnchanged = [&commandBuffer](const RenderPassDescUVE& passDesc) {
+        GLint before = 0;
+        glGetIntegerv(GL_FRAMEBUFFER_BINDING, &before);
+        commandBuffer->BeginRenderPassUVE(passDesc);
+        GLint after = 0;
+        glGetIntegerv(GL_FRAMEBUFFER_BINDING, &after);
+        EXPECT_EQ(after, before);
+    };
+    const auto loadOnlyPass = [](const TextureHandleUVE color) {
+        RenderPassDescUVE passDesc;
+        passDesc.colorAttachment = color;
+        passDesc.colorLoadOp = LoadOpUVE::Load;
+        passDesc.depthLoadOp = LoadOpUVE::Load;
+        return passDesc;
+    };
+    RenderPassDescUVE gap = loadOnlyPass(target0);
+    gap.extraColorAttachments[0].target = target1;
+    gap.extraColorAttachments[0].loadOp = LoadOpUVE::Load;
+    gap.extraColorAttachments[2].target = target1; // location 2 set while 1 is empty
+    gap.extraColorAttachments[2].loadOp = LoadOpUVE::Load;
+    assertFramebufferUnchanged(gap);
+
+    RenderPassDescUVE noLocation0 = loadOnlyPass(kInvalidTextureHandleUVE);
+    noLocation0.extraColorAttachments[0].target = target1;
+    noLocation0.extraColorAttachments[0].loadOp = LoadOpUVE::Load;
+    assertFramebufferUnchanged(noLocation0);
+
+    RenderPassDescUVE unknownExtra = loadOnlyPass(target0);
+    unknownExtra.extraColorAttachments[0].target = TextureHandleUVE{999999U};
+    unknownExtra.extraColorAttachments[0].loadOp = LoadOpUVE::Load;
+    assertFramebufferUnchanged(unknownExtra);
+
+    RenderPassDescUVE dimsMismatch = loadOnlyPass(target0);
+    dimsMismatch.extraColorAttachments[0].target = small;
+    dimsMismatch.extraColorAttachments[0].loadOp = LoadOpUVE::Load;
+    assertFramebufferUnchanged(dimsMismatch);
+
+    RenderPassDescUVE aliased = loadOnlyPass(target0);
+    aliased.extraColorAttachments[0].target = target0; // one texture, two attachments
+    aliased.extraColorAttachments[0].loadOp = LoadOpUVE::Load;
+    assertFramebufferUnchanged(aliased);
+
+    RenderPassDescUVE badStore = loadOnlyPass(target0);
+    badStore.colorStoreOp = static_cast<StoreOpUVE>(0xFFU);
+    assertFramebufferUnchanged(badStore);
+
+    RenderPassDescUVE badExtraOp = loadOnlyPass(target0);
+    badExtraOp.extraColorAttachments[0].target = target1;
+    badExtraOp.extraColorAttachments[0].loadOp = LoadOpUVE::Load;
+    badExtraOp.extraColorAttachments[0].storeOp = static_cast<StoreOpUVE>(0xFFU);
+    assertFramebufferUnchanged(badExtraOp);
+
+    // The well-formed twin binds a real FBO — the rejects above were selective, not blanket.
+    RenderPassDescUVE valid = loadOnlyPass(target0);
+    valid.extraColorAttachments[0].target = target1;
+    valid.extraColorAttachments[0].loadOp = LoadOpUVE::Load;
+    commandBuffer->BeginRenderPassUVE(valid);
+    GLint mrtFramebuffer = 0;
+    glGetIntegerv(GL_FRAMEBUFFER_BINDING, &mrtFramebuffer);
+    EXPECT_NE(mrtFramebuffer, 0);
+    commandBuffer->EndRenderPassUVE();
+    renderDevice->DestroyTextureUVE(target0);
+    renderDevice->DestroyTextureUVE(target1);
+    renderDevice->DestroyTextureUVE(small);
+}
+
+TEST_F(GlRenderDeviceUVETest, BeginRenderPassUVE_DontCareStore_StaysHealthy) {
+    // Tier 2.5: DontCare stores discard (invalidate) without disturbing GL state — the error
+    // flag stays clean and the very next pass renders normally. (Discarded CONTENTS are
+    // undefined by design, so the follow-up pass carries the pixel proof, not this one.)
+    GLint glMajor = 0;
+    glGetIntegerv(GL_MAJOR_VERSION, &glMajor);
+    const TextureHandleUVE target0 = renderDevice->CreateTextureUVE(TextureDescUVE{4U, 4U});
+    ASSERT_NE(target0, kInvalidTextureHandleUVE);
+    const TextureHandleUVE target1 = renderDevice->CreateTextureUVE(TextureDescUVE{4U, 4U});
+    ASSERT_NE(target1, kInvalidTextureHandleUVE);
+    if (glMajor < 3) {
+        renderDevice->DestroyTextureUVE(target0);
+        renderDevice->DestroyTextureUVE(target1);
+        GTEST_SKIP() << "per-slot clears need glClearBufferfv (GL 3.0+)";
+    }
+
+    std::unique_ptr<ICommandBufferUVE> commandBuffer = renderDevice->CreateCommandBufferUVE();
+    ASSERT_NE(commandBuffer, nullptr);
+    RenderPassDescUVE discardPass;
+    discardPass.colorAttachment = target0;
+    discardPass.colorLoadOp = LoadOpUVE::Clear;
+    discardPass.clearColor = {0.0F, 1.0F, 0.0F, 1.0F};
+    discardPass.colorStoreOp = StoreOpUVE::DontCare;
+    discardPass.extraColorAttachments[0].target = target1;
+    discardPass.extraColorAttachments[0].loadOp = LoadOpUVE::Clear;
+    discardPass.extraColorAttachments[0].clearColor = {1.0F, 0.0F, 0.0F, 1.0F};
+    discardPass.extraColorAttachments[0].storeOp = StoreOpUVE::DontCare;
+    commandBuffer->BeginRenderPassUVE(discardPass);
+    commandBuffer->EndRenderPassUVE();
+
+    RenderPassDescUVE followUpPass;
+    followUpPass.colorAttachment = target0;
+    followUpPass.colorLoadOp = LoadOpUVE::Clear;
+    followUpPass.clearColor = {0.0F, 0.0F, 1.0F, 1.0F};
+    followUpPass.colorStoreOp = StoreOpUVE::Store;
+    commandBuffer->BeginRenderPassUVE(followUpPass);
+    commandBuffer->EndRenderPassUVE();
+    renderDevice->SubmitUVE(std::move(commandBuffer));
+    EXPECT_EQ(glGetError(), GL_NO_ERROR);
+
+    const GLuint native = static_cast<GLuint>(renderDevice->GetNativeTextureIdUVE(target0));
+    glBindTexture(GL_TEXTURE_2D, native);
+    std::array<std::uint8_t, 4U * 4U * 4U> pixels{};
+    glGetTexImage(GL_TEXTURE_2D, 0, GL_RGBA, GL_UNSIGNED_BYTE, pixels.data());
+    EXPECT_EQ(glGetError(), GL_NO_ERROR);
+    for (std::uint32_t texel = 0U; texel < 16U; ++texel) {
+        const std::size_t base = texel * 4U;
+        EXPECT_EQ(pixels[base], 0U);
+        EXPECT_EQ(pixels[base + 1U], 0U);
+        EXPECT_EQ(pixels[base + 2U], 255U);
+    }
+    renderDevice->DestroyTextureUVE(target0);
+    renderDevice->DestroyTextureUVE(target1);
+}
+
 } // namespace UVE::Render::Tests
