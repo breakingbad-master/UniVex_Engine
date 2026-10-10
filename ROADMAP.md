@@ -519,7 +519,7 @@ script per node; see `Engine/Runtime/UVScript/README.md`.
   rectangles-and-portals meshes, queried through NavmeshUVE)
 - [x] A* / pathfinding over the generated navmesh, with agent avoidance (FindNavPathUVE +
   string-pulling; NavAgentUVE steers with separation from neighbours)
-- [ ] A behavior-tree or utility-AI framework for authoring NPC decision-making
+- [x] A behavior-tree or utility-AI framework for authoring NPC decision-making (utility-AI: considerations, response curves, hysteresis selection over blackboards)
 - [ ] A perception system (sight/hearing cones feeding AI decisions)
 - [ ] Crowd simulation for large numbers of agents (long-term)
 

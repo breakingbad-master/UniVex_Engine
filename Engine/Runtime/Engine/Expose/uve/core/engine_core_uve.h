@@ -616,6 +616,9 @@ private:
     /// the playhead passed, and cuts the active camera to the live shot. Autoplay shots start
     /// themselves on the first running frame; cinematics without cuts never touch the camera.
     void SyncCinematicUVE(float deltaSeconds);
+    /// Evaluates every AI brain against its blackboard (a missing blackboard reads as empty, so
+    /// board-less priority brains work) and queues AiActionSelectedUVE when the selection changes.
+    void SyncAiBrainsUVE(float);
 
     /// The interaction scan, new wiring for previously unconsumed authored data (the
     /// Unreal-Lyra-style interactor/focus loop Godot leaves every game to hand-roll out of

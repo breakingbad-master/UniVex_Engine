@@ -110,6 +110,7 @@ add_executable(uve_core_tests
     Gameplay/gameplay_tags_uve_tests.cpp
     Gameplay/status_effects_uve_tests.cpp
     Gameplay/cinematic_uve_tests.cpp
+    AI/utility_ai_uve_tests.cpp
     Input/input_names_uve_tests.cpp
     Input/mobile_input_system_uve_tests.cpp
     Input/mobile_gesture_system_uve_tests.cpp
@@ -181,6 +182,7 @@ target_link_libraries(uve_core_tests PRIVATE
     uve_asset
     uve_input
     uve_gameplay
+    uve_ai
     uve_window
     uve_rhi
     uve_rhi_opengl
@@ -278,6 +280,7 @@ add_executable(uve_integration_tests
     Integration/Scene/scene_component_metadata_uve_tests.cpp
     Integration/Scene/scene_serializer_uve_tests.cpp
     Integration/Scene/gameplay_serialization_uve_tests.cpp
+    Integration/Scene/ai_serialization_uve_tests.cpp
     Integration/Scene/scene_object_type_uve_tests.cpp
     Integration/Scene/prefab_system_uve_tests.cpp
     Integration/Scene/prefab_maturity_uve_tests.cpp
@@ -413,6 +416,7 @@ target_link_libraries(uve_integration_tests PRIVATE
     uve_input
     uve_ui
     uve_gameplay
+    uve_ai
     GTest::gtest
     GTest::gtest_main
 )

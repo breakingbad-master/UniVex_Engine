@@ -2,6 +2,7 @@
 
 
 #include "uve/scene/scene_serializer_uve.h"
+#include "uve/ai/utility_ai_uve.h"
 #include "uve/gameplay/cinematic_uve.h"
 #include "uve/gameplay/gameplay_attributes_uve.h"
 #include "uve/gameplay/gameplay_tags_uve.h"
@@ -242,6 +243,32 @@ namespace {
                            {"remainingSeconds", effect.remainingSeconds}});
     }
     return {{"effects", std::move(effects)}};
+}
+
+[[nodiscard]] nlohmann::json ToJsonUVE(const BlackboardComponentUVE& component) {
+    nlohmann::json entries = nlohmann::json::array();
+    for (const AiBlackboardEntryUVE& entry : component.entries) {
+        entries.push_back({{"key", entry.key}, {"value", entry.value}});
+    }
+    return {{"entries", std::move(entries)}};
+}
+
+[[nodiscard]] nlohmann::json ToJsonUVE(const AiBrainComponentUVE& component) {
+    nlohmann::json actions = nlohmann::json::array();
+    for (const AiActionUVE& action : component.actions) {
+        nlohmann::json considerations = nlohmann::json::array();
+        for (const AiConsiderationUVE& consideration : action.considerations) {
+            considerations.push_back({{"inputId", consideration.inputId},
+                                      {"curve", static_cast<std::uint8_t>(consideration.curve)},
+                                      {"weight", consideration.weight}});
+        }
+        actions.push_back({{"actionId", action.actionId},
+                           {"baseScore", action.baseScore},
+                           {"considerations", std::move(considerations)}});
+    }
+    // Selection state (currentAction, currentScore) is deliberately not written: a loaded brain
+    // rethinks on its first frame, the same reseed rule as cinematics and sequencers.
+    return {{"hysteresis", component.hysteresis}, {"actions", std::move(actions)}};
 }
 
 [[nodiscard]] nlohmann::json ToJsonUVE(const CinematicComponentUVE& component) {
@@ -1846,7 +1873,8 @@ MakeMetadataRegistrationUVE(const std::string& componentName,
         // - Custom JSON shapes (nested objects, derived counts, dynamic lists): AnimationGraph,
         //   LodGroup3D (prefix-encoded level arrays with a derived levelCount), ObjectMetadata,
         //   Script, Skeleton3D (nested bones array), GameplayAttributes, GameplayTags,
-        //   StatusEffects (dynamic gameplay lists). Unlock: a list/struct codec decision per shape.
+        //   StatusEffects (dynamic gameplay lists), AiBrain, Blackboard (dynamic AI lists). Unlock:
+//   a list/struct codec decision per shape.
         // - Legacy-compat readers (old keys migrate on load): Transform (euler degrees),
         //   AnimationSequencer (clip paths, playOnAwake-era keys). Unlock: a compat horizon.
         // - Reseed-on-load readers (runtime state is recomputed from authored values, never
@@ -1991,6 +2019,54 @@ MakeMetadataRegistrationUVE(const std::string& componentName,
                           }
                           return cinematic;
                       }, IsCinematicComponentValidUVE));
+        table.emplace("BlackboardComponentUVE",
+                      MakeRegistrationUVE<BlackboardComponentUVE>([](const nlohmann::json& json) {
+                          BlackboardComponentUVE board;
+                          if (const auto entries = json.find("entries");
+                              entries != json.end() && entries->is_array()) {
+                              for (const nlohmann::json& entry : *entries) {
+                                  AiBlackboardEntryUVE item;
+                                  item.key = entry.value("key", std::string{});
+                                  item.value = entry.value("value", 0.0F);
+                                  board.entries.push_back(std::move(item));
+                              }
+                          }
+                          if (!IsBlackboardComponentValidUVE(board)) {
+                              throw std::runtime_error("Invalid BlackboardComponentUVE payload");
+                          }
+                          return board;
+                      }, IsBlackboardComponentValidUVE));
+        table.emplace("AiBrainComponentUVE",
+                      MakeRegistrationUVE<AiBrainComponentUVE>([](const nlohmann::json& json) {
+                          AiBrainComponentUVE brain;
+                          brain.hysteresis = json.value("hysteresis", 0.1F);
+                          if (const auto actions = json.find("actions");
+                              actions != json.end() && actions->is_array()) {
+                              for (const nlohmann::json& entry : *actions) {
+                                  AiActionUVE action;
+                                  action.actionId = entry.value("actionId", std::string{});
+                                  action.baseScore = entry.value("baseScore", 1.0F);
+                                  if (const auto considerations = entry.find("considerations");
+                                      considerations != entry.end() && considerations->is_array()) {
+                                      for (const nlohmann::json& item : *considerations) {
+                                          AiConsiderationUVE consideration;
+                                          consideration.inputId =
+                                              item.value("inputId", std::string{});
+                                          consideration.curve = static_cast<AiResponseCurveUVE>(
+                                              item.value("curve", static_cast<std::uint8_t>(
+                                                                     AiResponseCurveUVE::Linear)));
+                                          consideration.weight = item.value("weight", 1.0F);
+                                          action.considerations.push_back(std::move(consideration));
+                                      }
+                                  }
+                                  brain.actions.push_back(std::move(action));
+                              }
+                          }
+                          if (!IsAiBrainComponentValidUVE(brain)) {
+                              throw std::runtime_error("Invalid AiBrainComponentUVE payload");
+                          }
+                          return brain;
+                      }, IsAiBrainComponentValidUVE));
         table.emplace("AnimationDriverComponentUVE",
                       MakeRegistrationUVE<AnimationDriverComponentUVE>([](const nlohmann::json& json) {
                           const AnimationDriverComponentUVE driver = AnimationDriverFromJsonUVE(json);

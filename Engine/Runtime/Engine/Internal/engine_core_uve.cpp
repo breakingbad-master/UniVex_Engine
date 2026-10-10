@@ -72,6 +72,8 @@
 #include "uve/events/event_system_uve.h"
 #include "uve/input/gamepad_input_system_uve.h"
 #include "uve/input/input_system_uve.h"
+#include "uve/ai/ai_events_uve.h"
+#include "uve/ai/utility_ai_uve.h"
 #include "uve/gameplay/attribute_events_uve.h"
 #include "uve/gameplay/cinematic_events_uve.h"
 #include "uve/gameplay/cinematic_uve.h"
@@ -1838,6 +1840,26 @@ void EngineCoreUVE::SyncNavigationUVE(const float fixedDeltaTimeSeconds) {
     }
 }
 
+void EngineCoreUVE::SyncAiBrainsUVE(const float) {
+    const Scene::BlackboardComponentUVE empty;
+    for (const Scene::EntityUVE entity :
+         CollectFixedStepOrderUVE<Scene::AiBrainComponentUVE>(*m_entityManager, *m_sceneGraph)) {
+        Scene::AiBrainComponentUVE& brain =
+            m_entityManager->GetComponentUVE<Scene::AiBrainComponentUVE>(entity);
+        const Scene::BlackboardComponentUVE& board =
+            m_entityManager->HasComponentUVE<Scene::BlackboardComponentUVE>(entity)
+                ? m_entityManager->GetComponentUVE<Scene::BlackboardComponentUVE>(entity)
+                : empty;
+        const Scene::AiActionSelectionUVE selection = Scene::SelectAiActionUVE(brain, board);
+        brain.currentScore = selection.score;
+        if (selection.changed) {
+            brain.currentAction = selection.actionId;
+            m_eventSystem->QueueEvent(
+                Ai::AiActionSelectedUVE{entity, selection.actionId, selection.score});
+        }
+    }
+}
+
 void EngineCoreUVE::SyncCinematicUVE(const float deltaSeconds) {
     for (const Scene::EntityUVE entity :
          CollectFixedStepOrderUVE<Scene::CinematicComponentUVE>(*m_entityManager, *m_sceneGraph)) {
@@ -2777,6 +2799,7 @@ void EngineCoreUVE::Update() {
         SyncAnimationUVE(static_cast<float>(m_timer->GetDeltaTimeUVE()), /*physicsStep=*/false);
         SyncGameplayAttributesUVE(static_cast<float>(m_timer->GetDeltaTimeUVE()));
         SyncCinematicUVE(static_cast<float>(m_timer->GetDeltaTimeUVE()));
+        SyncAiBrainsUVE(static_cast<float>(m_timer->GetDeltaTimeUVE()));
     }
     // Bone attachments follow the pose that was just evaluated, and do it before the graph
     // propagates world transforms: a weapon on a hand is on the hand in the same frame the hand
