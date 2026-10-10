@@ -18,9 +18,10 @@ namespace UVE::UI {
 /// its children in the same pass; depth ties break by entity handle, and hierarchy cycles
 /// degrade to a stable order via the shared ancestry cap instead of hanging.
 ///
-/// A parent qualifies by carrying a container, button, or image rect, in that priority -
-/// anything else anchors against the viewport. Buttons, images, and containers take the full
-/// resolved rect; texts take the resolved minimum as positionPixels. Anchored entities without
+/// A parent qualifies by carrying a container, button, image, slider, or progress-bar rect, in
+/// that priority - anything else anchors against the viewport. Buttons, images, containers,
+/// sliders, and progress bars take the full resolved rect; texts take the resolved minimum as
+/// positionPixels. Anchored entities without
 /// any positioned component are skipped, and an invalid anchor component is skipped fail-closed.
 /// Runs before the stack/grid pass, which then overwrites container children's positions - for
 /// those widgets anchors contribute size, the container contributes position.

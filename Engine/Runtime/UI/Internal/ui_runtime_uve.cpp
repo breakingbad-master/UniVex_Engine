@@ -10,6 +10,8 @@
 
 #include "uve/component/ui_button_component_uve.h"
 #include "uve/component/ui_image_component_uve.h"
+#include "uve/component/ui_progress_bar_component_uve.h"
+#include "uve/component/ui_slider_component_uve.h"
 #include "uve/component/ui_text_component_uve.h"
 #include "uve/input/mouse_button_uve.h"
 #include "uve/ui/canvas_ancestry_uve.h"
@@ -91,6 +93,30 @@ void UIRuntimeUVE::TickUVE(Scene::IEntityManagerUVE& entityManager, const Input:
             RankWidgetUVE(entity, ResolveCanvasAncestryUVE(entityManager, entity), 0, {quad}, ranked);
         });
 
+    entityManager.ForEachUVE<Scene::UIProgressBarComponentUVE>(
+        [&entityManager, &ranked](const Scene::EntityUVE entity, const Scene::UIProgressBarComponentUVE& bar) {
+            if (!ShouldDrawUiWidgetUVE(entityManager, entity) || !IsUIProgressBarComponentValidUVE(bar)) {
+                return;
+            }
+            const float fraction =
+                bar.maxValue > bar.minValue
+                    ? std::clamp((bar.value - bar.minValue) / (bar.maxValue - bar.minValue), 0.0F, 1.0F)
+                    : (bar.value >= bar.maxValue ? 1.0F : 0.0F);
+            UIQuadUVE background{};
+            background.rect = bar.rect;
+            background.color = bar.backgroundColor;
+            background.kind = UIDrawItemKindUVE::SolidColor;
+            UIQuadUVE fill{};
+            fill.rect = Math::RectUVE{bar.rect.position,
+                                      Math::Vector2UVE{bar.rect.size.x * fraction, bar.rect.size.y}};
+            fill.color = bar.fillColor;
+            fill.kind = UIDrawItemKindUVE::SolidColor;
+            std::vector<UIQuadUVE> barQuads;
+            barQuads.push_back(background);
+            barQuads.push_back(fill);
+            RankWidgetUVE(entity, ResolveCanvasAncestryUVE(entityManager, entity), 0, std::move(barQuads), ranked);
+        });
+
     const Math::Vector2UVE rawMousePosition = inputSystem.GetMousePositionUVE();
     const Math::Vector2UVE mousePosition{
         (rawMousePosition.x * m_coordinateTransform.inputScaleX - m_coordinateTransform.inputOffsetX -
@@ -118,6 +144,69 @@ void UIRuntimeUVE::TickUVE(Scene::IEntityManagerUVE& entityManager, const Input:
             quad.alpha = 1.0F;
             quad.kind = UIDrawItemKindUVE::SolidColor;
             RankWidgetUVE(entity, ResolveCanvasAncestryUVE(entityManager, entity), 1, {quad}, ranked);
+        });
+
+    entityManager.ForEachUVE<Scene::UISliderComponentUVE>(
+        [&entityManager, &ranked, &mousePosition, mouseDown, mousePressedThisFrame](
+            const Scene::EntityUVE entity, Scene::UISliderComponentUVE& slider) {
+            if (!ShouldDrawUiWidgetUVE(entityManager, entity) || !IsUISliderComponentValidUVE(slider)) {
+                slider.isHovered = false;
+                slider.isDragging = false;
+                slider.wasChangedThisFrame = false;
+                return;
+            }
+            slider.isHovered = Math::ContainsUVE(slider.rect, mousePosition);
+            slider.wasChangedThisFrame = false;
+            if (slider.isDragging && !mouseDown) {
+                slider.isDragging = false;
+            }
+            if (mousePressedThisFrame && slider.isHovered) {
+                slider.isDragging = true;
+            }
+            // The thumb never leaves the track: the pointer maps to the thumb center across the
+            // travel, clamps past the ends, and snaps to `step` when one is set.
+            const float travel = std::max(0.0F, slider.rect.size.x - slider.thumbWidth);
+            if (slider.isDragging && travel > 0.0F) {
+                const float pointerFraction =
+                    (mousePosition.x - slider.rect.position.x - 0.5F * slider.thumbWidth) / travel;
+                float dragged = slider.minValue + std::clamp(pointerFraction, 0.0F, 1.0F) *
+                                                     (slider.maxValue - slider.minValue);
+                if (slider.step > 0.0F) {
+                    dragged =
+                        slider.minValue + std::round((dragged - slider.minValue) / slider.step) * slider.step;
+                    dragged = std::clamp(dragged, slider.minValue, slider.maxValue);
+                }
+                if (dragged != slider.value) {
+                    slider.value = dragged;
+                    slider.wasChangedThisFrame = true;
+                }
+            }
+            const float drawnFraction =
+                slider.maxValue > slider.minValue
+                    ? std::clamp((slider.value - slider.minValue) / (slider.maxValue - slider.minValue), 0.0F,
+                                 1.0F)
+                    : (slider.value >= slider.maxValue ? 1.0F : 0.0F);
+            const float thumbX = slider.rect.position.x + drawnFraction * travel;
+            UIQuadUVE track{};
+            track.rect = slider.rect;
+            track.color = slider.trackColor;
+            track.kind = UIDrawItemKindUVE::SolidColor;
+            UIQuadUVE fill{};
+            fill.rect = Math::RectUVE{slider.rect.position,
+                                      Math::Vector2UVE{thumbX + 0.5F * slider.thumbWidth - slider.rect.position.x,
+                                                       slider.rect.size.y}};
+            fill.color = slider.fillColor;
+            fill.kind = UIDrawItemKindUVE::SolidColor;
+            UIQuadUVE thumb{};
+            thumb.rect = Math::RectUVE{Math::Vector2UVE{thumbX, slider.rect.position.y},
+                                       Math::Vector2UVE{slider.thumbWidth, slider.rect.size.y}};
+            thumb.color = slider.thumbColor;
+            thumb.kind = UIDrawItemKindUVE::SolidColor;
+            std::vector<UIQuadUVE> sliderQuads;
+            sliderQuads.push_back(track);
+            sliderQuads.push_back(fill);
+            sliderQuads.push_back(thumb);
+            RankWidgetUVE(entity, ResolveCanvasAncestryUVE(entityManager, entity), 1, std::move(sliderQuads), ranked);
         });
 
     std::vector<UIGlyphQuadUVE> glyphQuads;

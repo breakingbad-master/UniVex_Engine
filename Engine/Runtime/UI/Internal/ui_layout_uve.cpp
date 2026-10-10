@@ -12,6 +12,8 @@
 #include "uve/component/ui_button_component_uve.h"
 #include "uve/component/ui_image_component_uve.h"
 #include "uve/component/ui_layout_container_component_uve.h"
+#include "uve/component/ui_progress_bar_component_uve.h"
+#include "uve/component/ui_slider_component_uve.h"
 #include "uve/component/ui_text_component_uve.h"
 #include "uve/entity/i_entity_manager_uve.h"
 #include "uve/math/vector2_uve.h"
@@ -48,6 +50,8 @@ struct PositionableChildUVE final {
     bool isButton = false;
     bool isImage = false;
     bool isContainer = false;
+    bool isSlider = false;
+    bool isProgress = false;
     bool isText = false;
 };
 
@@ -61,6 +65,12 @@ void MoveChildUVE(Scene::IEntityManagerUVE& entityManager, const PositionableChi
     }
     if (child.isContainer) {
         entityManager.GetComponentUVE<Scene::UILayoutContainerComponentUVE>(child.entity).rect.position = position;
+    }
+    if (child.isSlider) {
+        entityManager.GetComponentUVE<Scene::UISliderComponentUVE>(child.entity).rect.position = position;
+    }
+    if (child.isProgress) {
+        entityManager.GetComponentUVE<Scene::UIProgressBarComponentUVE>(child.entity).rect.position = position;
     }
     if (child.isText) {
         entityManager.GetComponentUVE<Scene::UITextComponentUVE>(child.entity).positionPixels = position;
@@ -90,8 +100,11 @@ std::vector<PositionableChildUVE> CollectContainerItemsUVE(Scene::IEntityManager
         item.isButton = entityManager.HasComponentUVE<Scene::UIButtonComponentUVE>(child.entity);
         item.isImage = entityManager.HasComponentUVE<Scene::UIImageComponentUVE>(child.entity);
         item.isContainer = entityManager.HasComponentUVE<Scene::UILayoutContainerComponentUVE>(child.entity);
+        item.isSlider = entityManager.HasComponentUVE<Scene::UISliderComponentUVE>(child.entity);
+        item.isProgress = entityManager.HasComponentUVE<Scene::UIProgressBarComponentUVE>(child.entity);
         item.isText = entityManager.HasComponentUVE<Scene::UITextComponentUVE>(child.entity);
-        if (!item.isButton && !item.isImage && !item.isContainer && !item.isText) {
+        if (!item.isButton && !item.isImage && !item.isContainer && !item.isSlider && !item.isProgress &&
+            !item.isText) {
             continue; // nothing positionable: ignored, not even spaced
         }
         if (item.isButton) {
@@ -101,6 +114,10 @@ std::vector<PositionableChildUVE> CollectContainerItemsUVE(Scene::IEntityManager
         } else if (item.isContainer) {
             item.extent =
                 entityManager.GetComponentUVE<Scene::UILayoutContainerComponentUVE>(child.entity).rect.size;
+        } else if (item.isSlider) {
+            item.extent = entityManager.GetComponentUVE<Scene::UISliderComponentUVE>(child.entity).rect.size;
+        } else if (item.isProgress) {
+            item.extent = entityManager.GetComponentUVE<Scene::UIProgressBarComponentUVE>(child.entity).rect.size;
         } else {
             const Scene::UITextComponentUVE& text =
                 entityManager.GetComponentUVE<Scene::UITextComponentUVE>(child.entity);

@@ -572,7 +572,9 @@ script per node; see `Engine/Runtime/UVScript/README.md`.
   against parents or the viewport ahead of layout, text paces by measured atlas
   advances, and containers auto-size to content per axis deepest-first
 - [ ] Additional widget types: sliders, checkboxes, dropdowns, text input fields, scroll
-  views, progress bars, tooltips
+  views, progress bars, tooltips — sliders (pointer-drag values with step snap) and
+  read-only progress bars have landed with draw batching and layout/anchor
+  participation; checkboxes, dropdowns, text input, scroll views, and tooltips remain
 - [ ] Rich text (multiple fonts/sizes/styles/colors within one text block, not just one
   baked font per label)
 - [ ] 9-slice/scalable image borders for resolution-independent UI art

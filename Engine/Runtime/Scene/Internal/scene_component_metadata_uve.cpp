@@ -40,6 +40,8 @@
 #include "uve/component/ui_button_component_uve.h"
 #include "uve/component/ui_image_component_uve.h"
 #include "uve/component/ui_layout_container_component_uve.h"
+#include "uve/component/ui_progress_bar_component_uve.h"
+#include "uve/component/ui_slider_component_uve.h"
 #include "uve/component/ui_text_component_uve.h"
 #include "uve/component/visibility_component_uve.h"
 #include "uve/logging/assert_uve.h"
@@ -1903,6 +1905,48 @@ void DeclareMediaAndUIUVE(std::vector<TypeMetadataEntryUVE>& entries) {
                                                                      kPropertyTypeVector2UVE),
                          DeclareUVE<&UIAnchorComponentUVE::offsetMax>("offsetMax", "Offset Max",
                                                                      kPropertyTypeVector2UVE),
+                     }));
+    AddUVE<UISliderComponentUVE>(
+        entries,
+        MakeEntryUVE("component.ui_slider", "UISliderComponentUVE", "UI Slider", kSectionOrderTypeSpecificUVE,
+                     {
+                         DeclareUVE<&UISliderComponentUVE::rect>("rect", "Rect", kPropertyTypeRectUVE),
+                         DeclareUVE<&UISliderComponentUVE::value>("value", "Value", kPropertyTypeFloatUVE),
+                         DeclareUVE<&UISliderComponentUVE::minValue>("minValue", "Min Value",
+                                                                    kPropertyTypeFloatUVE),
+                         DeclareUVE<&UISliderComponentUVE::maxValue>("maxValue", "Max Value",
+                                                                    kPropertyTypeFloatUVE),
+                         DeclareUVE<&UISliderComponentUVE::step>("step", "Step", kPropertyTypeFloatUVE),
+                         DeclareUVE<&UISliderComponentUVE::trackColor>("trackColor", "Track",
+                                                                      kPropertyTypeColorUVE),
+                         DeclareUVE<&UISliderComponentUVE::fillColor>("fillColor", "Fill",
+                                                                     kPropertyTypeColorUVE),
+                         DeclareUVE<&UISliderComponentUVE::thumbColor>("thumbColor", "Thumb",
+                                                                      kPropertyTypeColorUVE),
+                         DeclareUVE<&UISliderComponentUVE::thumbWidth>("thumbWidth", "Thumb Width",
+                                                                      kPropertyTypeFloatUVE),
+                         DeclareRuntimeStateUVE<&UISliderComponentUVE::isHovered>(
+                             "isHovered", "Hovered", kPropertyTypeBoolUVE),
+                         DeclareRuntimeStateUVE<&UISliderComponentUVE::isDragging>(
+                             "isDragging", "Dragging", kPropertyTypeBoolUVE),
+                         DeclareRuntimeStateUVE<&UISliderComponentUVE::wasChangedThisFrame>(
+                             "wasChangedThisFrame", "Changed This Frame", kPropertyTypeBoolUVE),
+                     }));
+    AddValidatedUVE<UIProgressBarComponentUVE, &IsUIProgressBarComponentValidUVE>(
+        entries,
+        MakeEntryUVE("component.ui_progress_bar", "UIProgressBarComponentUVE", "UI Progress Bar",
+                     kSectionOrderTypeSpecificUVE,
+                     {
+                         DeclareUVE<&UIProgressBarComponentUVE::rect>("rect", "Rect", kPropertyTypeRectUVE),
+                         DeclareUVE<&UIProgressBarComponentUVE::value>("value", "Value", kPropertyTypeFloatUVE),
+                         DeclareUVE<&UIProgressBarComponentUVE::minValue>("minValue", "Min Value",
+                                                                         kPropertyTypeFloatUVE),
+                         DeclareUVE<&UIProgressBarComponentUVE::maxValue>("maxValue", "Max Value",
+                                                                         kPropertyTypeFloatUVE),
+                         DeclareUVE<&UIProgressBarComponentUVE::backgroundColor>("backgroundColor", "Background",
+                                                                                kPropertyTypeColorUVE),
+                         DeclareUVE<&UIProgressBarComponentUVE::fillColor>("fillColor", "Fill",
+                                                                          kPropertyTypeColorUVE),
                      }));
 }
 

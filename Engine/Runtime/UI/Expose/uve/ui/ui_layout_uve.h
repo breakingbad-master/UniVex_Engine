@@ -24,11 +24,12 @@ class UIFontAtlasUVE;
 /// and `alignment` resolving within each cell. The grid always starts at the inner edge, and a
 /// short line is still spaced as a grid, never packed as a stack.
 ///
-/// Buttons and images lay out at their rect size, nested containers at their own rect size, and
-/// text at {measured width, fontSize} - the width comes from `fontAtlas`'s advance sums, so
-/// horizontal stacks and grids pace text exactly as it draws. A child
-/// carrying several positioned components advances the stack by one extent - button first, image
-/// second, container third, text last - but every positioned component it has moves to the laid-out
+/// Buttons, images, sliders, and progress bars lay out at their rect size, nested containers at
+/// their own rect size, and text at {measured width, fontSize} - the width comes from
+/// `fontAtlas`'s advance sums, so horizontal stacks and grids pace text exactly as it draws. A
+/// child carrying several positioned components advances the stack by one extent - button first,
+/// image second, container third, slider fourth, progress fifth, text last - but every positioned
+/// component it has moves to the laid-out
 /// position together, so a container with its own background quad stays in one piece. Children
 /// without any positioned component are ignored, not spaced. Depth walks reuse the canvas ancestry cap, so a hierarchy cycle degrades
 /// to an arbitrary-but-stable container order instead of hanging the frame.

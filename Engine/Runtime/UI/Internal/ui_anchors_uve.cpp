@@ -12,6 +12,8 @@
 #include "uve/component/ui_button_component_uve.h"
 #include "uve/component/ui_image_component_uve.h"
 #include "uve/component/ui_layout_container_component_uve.h"
+#include "uve/component/ui_progress_bar_component_uve.h"
+#include "uve/component/ui_slider_component_uve.h"
 #include "uve/component/ui_text_component_uve.h"
 #include "uve/entity/i_entity_manager_uve.h"
 #include "uve/math/rect_uve.h"
@@ -49,6 +51,12 @@ struct AnchoredWidgetUVE final {
     if (entityManager.HasComponentUVE<Scene::UIImageComponentUVE>(parent)) {
         return entityManager.GetComponentUVE<Scene::UIImageComponentUVE>(parent).rect;
     }
+    if (entityManager.HasComponentUVE<Scene::UISliderComponentUVE>(parent)) {
+        return entityManager.GetComponentUVE<Scene::UISliderComponentUVE>(parent).rect;
+    }
+    if (entityManager.HasComponentUVE<Scene::UIProgressBarComponentUVE>(parent)) {
+        return entityManager.GetComponentUVE<Scene::UIProgressBarComponentUVE>(parent).rect;
+    }
     return viewport;
 }
 
@@ -84,8 +92,10 @@ void ResolveUIAnchorsUVE(Scene::IEntityManagerUVE& entityManager,
         const bool isImage = entityManager.HasComponentUVE<Scene::UIImageComponentUVE>(widget.entity);
         const bool isContainer =
             entityManager.HasComponentUVE<Scene::UILayoutContainerComponentUVE>(widget.entity);
+        const bool isSlider = entityManager.HasComponentUVE<Scene::UISliderComponentUVE>(widget.entity);
+        const bool isProgress = entityManager.HasComponentUVE<Scene::UIProgressBarComponentUVE>(widget.entity);
         const bool isText = entityManager.HasComponentUVE<Scene::UITextComponentUVE>(widget.entity);
-        if (!isButton && !isImage && !isContainer && !isText) {
+        if (!isButton && !isImage && !isContainer && !isSlider && !isProgress && !isText) {
             continue;
         }
         const Math::RectUVE parent = AnchorParentRectUVE(entityManager, widget.entity, viewportSize);
@@ -109,6 +119,14 @@ void ResolveUIAnchorsUVE(Scene::IEntityManagerUVE& entityManager,
         if (isContainer) {
             entityManager.GetComponentUVE<Scene::UILayoutContainerComponentUVE>(widget.entity).rect = {
                 resolvedMin, resolvedSize};
+        }
+        if (isSlider) {
+            entityManager.GetComponentUVE<Scene::UISliderComponentUVE>(widget.entity).rect = {resolvedMin,
+                                                                                              resolvedSize};
+        }
+        if (isProgress) {
+            entityManager.GetComponentUVE<Scene::UIProgressBarComponentUVE>(widget.entity).rect = {resolvedMin,
+                                                                                                   resolvedSize};
         }
         if (isText) {
             entityManager.GetComponentUVE<Scene::UITextComponentUVE>(widget.entity).positionPixels = resolvedMin;
