@@ -175,6 +175,7 @@ namespace {
     }
     return {{"clip", component.clip.value},
             {"library", std::move(library)},
+            {"libraryRef", component.libraryRef.value},
             {"autoplay", component.autoplay},
             {"speed", component.speed},
             {"loopMode", static_cast<std::uint8_t>(component.loopMode)},
@@ -1729,6 +1730,7 @@ MakeMetadataRegistrationUVE(const std::string& componentName,
                       MakeRegistrationUVE<AnimationSequencerComponentUVE>([](const nlohmann::json& json) {
                           AnimationSequencerComponentUVE animation;
                           animation.clip = Asset::AssetGuidUVE{json.value("clip", std::uint64_t{0})};
+                          animation.libraryRef = Asset::AssetGuidUVE{json.value("libraryRef", std::uint64_t{0})};
                           if (const auto library = json.find("library"); library != json.end() && library->is_array()) {
                               for (const nlohmann::json& guid : *library) {
                                   if (guid.is_number_unsigned() && guid.get<std::uint64_t>() != 0U) {

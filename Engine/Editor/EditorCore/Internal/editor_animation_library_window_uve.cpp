@@ -186,6 +186,7 @@ void EditorUVE::DrawAnimationLibraryWindowUVE() {
     std::optional<std::size_t> removeAt;
     std::optional<std::size_t> moveUpAt;
     std::optional<std::size_t> moveDownAt;
+    std::optional<std::size_t> renameAt;
     for (std::size_t index = 0U; index < window.library.entries.size(); ++index) {
         const Asset::AnimationLibraryEntryUVE& entry = window.library.entries[index];
         ImGui::PushID(static_cast<int>(index));
@@ -210,6 +211,10 @@ void EditorUVE::DrawAnimationLibraryWindowUVE() {
         if (ImGui::SmallButton("Remove")) {
             removeAt = index;
         }
+        ImGui::SameLine();
+        if (ImGui::SmallButton("Rename")) {
+            renameAt = index;
+        }
         ImGui::PopID();
     }
     if (window.library.entries.empty()) {
@@ -225,6 +230,11 @@ void EditorUVE::DrawAnimationLibraryWindowUVE() {
     } else if (moveDownAt.has_value()) {
         std::swap(window.library.entries[*moveDownAt], window.library.entries[*moveDownAt + 1U]);
         static_cast<void>(saveNow("Moved down."));
+    }
+    if (renameAt.has_value()) {
+        window.renameEntryRequested = renameAt;
+        window.entryName = window.library.entries[*renameAt].name;
+        ImGui::OpenPopup("##lib-rename-entry");
     }
 
     ImGui::Separator();
@@ -267,6 +277,37 @@ void EditorUVE::DrawAnimationLibraryWindowUVE() {
         } else {
             ImGui::TextDisabled("%s", window.status.c_str());
         }
+    }
+
+    // Renaming an entry: the list's own label for the clip, checked on Enter. The 128-byte box
+    // is the format's whole name budget, so anything typed already fits.
+    if (ImGui::BeginPopup("##lib-rename-entry")) {
+        ImGui::TextDisabled("Entry name");
+        char buffer[129];
+        std::snprintf(buffer, sizeof(buffer), "%s", window.entryName.c_str());
+        if (ImGui::IsWindowAppearing()) {
+            ImGui::SetKeyboardFocusHere();
+        }
+        ImGui::SetNextItemWidth(240.0F);
+        const bool entered = ImGui::InputText("##lib-rename-entry-field", buffer, sizeof(buffer),
+                                              ImGuiInputTextFlags_EnterReturnsTrue | ImGuiInputTextFlags_AutoSelectAll);
+        window.entryName = buffer;
+        if (entered) {
+            const std::size_t at = window.renameEntryRequested.value_or(window.library.entries.size());
+            if (window.entryName.empty()) {
+                window.status = "Give the entry a name.";
+                window.statusIsError = true;
+            } else if (at >= window.library.entries.size()) {
+                window.status = "That entry is gone; nothing was renamed.";
+                window.statusIsError = true;
+            } else {
+                window.library.entries[at].name = window.entryName;
+                static_cast<void>(saveNow(("Renamed to '" + window.entryName + "'.").c_str()));
+            }
+            window.renameEntryRequested.reset();
+            ImGui::CloseCurrentPopup();
+        }
+        ImGui::EndPopup();
     }
 
     // A clip dropped anywhere on the window joins the list, like the Timeline's own drop.

@@ -309,6 +309,9 @@ struct AnimationLibraryWindowStateUVE final {
     /// The last result, one line.
     std::string status;
     bool statusIsError = false;
+    /// A request to rename an entry (its index), and the name the popup edits.
+    std::optional<std::size_t> renameEntryRequested;
+    std::string entryName;
 };
 
 class EditorUVE final {
@@ -545,6 +548,19 @@ public:
     /// Writes the player's list (and its clip, when it is not listed) to `absoluteLibrary`.
     /// Missing clips keep their GUIDs with a "(missing)" name, so importing back restores the list.
     bool ExportAnimationSequencerToLibraryUVE(Scene::EntityUVE player, const std::filesystem::path& absoluteLibrary);
+    /// Links the player to the `.uvanimlib` file as one undo step: the Timeline offers the file's
+    /// clips alongside the owned list, live. Linking elsewhere switches the link.
+    bool LinkAnimationLibraryToSequencerUVE(Scene::EntityUVE player, const std::filesystem::path& absoluteLibrary);
+    /// Clears the player's library link as one undo step; the owned list is untouched.
+    bool UnlinkAnimationLibraryFromSequencerUVE(Scene::EntityUVE player);
+    /// Re-reads the player's linked library into the picker's cache (`linkedLibraryClips` and
+    /// friends). The picker calls this when it opens and whenever the link changes.
+    void RefreshSequencerLinkedClipsUVE(Scene::EntityUVE player);
+    /// The clips the Timeline picker offers: the owned list, the clip first when an older save
+    /// never listed it, then the linked entries in file order. Deduped.
+    static std::vector<Asset::AssetGuidUVE> MergeSequencerClipListsUVE(const std::vector<Asset::AssetGuidUVE>& owned,
+                                                                       Asset::AssetGuidUVE clip,
+                                                                       const std::vector<Asset::AssetGuidUVE>& linked);
 
     /// Brings a model source (an FBX, glTF or OBJ in Content, by its content-relative path) into the
     /// scene as one undo step and returns its root. A file with bones becomes
@@ -2248,6 +2264,13 @@ private:
         /// A request to export the player's list, and the library name the popup edits.
         bool exportLibraryRequested = false;
         std::string exportLibraryName;
+        /// The linked `.uvanimlib`'s cache: the link this was read for, the file's stem, its clip
+        /// GUIDs in file order, and whether a set link is unreadable. Refreshed when the picker
+        /// opens and whenever the link changes, so the section always shows the file as it is.
+        Asset::AssetGuidUVE linkedLibraryRef{};
+        std::string linkedLibraryName;
+        std::vector<Asset::AssetGuidUVE> linkedLibraryClips;
+        bool linkedLibraryBroken = false;
         /// Curves view instead of the dope sheet, and which channel it draws (-1: all that move).
         bool curves = false;
         int curveChannel = -1;

@@ -2417,6 +2417,8 @@ TEST_F(SceneSerializerUVETest, SaveThenLoad_AnimationSequencerComponentUVE_Round
     const EntityUVE entity = entityManager.CreateEntityUVE();
     AnimationSequencerComponentUVE animation;
     animation.clip = Asset::AssetGuidUVE{0x1234U};
+    animation.library = {Asset::AssetGuidUVE{0x1234U}, Asset::AssetGuidUVE{0xABCDU}};
+    animation.libraryRef = Asset::AssetGuidUVE{0x5678U};
     animation.autoplay = false;
     animation.speed = -1.25F;
     animation.loopMode = AnimationLoopModeUVE::PingPong;

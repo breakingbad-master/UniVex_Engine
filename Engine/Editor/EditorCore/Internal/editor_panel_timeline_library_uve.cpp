@@ -3,7 +3,8 @@
 // The Timeline's animation picker: an AnimationSequencer's own list of animations, which one it
 // plays, and the ways to grow the list - a new blank clip, any clip already in the project, or a
 // .uvanim dragged in from Content. Libraries move whole lists at once: any .uvanimlib in the
-// project imports in, and the player's list exports back out to one. Every change to the player
+// project imports in, and the player's list exports back out to one. Linking one instead keeps
+// the player following the file. Every change to the player
 // is one undo step; clip files are written only by New, Rename and Duplicate, which say so in the
 // status line.
 
@@ -68,6 +69,36 @@ namespace {
         name.resize(Asset::kMaximumAnimationLibraryIdentifierBytesUVE);
     }
     return name;
+}
+
+/// The linked library's clip GUIDs in file order, or empty when unlinked or unreadable. `name`
+/// takes the file's stem for the section header ("(missing library)" when the link resolves to
+/// nothing); `broken` is set when a link is set but unusable.
+[[nodiscard]] std::vector<Asset::AssetGuidUVE> LinkedSequencerClipsUVE(Asset::IAssetDatabaseUVE& assetDatabase,
+                                                                      Asset::AssetGuidUVE libraryRef,
+                                                                      std::string& name, bool& broken) {
+    std::vector<Asset::AssetGuidUVE> guids;
+    if (libraryRef == Asset::AssetGuidUVE{}) {
+        return guids;
+    }
+    const std::filesystem::path path = assetDatabase.ResolveUVE(libraryRef);
+    if (path.empty()) {
+        name = "(missing library)";
+        broken = true;
+        return guids;
+    }
+    Asset::AnimationLibraryAssetUVE library;
+    if (!Asset::LoadAnimationLibraryAssetUVE(path, library)) {
+        name = path.stem().string();
+        broken = true;
+        return guids;
+    }
+    name = path.stem().string();
+    guids.reserve(library.entries.size());
+    for (const Asset::AnimationLibraryEntryUVE& entry : library.entries) {
+        guids.push_back(entry.clip);
+    }
+    return guids;
 }
 
 /// `directory/stem.uvanim`, or `stem_2`, `stem_3`... when that file exists.
@@ -193,16 +224,18 @@ bool EditorUVE::ExportAnimationSequencerToLibraryUVE(const Scene::EntityUVE play
     }
     const Scene::AnimationSequencerComponentUVE& component =
         entityManager.GetComponentUVE<Scene::AnimationSequencerComponentUVE>(player);
-    // The list the picker offers: the library, and the clip even when an older save never listed it.
-    std::vector<Asset::AssetGuidUVE> guids = component.library;
-    if (component.clip != Asset::AssetGuidUVE{} && std::ranges::find(guids, component.clip) == guids.end()) {
-        guids.insert(guids.begin(), component.clip);
-    }
+    // What the picker offers: the owned list, the clip, and the linked library's entries.
+    Asset::IAssetDatabaseUVE& assetDatabase = m_services->GetAssetDatabaseUVE();
+    std::string linkedName;
+    bool linkedBroken = false;
+    const std::vector<Asset::AssetGuidUVE> linked =
+        LinkedSequencerClipsUVE(assetDatabase, component.libraryRef, linkedName, linkedBroken);
+    const std::vector<Asset::AssetGuidUVE> guids =
+        MergeSequencerClipListsUVE(component.library, component.clip, linked);
     if (guids.empty()) {
         m_timeline.status = "Nothing to export: this player has no animations.";
         return false;
     }
-    Asset::IAssetDatabaseUVE& assetDatabase = m_services->GetAssetDatabaseUVE();
     Asset::AnimationLibraryAssetUVE library;
     library.libraryId = absoluteLibrary.stem().generic_string();
     if (library.libraryId.empty()) {
@@ -236,6 +269,101 @@ bool EditorUVE::ExportAnimationSequencerToLibraryUVE(const Scene::EntityUVE play
     return true;
 }
 
+std::vector<Asset::AssetGuidUVE> EditorUVE::MergeSequencerClipListsUVE(const std::vector<Asset::AssetGuidUVE>& owned,
+                                                                       Asset::AssetGuidUVE clip,
+                                                                       const std::vector<Asset::AssetGuidUVE>& linked) {
+    std::vector<Asset::AssetGuidUVE> guids = owned;
+    if (clip != Asset::AssetGuidUVE{} && std::ranges::find(guids, clip) == guids.end()) {
+        guids.insert(guids.begin(), clip);
+    }
+    for (const Asset::AssetGuidUVE guid : linked) {
+        if (guid != Asset::AssetGuidUVE{} && std::ranges::find(guids, guid) == guids.end()) {
+            guids.push_back(guid);
+        }
+    }
+    return guids;
+}
+
+void EditorUVE::RefreshSequencerLinkedClipsUVE(const Scene::EntityUVE player) {
+    m_timeline.linkedLibraryRef = Asset::AssetGuidUVE{};
+    m_timeline.linkedLibraryName.clear();
+    m_timeline.linkedLibraryClips.clear();
+    m_timeline.linkedLibraryBroken = false;
+    Scene::IEntityManagerUVE& entityManager = m_services->GetEntityManagerUVE();
+    if (!entityManager.IsAliveUVE(player) ||
+        !entityManager.HasComponentUVE<Scene::AnimationSequencerComponentUVE>(player)) {
+        return;
+    }
+    const Asset::AssetGuidUVE libraryRef =
+        entityManager.GetComponentUVE<Scene::AnimationSequencerComponentUVE>(player).libraryRef;
+    if (libraryRef == Asset::AssetGuidUVE{}) {
+        return;
+    }
+    m_timeline.linkedLibraryRef = libraryRef;
+    m_timeline.linkedLibraryClips = LinkedSequencerClipsUVE(m_services->GetAssetDatabaseUVE(), libraryRef,
+                                                            m_timeline.linkedLibraryName, m_timeline.linkedLibraryBroken);
+}
+
+bool EditorUVE::LinkAnimationLibraryToSequencerUVE(const Scene::EntityUVE player,
+                                                   const std::filesystem::path& absoluteLibrary) {
+    if (!IsAuthoringCommandAllowedUVE()) {
+        m_timeline.status = "Stop the game to change the player's animations.";
+        return false;
+    }
+    Scene::IEntityManagerUVE& entityManager = m_services->GetEntityManagerUVE();
+    if (!entityManager.IsAliveUVE(player) ||
+        !entityManager.HasComponentUVE<Scene::AnimationSequencerComponentUVE>(player)) {
+        return false;
+    }
+    Asset::AnimationLibraryAssetUVE probe;
+    if (!Asset::LoadAnimationLibraryAssetUVE(absoluteLibrary, probe)) {
+        m_timeline.status = "Not a library: " + absoluteLibrary.filename().string();
+        return false;
+    }
+    const Asset::AssetGuidUVE guid = m_services->GetAssetDatabaseUVE().RegisterUVE(absoluteLibrary);
+    if (guid == Asset::AssetGuidUVE{}) {
+        m_timeline.status = "Could not use " + absoluteLibrary.filename().string() + " as a library.";
+        return false;
+    }
+    const bool changed = EditAnimationSequencerUVE(
+        player, [guid](Scene::AnimationSequencerComponentUVE& component) { component.libraryRef = guid; });
+    if (!changed) {
+        m_timeline.status = absoluteLibrary.stem().string() + " is already this player's library.";
+        return false;
+    }
+    RefreshSequencerLinkedClipsUVE(player);
+    m_timeline.status = "Linked " + absoluteLibrary.stem().string() + ": " +
+                        std::to_string(m_timeline.linkedLibraryClips.size()) + " clips offered.";
+    return true;
+}
+
+bool EditorUVE::UnlinkAnimationLibraryFromSequencerUVE(const Scene::EntityUVE player) {
+    if (!IsAuthoringCommandAllowedUVE()) {
+        m_timeline.status = "Stop the game to change the player's animations.";
+        return false;
+    }
+    Scene::IEntityManagerUVE& entityManager = m_services->GetEntityManagerUVE();
+    if (!entityManager.IsAliveUVE(player) ||
+        !entityManager.HasComponentUVE<Scene::AnimationSequencerComponentUVE>(player)) {
+        return false;
+    }
+    const Asset::AssetGuidUVE before =
+        entityManager.GetComponentUVE<Scene::AnimationSequencerComponentUVE>(player).libraryRef;
+    if (before == Asset::AssetGuidUVE{}) {
+        m_timeline.status = "No library linked.";
+        return false;
+    }
+    const std::filesystem::path where = m_services->GetAssetDatabaseUVE().ResolveUVE(before);
+    const bool changed = EditAnimationSequencerUVE(player, [](Scene::AnimationSequencerComponentUVE& component) {
+        component.libraryRef = Asset::AssetGuidUVE{};
+    });
+    if (changed) {
+        RefreshSequencerLinkedClipsUVE(player);
+        m_timeline.status = "Unlinked " + (where.empty() ? std::string{"library"} : where.stem().string()) + ".";
+    }
+    return changed;
+}
+
 void EditorUVE::DrawAnimationPickerUVE(const Scene::EntityUVE player, const Scene::EntityUVE skeletonEntity) {
     Scene::IEntityManagerUVE& entityManager = m_services->GetEntityManagerUVE();
     Asset::IAssetDatabaseUVE& assetDatabase = m_services->GetAssetDatabaseUVE();
@@ -246,6 +374,17 @@ void EditorUVE::DrawAnimationPickerUVE(const Scene::EntityUVE player, const Scen
     std::vector<Asset::AssetGuidUVE> list = component.library;
     if (component.clip != Asset::AssetGuidUVE{} && std::ranges::find(list, component.clip) == list.end()) {
         list.insert(list.begin(), component.clip);
+    }
+    // The link is live: when it changed (Inspector, undo) while the picker stood open, re-read.
+    if (component.libraryRef != m_timeline.linkedLibraryRef) {
+        RefreshSequencerLinkedClipsUVE(player);
+    }
+    // The linked library's entries, minus what the player already lists: the picker's second section.
+    std::vector<Asset::AssetGuidUVE> linkedOnly;
+    for (const Asset::AssetGuidUVE guid : m_timeline.linkedLibraryClips) {
+        if (std::ranges::find(list, guid) == list.end()) {
+            linkedOnly.push_back(guid);
+        }
     }
     const auto cardOf = [&](const Asset::AssetGuidUVE guid) -> const AnimationTimelineStateUVE::ClipCardUVE& {
         auto found = m_timeline.clipCards.find(guid.value);
@@ -284,10 +423,11 @@ void EditorUVE::DrawAnimationPickerUVE(const Scene::EntityUVE player, const Scen
     if (clicked) {
         m_timeline.clipCards.clear(); // re-read names and lengths each time it opens
         m_timeline.pickerSearch.clear();
+        RefreshSequencerLinkedClipsUVE(player); // and the linked file as it is now
         ImGui::OpenPopup("##tl-anim-picker");
     }
     if (ImGui::IsItemHovered()) {
-        ImGui::SetTooltip("This player's animations: switch, add, import, export, rename, duplicate, remove");
+        ImGui::SetTooltip("This player's animations: switch, add, import, link, export, rename, duplicate, remove");
     }
     // Opens upwards, over the tall part of the window, never over the button or down into the
     // Timeline's little space at the bottom.
@@ -354,6 +494,36 @@ void EditorUVE::DrawAnimationPickerUVE(const Scene::EntityUVE player, const Scen
         if (list.empty()) {
             ImGui::TextDisabled("  No animations yet.");
         }
+        if (!m_timeline.linkedLibraryName.empty()) {
+            ImGui::Spacing();
+            ImGui::TextDisabled("FROM %s  %zu", m_timeline.linkedLibraryName.c_str(), linkedOnly.size());
+            if (m_timeline.linkedLibraryBroken) {
+                ImGui::TextDisabled("  The linked library cannot be read.");
+            } else if (linkedOnly.empty()) {
+                ImGui::TextDisabled("  Every clip is already on this player.");
+            }
+            for (const Asset::AssetGuidUVE guid : linkedOnly) {
+                const AnimationTimelineStateUVE::ClipCardUVE& card = cardOf(guid);
+                if (!matches(card.name)) {
+                    continue;
+                }
+                ImGui::PushID(static_cast<int>(guid.value & 0x7FFFFFFFU));
+                const bool isCurrent = guid == component.clip;
+                char right[48];
+                std::snprintf(right, sizeof(right), "%s  %.2f s", card.skeletal ? "bones" : "object",
+                              card.durationSeconds);
+                const float rightWidth = ImGui::CalcTextSize(right).x;
+                if (ImGui::Selectable(card.name.c_str(), isCurrent, ImGuiSelectableFlags_AllowOverlap)) {
+                    choose = guid;
+                }
+                if (ImGui::IsItemHovered() && !card.path.empty()) {
+                    ImGui::SetTooltip("%s", card.path.string().c_str());
+                }
+                ImGui::SameLine(ImGui::GetWindowContentRegionMax().x - rightWidth);
+                ImGui::TextDisabled("%s", right);
+                ImGui::PopID();
+            }
+        }
 
         ImGui::Separator();
         bool createNew = false;
@@ -409,6 +579,39 @@ void EditorUVE::DrawAnimationPickerUVE(const Scene::EntityUVE player, const Scen
             }
             ImGui::EndMenu();
         }
+        std::optional<std::filesystem::path> linkPath;
+        bool unlinkRequested = false;
+        if (component.libraryRef == Asset::AssetGuidUVE{}) {
+            if (ImGui::BeginMenu("Link Library...")) {
+                int shown = 0;
+                for (const Asset::ProjectFileEntryUVE& entry : project.entries) {
+                    if (entry.kind != Asset::ProjectFileEntryKindUVE::File ||
+                        entry.relativePath.extension() != ".uvanimlib") {
+                        continue;
+                    }
+                    if (!matches(entry.relativePath.stem().string())) {
+                        continue;
+                    }
+                    ++shown;
+                    const std::string folder = entry.relativePath.parent_path().string();
+                    if (ImGui::MenuItem(entry.relativePath.stem().string().c_str(),
+                                        folder.empty() ? "Content" : folder.c_str())) {
+                        linkPath = project.contentRoot / entry.relativePath;
+                    }
+                }
+                if (shown == 0) {
+                    ImGui::TextDisabled("No animation libraries in the project yet.");
+                }
+                ImGui::EndMenu();
+            }
+        } else {
+            const std::filesystem::path linkedPath = assetDatabase.ResolveUVE(component.libraryRef);
+            const std::string unlinkLabel =
+                linkedPath.empty() ? std::string{"Unlink library"} : "Unlink " + linkedPath.stem().string();
+            if (ImGui::Selectable(unlinkLabel.c_str())) {
+                unlinkRequested = true;
+            }
+        }
         bool exportLibrary = false;
         if (ImGui::Selectable("Export to Library...")) {
             exportLibrary = true;
@@ -432,6 +635,12 @@ void EditorUVE::DrawAnimationPickerUVE(const Scene::EntityUVE player, const Scen
         }
         if (importPath.has_value()) {
             static_cast<void>(ImportAnimationLibraryIntoSequencerUVE(player, *importPath));
+        }
+        if (linkPath.has_value()) {
+            static_cast<void>(LinkAnimationLibraryToSequencerUVE(player, *linkPath));
+        }
+        if (unlinkRequested) {
+            static_cast<void>(UnlinkAnimationLibraryFromSequencerUVE(player));
         }
         if (exportLibrary) {
             const std::string owner = entityManager.HasComponentUVE<Scene::NameComponentUVE>(player)
