@@ -10,6 +10,7 @@
 #include "uve/component/hierarchy_component_uve.h"
 #include "uve/component/ui_anchor_component_uve.h"
 #include "uve/component/ui_button_component_uve.h"
+#include "uve/component/ui_checkbox_component_uve.h"
 #include "uve/component/ui_image_component_uve.h"
 #include "uve/component/ui_layout_container_component_uve.h"
 #include "uve/component/ui_progress_bar_component_uve.h"
@@ -57,6 +58,9 @@ struct AnchoredWidgetUVE final {
     if (entityManager.HasComponentUVE<Scene::UIProgressBarComponentUVE>(parent)) {
         return entityManager.GetComponentUVE<Scene::UIProgressBarComponentUVE>(parent).rect;
     }
+    if (entityManager.HasComponentUVE<Scene::UICheckboxComponentUVE>(parent)) {
+        return entityManager.GetComponentUVE<Scene::UICheckboxComponentUVE>(parent).rect;
+    }
     return viewport;
 }
 
@@ -94,8 +98,9 @@ void ResolveUIAnchorsUVE(Scene::IEntityManagerUVE& entityManager,
             entityManager.HasComponentUVE<Scene::UILayoutContainerComponentUVE>(widget.entity);
         const bool isSlider = entityManager.HasComponentUVE<Scene::UISliderComponentUVE>(widget.entity);
         const bool isProgress = entityManager.HasComponentUVE<Scene::UIProgressBarComponentUVE>(widget.entity);
+        const bool isCheckbox = entityManager.HasComponentUVE<Scene::UICheckboxComponentUVE>(widget.entity);
         const bool isText = entityManager.HasComponentUVE<Scene::UITextComponentUVE>(widget.entity);
-        if (!isButton && !isImage && !isContainer && !isSlider && !isProgress && !isText) {
+        if (!isButton && !isImage && !isContainer && !isSlider && !isProgress && !isCheckbox && !isText) {
             continue;
         }
         const Math::RectUVE parent = AnchorParentRectUVE(entityManager, widget.entity, viewportSize);
@@ -127,6 +132,10 @@ void ResolveUIAnchorsUVE(Scene::IEntityManagerUVE& entityManager,
         if (isProgress) {
             entityManager.GetComponentUVE<Scene::UIProgressBarComponentUVE>(widget.entity).rect = {resolvedMin,
                                                                                                    resolvedSize};
+        }
+        if (isCheckbox) {
+            entityManager.GetComponentUVE<Scene::UICheckboxComponentUVE>(widget.entity).rect = {resolvedMin,
+                                                                                                resolvedSize};
         }
         if (isText) {
             entityManager.GetComponentUVE<Scene::UITextComponentUVE>(widget.entity).positionPixels = resolvedMin;

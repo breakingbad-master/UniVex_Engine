@@ -5,14 +5,17 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdint>
+#include <optional>
 #include <string>
 #include <vector>
 
 #include "uve/component/ui_button_component_uve.h"
+#include "uve/component/ui_checkbox_component_uve.h"
 #include "uve/component/ui_image_component_uve.h"
 #include "uve/component/ui_progress_bar_component_uve.h"
 #include "uve/component/ui_slider_component_uve.h"
 #include "uve/component/ui_text_component_uve.h"
+#include "uve/component/ui_tooltip_component_uve.h"
 #include "uve/input/mouse_button_uve.h"
 #include "uve/ui/canvas_ancestry_uve.h"
 #include "uve/ui/ui_anchors_uve.h"
@@ -114,6 +117,28 @@ void AppendImageQuadsUVE(const Scene::UIImageComponentUVE& image, const float al
             quads.push_back(cell);
         }
     }
+}
+
+/// The rect a tooltip watches: the entity's first rect widget in button/slider/checkbox/image/
+/// progress priority. Text-only entities hover nothing - a tooltip needs a rect to watch.
+[[nodiscard]] std::optional<Math::RectUVE> TooltipAnchorRectUVE(Scene::IEntityManagerUVE& entityManager,
+                                                               const Scene::EntityUVE entity) {
+    if (entityManager.HasComponentUVE<Scene::UIButtonComponentUVE>(entity)) {
+        return entityManager.GetComponentUVE<Scene::UIButtonComponentUVE>(entity).rect;
+    }
+    if (entityManager.HasComponentUVE<Scene::UISliderComponentUVE>(entity)) {
+        return entityManager.GetComponentUVE<Scene::UISliderComponentUVE>(entity).rect;
+    }
+    if (entityManager.HasComponentUVE<Scene::UICheckboxComponentUVE>(entity)) {
+        return entityManager.GetComponentUVE<Scene::UICheckboxComponentUVE>(entity).rect;
+    }
+    if (entityManager.HasComponentUVE<Scene::UIImageComponentUVE>(entity)) {
+        return entityManager.GetComponentUVE<Scene::UIImageComponentUVE>(entity).rect;
+    }
+    if (entityManager.HasComponentUVE<Scene::UIProgressBarComponentUVE>(entity)) {
+        return entityManager.GetComponentUVE<Scene::UIProgressBarComponentUVE>(entity).rect;
+    }
+    return std::nullopt;
 }
 
 void RankWidgetUVE(const Scene::EntityUVE entity, const CanvasAncestryUVE& ancestry, const std::uint8_t layer,
@@ -302,6 +327,40 @@ void UIRuntimeUVE::TickUVE(Scene::IEntityManagerUVE& entityManager, const Input:
             RankWidgetUVE(entity, ResolveCanvasAncestryUVE(entityManager, entity), 1, std::move(sliderQuads), ranked);
         });
 
+    entityManager.ForEachUVE<Scene::UICheckboxComponentUVE>(
+        [&entityManager, &ranked, &mousePosition, mousePressedThisFrame](
+            const Scene::EntityUVE entity, Scene::UICheckboxComponentUVE& checkbox) {
+            if (!ShouldDrawUiWidgetUVE(entityManager, entity) || !IsUICheckboxComponentValidUVE(checkbox)) {
+                checkbox.isHovered = false;
+                checkbox.wasToggledThisFrame = false;
+                return;
+            }
+            checkbox.isHovered = Math::ContainsUVE(checkbox.rect, mousePosition);
+            checkbox.wasToggledThisFrame = checkbox.isHovered && mousePressedThisFrame;
+            if (checkbox.wasToggledThisFrame) {
+                checkbox.checked = !checkbox.checked;
+            }
+            const float alpha = TweenedAlphaUVE(entityManager, entity, 1.0F);
+            UIQuadUVE box{};
+            box.rect = checkbox.rect;
+            box.color = checkbox.isHovered ? checkbox.hoverColor : checkbox.boxColor;
+            box.alpha = alpha;
+            box.kind = UIDrawItemKindUVE::SolidColor;
+            std::vector<UIQuadUVE> checkboxQuads;
+            checkboxQuads.push_back(box);
+            if (checkbox.checked) {
+                const Math::Vector2UVE inset{checkbox.rect.size.x * 0.25F, checkbox.rect.size.y * 0.25F};
+                UIQuadUVE check{};
+                check.rect = Math::RectUVE{checkbox.rect.position + inset, checkbox.rect.size - inset - inset};
+                check.color = checkbox.checkColor;
+                check.alpha = alpha;
+                check.kind = UIDrawItemKindUVE::SolidColor;
+                checkboxQuads.push_back(check);
+            }
+            RankWidgetUVE(entity, ResolveCanvasAncestryUVE(entityManager, entity), 1, std::move(checkboxQuads),
+                          ranked);
+        });
+
     std::vector<UIGlyphQuadUVE> glyphQuads;
     std::string translated;
     entityManager.ForEachUVE<Scene::UITextComponentUVE>(
@@ -336,6 +395,65 @@ void UIRuntimeUVE::TickUVE(Scene::IEntityManagerUVE& entityManager, const Input:
                 quads.push_back(quad);
             }
             RankWidgetUVE(entity, ResolveCanvasAncestryUVE(entityManager, entity), 2, std::move(quads), ranked);
+        });
+
+    entityManager.ForEachUVE<Scene::UITooltipComponentUVE>(
+        [this, &entityManager, &ranked, &mousePosition, &glyphQuads, &localization, &translated](
+            const Scene::EntityUVE entity, Scene::UITooltipComponentUVE& tooltip) {
+            tooltip.visibleThisFrame = false;
+            if (!ShouldDrawUiWidgetUVE(entityManager, entity) || !IsUITooltipComponentValidUVE(tooltip)) {
+                tooltip.hoverTime = 0.0F;
+                return;
+            }
+            const std::optional<Math::RectUVE> anchor = TooltipAnchorRectUVE(entityManager, entity);
+            if (!anchor.has_value() || !Math::ContainsUVE(*anchor, mousePosition)) {
+                tooltip.hoverTime = 0.0F;
+                return;
+            }
+            tooltip.hoverTime += m_deltaTime;
+            if (tooltip.text.empty() || tooltip.hoverTime < tooltip.delay) {
+                return;
+            }
+            glyphQuads.clear();
+            const std::string* shown = &tooltip.text;
+            if (localization.service != nullptr &&
+                (!localization.isAutoTranslated || localization.isAutoTranslated(entity))) {
+                translated = localization.service->TranslateUVE(tooltip.text);
+                shown = &translated;
+            }
+            const float textWidth = m_fontAtlas.MeasureTextWidthUVE(*shown, tooltip.fontSize);
+            const Math::Vector2UVE popupSize{textWidth + 2.0F * tooltip.padding,
+                                             tooltip.fontSize + 2.0F * tooltip.padding};
+            const Math::Vector2UVE desired{mousePosition.x + tooltip.offset.x, mousePosition.y + tooltip.offset.y};
+            const Math::Vector2UVE popupPosition{
+                std::clamp(desired.x, 0.0F, std::max(0.0F, m_viewportSize.x - popupSize.x)),
+                std::clamp(desired.y, 0.0F, std::max(0.0F, m_viewportSize.y - popupSize.y))};
+            float cursorX = popupPosition.x + tooltip.padding;
+            float cursorY = popupPosition.y + tooltip.padding + tooltip.fontSize;
+            m_fontAtlas.AppendTextQuadsUVE(*shown, cursorX, cursorY, tooltip.fontSize, glyphQuads);
+            const float alpha = TweenedAlphaUVE(entityManager, entity, 1.0F);
+            std::vector<UIQuadUVE> popupQuads;
+            UIQuadUVE background{};
+            background.rect = Math::RectUVE{popupPosition, popupSize};
+            background.color = tooltip.backgroundColor;
+            background.alpha = alpha;
+            background.kind = UIDrawItemKindUVE::SolidColor;
+            popupQuads.push_back(background);
+            for (const UIGlyphQuadUVE& glyphQuad : glyphQuads) {
+                UIQuadUVE quad{};
+                quad.rect = Math::RectUVE{Math::Vector2UVE{glyphQuad.x0, glyphQuad.y0},
+                                           Math::Vector2UVE{glyphQuad.x1 - glyphQuad.x0, glyphQuad.y1 - glyphQuad.y0}};
+                quad.u0 = glyphQuad.u0;
+                quad.v0 = glyphQuad.v0;
+                quad.u1 = glyphQuad.u1;
+                quad.v1 = glyphQuad.v1;
+                quad.color = tooltip.textColor;
+                quad.alpha = alpha;
+                quad.kind = UIDrawItemKindUVE::Glyph;
+                popupQuads.push_back(quad);
+            }
+            RankWidgetUVE(entity, ResolveCanvasAncestryUVE(entityManager, entity), 2, std::move(popupQuads), ranked);
+            tooltip.visibleThisFrame = true;
         });
 
     std::sort(ranked.begin(), ranked.end(), [](const RankedWidgetUVE& lhs, const RankedWidgetUVE& rhs) {

@@ -38,11 +38,13 @@
 #include "uve/component/transform_component_uve.h"
 #include "uve/component/ui_anchor_component_uve.h"
 #include "uve/component/ui_button_component_uve.h"
+#include "uve/component/ui_checkbox_component_uve.h"
 #include "uve/component/ui_image_component_uve.h"
 #include "uve/component/ui_layout_container_component_uve.h"
 #include "uve/component/ui_progress_bar_component_uve.h"
 #include "uve/component/ui_slider_component_uve.h"
 #include "uve/component/ui_text_component_uve.h"
+#include "uve/component/ui_tooltip_component_uve.h"
 #include "uve/component/ui_tween_component_uve.h"
 #include "uve/component/visibility_component_uve.h"
 #include "uve/logging/assert_uve.h"
@@ -1998,6 +2000,48 @@ void DeclareMediaAndUIUVE(std::vector<TypeMetadataEntryUVE>& entries) {
                              "completedThisFrame", "Completed This Frame", kPropertyTypeBoolUVE),
                          DeclareRuntimeStateUVE<&UITweenComponentUVE::currentAlpha>(
                              "currentAlpha", "Current Alpha", kPropertyTypeFloatUVE),
+                     }));
+    AddUVE<UICheckboxComponentUVE>(
+        entries,
+        MakeEntryUVE("component.ui_checkbox", "UICheckboxComponentUVE", "UI Checkbox",
+                     kSectionOrderTypeSpecificUVE,
+                     {
+                         DeclareUVE<&UICheckboxComponentUVE::rect>("rect", "Rect", kPropertyTypeRectUVE),
+                         DeclareUVE<&UICheckboxComponentUVE::boxColor>("boxColor", "Box",
+                                                                      kPropertyTypeColorUVE),
+                         DeclareUVE<&UICheckboxComponentUVE::hoverColor>("hoverColor", "Hover",
+                                                                        kPropertyTypeColorUVE),
+                         DeclareUVE<&UICheckboxComponentUVE::checkColor>("checkColor", "Check",
+                                                                        kPropertyTypeColorUVE),
+                         DeclareUVE<&UICheckboxComponentUVE::checked>("checked", "Checked",
+                                                                     kPropertyTypeBoolUVE),
+                         DeclareRuntimeStateUVE<&UICheckboxComponentUVE::isHovered>(
+                             "isHovered", "Hovered", kPropertyTypeBoolUVE),
+                         DeclareRuntimeStateUVE<&UICheckboxComponentUVE::wasToggledThisFrame>(
+                             "wasToggledThisFrame", "Toggled This Frame", kPropertyTypeBoolUVE),
+                     }));
+    AddUVE<UITooltipComponentUVE>(
+        entries,
+        MakeEntryUVE("component.ui_tooltip", "UITooltipComponentUVE", "UI Tooltip",
+                     kSectionOrderTypeSpecificUVE,
+                     {
+                         DeclareUVE<&UITooltipComponentUVE::text>("text", "Text", kPropertyTypeStringUVE),
+                         DeclareUVE<&UITooltipComponentUVE::delay>("delay", "Delay",
+                                                                  kPropertyTypeFloatUVE),
+                         DeclareUVE<&UITooltipComponentUVE::offset>("offset", "Offset",
+                                                                   kPropertyTypeVector2UVE),
+                         DeclareUVE<&UITooltipComponentUVE::padding>("padding", "Padding",
+                                                                    kPropertyTypeFloatUVE),
+                         DeclareUVE<&UITooltipComponentUVE::fontSize>("fontSize", "Font Size",
+                                                                     kPropertyTypeFloatUVE),
+                         DeclareUVE<&UITooltipComponentUVE::backgroundColor>("backgroundColor", "Background",
+                                                                            kPropertyTypeColorUVE),
+                         DeclareUVE<&UITooltipComponentUVE::textColor>("textColor", "Text",
+                                                                      kPropertyTypeColorUVE),
+                         DeclareRuntimeStateUVE<&UITooltipComponentUVE::hoverTime>(
+                             "hoverTime", "Hover Time", kPropertyTypeFloatUVE),
+                         DeclareRuntimeStateUVE<&UITooltipComponentUVE::visibleThisFrame>(
+                             "visibleThisFrame", "Visible This Frame", kPropertyTypeBoolUVE),
                      }));
 }
 
