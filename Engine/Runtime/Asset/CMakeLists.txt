@@ -119,6 +119,7 @@ add_library(uve_asset STATIC
     Internal/resource_dependency_graph_uve.cpp
     Internal/animation_clip_asset_uve.cpp
     Internal/skeleton_asset_uve.cpp
+    Internal/animation_library_asset_uve.cpp
     Internal/data_table_uve.cpp
     Internal/data_table_asset_uve.cpp
     Internal/data_table_asset_manager_uve.cpp
