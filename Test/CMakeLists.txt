@@ -103,6 +103,7 @@ add_executable(uve_core_tests
     Network/reliable_packet_window_uve_tests.cpp
     Network/network_transport_uve_tests.cpp
     Network/network_session_uve_tests.cpp
+    Network/network_conditions_uve_tests.cpp
     Network/network_replication_uve_tests.cpp
     Plugins/plugin_registry_uve_tests.cpp
     Plugins/native_plugin_host_uve_tests.cpp

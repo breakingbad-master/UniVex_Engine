@@ -477,6 +477,7 @@ real utility file) — networked multiplayer is a from-scratch, long-term projec
 - [ ] A matchmaking/lobby layer, or at minimum a clean integration point for a third-party
   one
 - [ ] Network debugging tools (packet inspector, simulated latency/loss for testing)
+- [x] Simulated transport conditions: deterministic drop periods + fixed delays per direction over any endpoint (packet inspector still open)
 - [ ] The now-redundant `Networking` placeholder folder and the real `Network` folder
   should be reconciled into one clearly-named module once real network code exists, instead
   of carrying two same-purpose folders forward

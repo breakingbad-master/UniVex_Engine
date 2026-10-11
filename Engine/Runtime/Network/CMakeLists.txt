@@ -6,6 +6,7 @@
 # and uve_utilities (PRIVATE: the wire codec stays in the .cpp).
 
 add_library(uve_network STATIC
+    Internal/network_conditions_uve.cpp
     Internal/network_replication_uve.cpp
     Internal/network_session_uve.cpp
     Internal/network_transport_uve.cpp
