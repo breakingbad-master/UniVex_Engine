@@ -65,6 +65,30 @@ bool TryInverseTransformDirectionUVE(const TrsUVE& trs, const Vector3UVE& direct
     return true;
 }
 
+bool TryInverseTransformRotationUVE(const TrsUVE& trs, const QuaternionUVE& worldDelta,
+                                    QuaternionUVE& outLocalDelta) noexcept {
+    if (!IsFiniteUVE(trs.rotation) || !IsFiniteUVE(worldDelta)) {
+        return false;
+    }
+    // Byte-identical expressions to the viewport rotate-drag path's long-standing world-to-local
+    // arithmetic (EditorUVE::ComputeLocalRotationForWorldAxisUVE), so adopting this function
+    // cannot change a single drag: normalize the parent rotation, then conjugate the world delta
+    // into the parent frame. Conjugation is scale-free - the translation and scale never enter.
+    QuaternionUVE parentNormalized{};
+    QuaternionUVE parentInverse{};
+    if (!TryNormalizeUVE(trs.rotation, parentNormalized) ||
+        !TryInverseUVE(parentNormalized, parentInverse)) {
+        return false;
+    }
+    const QuaternionUVE result =
+        MultiplyUVE(MultiplyUVE(parentInverse, worldDelta), parentNormalized);
+    if (!IsFiniteUVE(result)) {
+        return false;
+    }
+    outLocalDelta = result;
+    return true;
+}
+
 std::string ToStringUVE(const TrsUVE& trs) {
     return "Trs(" + ToStringUVE(trs.translation) + ", " + ToStringUVE(trs.rotation) + ", " +
            ToStringUVE(trs.scale) + ")";

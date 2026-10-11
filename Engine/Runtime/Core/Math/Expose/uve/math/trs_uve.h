@@ -16,8 +16,9 @@ namespace UVE::Math {
 /// quaternion/vector arithmetic; this type makes that composition one named operation.
 /// A point `p` is transformed as `translation + rotation * (scale * p)` (scale first, then
 /// rotation, then translation), matching `Matrix4x4UVE::ComposeTrsUVE` exactly.
-/// Deliberately minimal, matching this module's precedent: compose, forward/inverse point and
-/// direction transforms, equality, and a debug formatter. There is intentionally NO materialized
+/// Deliberately minimal, matching this module's precedent: compose, forward/inverse point,
+/// direction, and rotation-delta transforms, equality, and a debug formatter. There is
+/// intentionally NO materialized
 /// inverse (`TryInverseUVE` returning a `TrsUVE`): rotation and non-uniform scale do not commute,
 /// so the inverse of a general TRS is not itself a TRS — the in-tree precedent is the reparent
 /// path refusing non-uniformly-scaled rotated parents, since no local TRS reproduces that world
@@ -78,6 +79,20 @@ struct TrsUVE {
 /// Same contract as TryInverseTransformPointUVE().
 [[nodiscard]] bool TryInverseTransformDirectionUVE(const TrsUVE& trs, const Vector3UVE& direction,
                                                    Vector3UVE& outDirection) noexcept;
+
+/// Conjugates a world-space rotation delta into `trs`' frame: `rotation^-1 * worldDelta *
+/// rotation` — the local delta that reproduces `worldDelta` back under the parent, for the
+/// viewport rotate-drag path (a drag about a world axis becomes the entity-local spin). Rotation
+/// conjugation is scale-free, so unlike the point/direction inverses this deliberately ignores
+/// `trs` translation and scale: they never enter the arithmetic, and non-finite values there do
+/// not fail. Returns false (leaving `outLocalDelta` untouched) only when the rotation or the
+/// delta is non-finite, or the rotation is degenerate (not normalizable as a quaternion).
+/// Normalize-then-conjugate order, matching the editor's long-standing world-to-local arithmetic.
+/// A materialized-inverse formulation (`parent^-1 * newWorld`) stays impossible — the inverse of
+/// a general TRS is not a TRS — so conjugation remains the value-type spelling of this gesture.
+[[nodiscard]] bool TryInverseTransformRotationUVE(const TrsUVE& trs,
+                                                 const QuaternionUVE& worldDelta,
+                                                 QuaternionUVE& outLocalDelta) noexcept;
 
 /// Formats `trs` as `"Trs((tx, ty, tz), (qx, qy, qz, qw), (sx, sy, sz))"`, for logging/debugging.
 [[nodiscard]] std::string ToStringUVE(const TrsUVE& trs);

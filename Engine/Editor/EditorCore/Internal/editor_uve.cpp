@@ -4454,14 +4454,17 @@ bool EditorUVE::ComputeLocalRotationForWorldAxisUVE(const Scene::EntityUVE entit
         }
 
         const Scene::WorldTransformComponentUVE& parentWorld = *composingParent;
-        Math::QuaternionUVE parentNormalized{};
-        Math::QuaternionUVE parentInverse{};
-        if (parentWorld.dirty || !Math::TryNormalizeUVE(parentWorld.worldRotation, parentNormalized) ||
-            !Math::TryInverseUVE(parentNormalized, parentInverse)) {
+        if (parentWorld.dirty) {
             return false;
         }
-        localDelta = Math::MultiplyUVE(
-            Math::MultiplyUVE(parentInverse, worldDelta), parentNormalized);
+        // One TrsUVE value op conjugates the world-axis delta into the parent frame -
+        // byte-identical to the quaternion sandwich it replaces (see
+        // TryInverseTransformRotationUVE).
+        const Math::TrsUVE parentTrs{
+            parentWorld.worldPosition, parentWorld.worldRotation, parentWorld.worldScale};
+        if (!Math::TryInverseTransformRotationUVE(parentTrs, worldDelta, localDelta)) {
+            return false;
+        }
     }
 
     return Math::TryNormalizeUVE(Math::MultiplyUVE(localDelta, initialNormalized), outLocalRotation);

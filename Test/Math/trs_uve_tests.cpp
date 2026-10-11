@@ -217,5 +217,94 @@ TEST(TrsUVETest, ToStringUVE_ContainsAllFields) {
     EXPECT_NE(text.find("6.000000"), std::string::npos);
 }
 
+TEST(TrsUVETest, InverseTransformRotation_IdentityParent_ReturnsDeltaUnchanged) {
+    QuaternionUVE worldDelta{};
+    ASSERT_TRUE(TryMakeAxisAngleUVE(Vector3UVE{1.0F, 0.0F, 0.0F}, 0.5F, worldDelta));
+    QuaternionUVE local{};
+
+    ASSERT_TRUE(TryInverseTransformRotationUVE(TrsUVE::IdentityUVE(), worldDelta, local));
+    EXPECT_FLOAT_EQ(local.x, worldDelta.x);
+    EXPECT_FLOAT_EQ(local.y, worldDelta.y);
+    EXPECT_FLOAT_EQ(local.z, worldDelta.z);
+    EXPECT_FLOAT_EQ(local.w, worldDelta.w);
+}
+
+TEST(TrsUVETest, InverseTransformRotation_ConjugatesWorldDeltaIntoParentFrame) {
+    // Parent yawed +90 degrees about Y; world delta is +90 degrees about world X. Conjugating by
+    // the parent yaw moves the X-axis delta onto the parent's +Z axis: local == Rz(+90 degrees).
+    // (Yaw +90 maps parent-frame +Z onto world-frame +X, so a world X spin is a local Z spin.)
+    QuaternionUVE parentRotation{};
+    ASSERT_TRUE(TryMakeAxisAngleUVE(
+        Vector3UVE{0.0F, 1.0F, 0.0F}, std::numbers::pi_v<float> / 2.0F, parentRotation));
+    QuaternionUVE worldDelta{};
+    ASSERT_TRUE(TryMakeAxisAngleUVE(
+        Vector3UVE{1.0F, 0.0F, 0.0F}, std::numbers::pi_v<float> / 2.0F, worldDelta));
+    QuaternionUVE expectedLocal{};
+    ASSERT_TRUE(TryMakeAxisAngleUVE(
+        Vector3UVE{0.0F, 0.0F, 1.0F}, std::numbers::pi_v<float> / 2.0F, expectedLocal));
+    const TrsUVE parent{Vector3UVE{}, parentRotation, Vector3UVE{1.0F, 1.0F, 1.0F}};
+    QuaternionUVE local{};
+
+    ASSERT_TRUE(TryInverseTransformRotationUVE(parent, worldDelta, local));
+    EXPECT_NEAR(local.x, expectedLocal.x, kEpsilon);
+    EXPECT_NEAR(local.y, expectedLocal.y, kEpsilon);
+    EXPECT_NEAR(local.z, expectedLocal.z, kEpsilon);
+    EXPECT_NEAR(local.w, expectedLocal.w, kEpsilon);
+
+    // The local delta must reproduce the world delta back under the parent: the composed world
+    // rotation equals the delta applied to the old world rotation.
+    const QuaternionUVE recomposed = MultiplyUVE(parentRotation, local);
+    const QuaternionUVE expectedWorld = MultiplyUVE(worldDelta, parentRotation);
+    EXPECT_NEAR(recomposed.x, expectedWorld.x, kEpsilon);
+    EXPECT_NEAR(recomposed.y, expectedWorld.y, kEpsilon);
+    EXPECT_NEAR(recomposed.z, expectedWorld.z, kEpsilon);
+    EXPECT_NEAR(recomposed.w, expectedWorld.w, kEpsilon);
+}
+
+TEST(TrsUVETest, InverseTransformRotation_IgnoresTranslationAndScale) {
+    QuaternionUVE parentRotation{};
+    ASSERT_TRUE(TryMakeAxisAngleUVE(Vector3UVE{0.0F, 1.0F, 0.0F}, 0.7F, parentRotation));
+    QuaternionUVE worldDelta{};
+    ASSERT_TRUE(TryMakeAxisAngleUVE(Vector3UVE{1.0F, 0.0F, 0.0F}, 0.3F, worldDelta));
+    const TrsUVE plain{Vector3UVE{}, parentRotation, Vector3UVE{1.0F, 1.0F, 1.0F}};
+    const TrsUVE wild{Vector3UVE{9.0F, -4.0F, 2.0F}, parentRotation,
+                      Vector3UVE{2.0F, 0.5F, -3.0F}};
+    QuaternionUVE localPlain{};
+    QuaternionUVE localWild{};
+
+    ASSERT_TRUE(TryInverseTransformRotationUVE(plain, worldDelta, localPlain));
+    ASSERT_TRUE(TryInverseTransformRotationUVE(wild, worldDelta, localWild));
+    EXPECT_EQ(localPlain, localWild);
+
+    // Non-finite translation/scale are still accepted: the retired sandwich never read them, and
+    // neither does this function - a degenerate scale must not break rotate drags.
+    const TrsUVE nonFiniteScale{Vector3UVE{}, parentRotation,
+                                Vector3UVE{std::numeric_limits<float>::infinity(), 1.0F, 1.0F}};
+    QuaternionUVE localNonFinite{};
+
+    ASSERT_TRUE(TryInverseTransformRotationUVE(nonFiniteScale, worldDelta, localNonFinite));
+    EXPECT_EQ(localPlain, localNonFinite);
+}
+
+TEST(TrsUVETest, InverseTransformRotation_DegenerateOrNonFinite_ReturnsFalse) {
+    const TrsUVE zeroRotation{Vector3UVE{}, QuaternionUVE{0.0F, 0.0F, 0.0F, 0.0F},
+                              Vector3UVE{1.0F, 1.0F, 1.0F}};
+    const TrsUVE finite = TrsUVE::IdentityUVE();
+    QuaternionUVE worldDelta{};
+    ASSERT_TRUE(TryMakeAxisAngleUVE(Vector3UVE{1.0F, 0.0F, 0.0F}, 0.3F, worldDelta));
+    const QuaternionUVE sentinel{1.0F, 2.0F, 3.0F, 4.0F};
+    QuaternionUVE out = sentinel;
+
+    EXPECT_FALSE(TryInverseTransformRotationUVE(zeroRotation, worldDelta, out));
+    EXPECT_EQ(out, sentinel);
+    const QuaternionUVE nonFiniteDelta{
+        std::numeric_limits<float>::quiet_NaN(), 0.0F, 0.0F, 1.0F};
+    EXPECT_FALSE(TryInverseTransformRotationUVE(finite, nonFiniteDelta, out));
+    EXPECT_EQ(out, sentinel);
+    const TrsUVE nonFiniteRotation{Vector3UVE{}, nonFiniteDelta, Vector3UVE{1.0F, 1.0F, 1.0F}};
+    EXPECT_FALSE(TryInverseTransformRotationUVE(nonFiniteRotation, worldDelta, out));
+    EXPECT_EQ(out, sentinel);
+}
+
 } // namespace
 } // namespace UVE::Math::Tests
