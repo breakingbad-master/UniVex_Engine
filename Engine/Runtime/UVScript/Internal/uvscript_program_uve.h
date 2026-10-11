@@ -50,6 +50,12 @@ enum class OpUVE : std::uint8_t {
     Return,       // pops the result
     ReturnNone,
     Wait,         // pops seconds
+    BuildList,    // a = item count: pops that many values, pushes the list
+    BuildMap,     // a = pair count: pops key, value, ... (2*a values), pushes the map
+    BuildTuple,   // a = item count: pops that many values, pushes the tuple
+    GetIndex,     // pops [container, key], pushes the item (a read never changes the container)
+    SetIndex,     // pops [container, key, value], pushes the container with the item replaced
+    Unpack,       // a = count: pops a tuple, pushes its items in order (first pushed first)
 };
 
 struct InstructionUVE final {
@@ -76,6 +82,10 @@ enum class BuiltinUVE : std::uint8_t {
     Str,
     Length,
     Normalize,
+    Push,
+    Keys,
+    Contains,
+    Remove,
 };
 
 struct ChunkUVE final {

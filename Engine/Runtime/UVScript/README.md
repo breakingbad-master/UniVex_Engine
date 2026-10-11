@@ -67,6 +67,7 @@ param       := IDENT (':' type)?
 type        := IDENT ('[' type (',' type)* ']')?
 block       := NEWLINE INDENT statement+ DEDENT
 statement   := 'let' IDENT (':' type)? '=' expr NEWLINE
+             | 'let' '(' IDENT (',' IDENT)* ')' '=' expr NEWLINE
              | 'if' expr ':' block ('elif' expr ':' block)* ('else' ':' block)?
              | 'while' expr ':' block
              | 'for' IDENT 'in' expr ':' block
@@ -82,7 +83,9 @@ sum         := product (('+'|'-') product)*
 product     := unary (('*'|'/'|'%') unary)*
 unary       := '-' unary | postfix
 postfix     := primary ('.' IDENT | '(' args? ')' | '[' expr ']')*
-primary     := NUMBER UNIT? | STRING | 'true' | 'false' | 'none' | IDENT | '(' expr ')'
+primary     := NUMBER UNIT? | STRING | 'true' | 'false' | 'none' | IDENT
+             | '[' (expr (',' expr)* ','?)? ']' | '{' (expr ':' expr (',' expr ':' expr)* ','?)? '}'
+             | '(' (expr (',' expr)* ','?)? ')'
 ```
 
 ## Module
@@ -111,9 +114,13 @@ primary     := NUMBER UNIT? | STRING | 'true' | 'false' | 'none' | IDENT | '(' e
    - A runaway loop is cut off after one million instructions.
    - `ref.method(args)` calls a method on another node: fire-and-forget, answered with none,
      resolved when the script runs. An object may be compared with `none`, for lookups that miss.
-   - Not in yet:
-     - collections, tuples and `[]`;
-     - `wait` inside a `fn`.
+   - Collections and tuples: typed `list[int]`, `map[str, int]` and `tuple[int, str]` with
+     literals (`[1, 2]`, `{"a": 1}`, `(1, "a")`), `[]` reads, `xs[i] = v` / `m[k] = v` writes
+     (tuples never change), `for x in xs` and `for k in map`, `let (a, b) = pair()`, `+` on
+     lists, deep `==`, and `length`/`push`/`keys`/`contains`/`remove` (also as `xs.push(v)`).
+     Copies never alias: every write builds a new collection. Generated C++ runs collections
+     through the same operations, so native and interpreted agree exactly.
+   - Not in yet: `wait` inside a `fn`.
 3. **Engine binding.** A node whose script slot names a `.uvs` file runs it:
    - `EngineCoreUVE` compiles it once per path against `UVScriptNodeHostUVE`; errors are logged with
      `file:line:column` once, not every frame;

@@ -48,6 +48,7 @@ add_executable(uve_core_tests
     Core/Asset/legacy_extension_migration_uve_tests.cpp
     UVScript/uvscript_parser_uve_tests.cpp
     UVScript/uvscript_vm_uve_tests.cpp
+    UVScript/uvscript_collections_uve_tests.cpp
     Core/Asset/asset_manager_uve_tests.cpp
     Core/Asset/file_system_uve_tests.cpp
     Core/Asset/mesh_asset_uve_tests.cpp
@@ -247,7 +248,7 @@ target_include_directories(uve_core_tests PRIVATE ${CMAKE_SOURCE_DIR}/Engine/Run
 uve_add_uvscript_native(uve_core_tests
     HOST UVScript/native/fake_object.uvhost
     SCRIPTS UVScript/native/player.uvs UVScript/native/math.uvs UVScript/native/waits.uvs
-            UVScript/native/errors.uvs UVScript/native/methods.uvs)
+            UVScript/native/errors.uvs UVScript/native/methods.uvs UVScript/native/collections.uvs)
 target_compile_definitions(uve_core_tests PRIVATE
     UVE_UVSCRIPT_NATIVE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/UVScript/native")
 

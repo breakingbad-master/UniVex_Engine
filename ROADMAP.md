@@ -498,8 +498,10 @@ script per node; see `Engine/Runtime/UVScript/README.md`.
   fields in the Inspector
 - [ ] Collections and tuples, calling methods on other nodes, `wait` inside a `fn` — methods
   on other nodes have landed (`node(name)` lookup plus fire-and-forget `ref.method(args)`, reaching
-  the target's own script functions first with `hide()`/`show()` built in); collections and tuples
-  and `wait` inside a `fn` remain
+  the target's own script functions first with `hide()`/`show()` built in), and so have collections
+  and tuples (typed `list[int]`/`map[str, int]`/`tuple[int, str]`, literals, `[]`, `for x in xs`,
+  `let (a, b) = pair()`, `length`/`push`/`keys`/`contains`/`remove` with native-code parity); only
+  `wait` inside a `fn` remains
 - [ ] More host bindings: collision/overlap events, audio, physics forces, other node kinds —
   physics forces have landed (persistent force/torque plus mass-scaled impulses on rigid
   bodies, with rigid-body velocity readable/writable), as have audio bindings (play/stop

@@ -127,6 +127,20 @@ inline void CallChunkUVE(ContextUVE& context, const ChunkFunctionUVE callee, Fra
     }
 }
 
+/// The collection inside `value`, or an error when it holds anything else.
+[[nodiscard]] const CollectionValueUVE& AsCollectionUVE(const ValueUVE& value);
+/// Builds a collection from the last values of `stack`, removing them: `count` items for a list
+/// or tuple, key, value, ... (`pairs` pairs) for a map, where a repeated key keeps the last value.
+[[nodiscard]] ValueUVE BuildListUVE(std::vector<ValueUVE>& stack, std::size_t count);
+[[nodiscard]] ValueUVE BuildMapUVE(std::vector<ValueUVE>& stack, std::size_t pairs);
+[[nodiscard]] ValueUVE BuildTupleUVE(std::vector<ValueUVE>& stack, std::size_t count);
+/// Reads `container[key]`: an int item of a list or tuple, or a map's value for the key.
+[[nodiscard]] ValueUVE GetIndexUVE(const ValueUVE& container, const ValueUVE& key);
+/// A copy of `container` with `key` replaced (or, for a map, added): nothing is changed in place.
+[[nodiscard]] ValueUVE SetIndexUVE(const ValueUVE& container, const ValueUVE& key, const ValueUVE& value);
+/// Pops a tuple and pushes its items in order; an error unless it holds exactly `count` items.
+void UnpackUVE(std::vector<ValueUVE>& stack, std::size_t count);
+
 /// Formats and joins the last `count` values of `stack`, removing them.
 [[nodiscard]] ValueUVE ConcatUVE(std::vector<ValueUVE>& stack, std::size_t count);
 /// A built-in (`sqrt`, `print`, ...) by its compiler id.

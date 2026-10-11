@@ -395,6 +395,36 @@ TEST(UVScriptNativeUVETest, MethodCallsMatchTheInterpreter) {
         });
 }
 
+TEST(UVScriptNativeUVETest, CollectionsMatchTheInterpreter) {
+    ExpectNativeMatchesInterpreterUVE("collections.uvs", [](ScriptInstanceUVE& instance, FakeHostUVE&,
+                                                             std::vector<std::string>& results) {
+        results.push_back(ResultTextUVE(instance.CallUVE("describe"), instance));
+        results.push_back(ResultTextUVE(instance.CallUVE("total"), instance));
+        const std::array<ValueUVE, 1> words{MakeListValueUVE({ValueUVE{std::string{"a"}}, ValueUVE{std::string{"b"}},
+                                                              ValueUVE{std::string{"a"}}})};
+        results.push_back(ResultTextUVE(instance.CallUVE("tally", words), instance));
+        results.push_back(ResultTextUVE(instance.CallUVE("first_pair"), instance));
+        results.push_back(ResultTextUVE(instance.CallUVE("unpacked"), instance));
+        results.push_back(ResultTextUVE(instance.CallUVE("key_list"), instance));
+        results.push_back(ResultTextUVE(instance.CallUVE("dropped"), instance));
+        results.push_back(ResultTextUVE(instance.CallUVE("joined"), instance));
+        results.push_back(ResultTextUVE(instance.CallUVE("has_torch"), instance));
+        results.push_back(ResultTextUVE(instance.CallUVE("count_words"), instance));
+        results.push_back(ResultTextUVE(instance.CallUVE("count_words"), instance));
+        results.push_back(std::to_string(instance.RaiseEventUVE("ready")));
+    });
+    // And the values are the right ones, not merely the same wrong ones.
+    FakeHostUVE host;
+    const auto program = CompileOrFailUVE(ReadNativeScriptUVE("collections.uvs"), host);
+    ASSERT_NE(program, nullptr);
+    ScriptInstanceUVE instance(program, host);
+    ASSERT_TRUE(instance.IsNativeUVE());
+    EXPECT_EQ(FormatValueUVE(*instance.CallUVE("total")), "6");
+    EXPECT_EQ(FormatValueUVE(*instance.CallUVE("unpacked")), "one=1");
+    EXPECT_EQ(FormatValueUVE(*instance.CallUVE("joined")), "[1, 2, 3]");
+    EXPECT_EQ(FormatValueUVE(*instance.CallUVE("describe")), "3 things: rope, map");
+}
+
 TEST(UVScriptNativeUVETest, ArithmeticControlFlowAndBuiltinsMatchTheInterpreter) {
     ExpectNativeMatchesInterpreterUVE("math.uvs", [](ScriptInstanceUVE& instance, FakeHostUVE&,
                                                      std::vector<std::string>& results) {

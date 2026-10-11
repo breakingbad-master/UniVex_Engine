@@ -164,6 +164,23 @@ struct ScriptInstanceUVE::StateUVE final {
                         s.push_back(std::move(text));
                         break;
                     }
+                    case OpUVE::BuildList: s.push_back(Native::BuildListUVE(s, static_cast<std::size_t>(in.a))); break;
+                    case OpUVE::BuildMap: s.push_back(Native::BuildMapUVE(s, static_cast<std::size_t>(in.a))); break;
+                    case OpUVE::BuildTuple: s.push_back(Native::BuildTupleUVE(s, static_cast<std::size_t>(in.a))); break;
+                    case OpUVE::GetIndex: {
+                        const ValueUVE key = pop();
+                        const ValueUVE container = pop();
+                        s.push_back(Native::GetIndexUVE(container, key));
+                        break;
+                    }
+                    case OpUVE::SetIndex: {
+                        const ValueUVE value = pop();
+                        const ValueUVE key = pop();
+                        const ValueUVE container = pop();
+                        s.push_back(Native::SetIndexUVE(container, key, value));
+                        break;
+                    }
+                    case OpUVE::Unpack: Native::UnpackUVE(s, static_cast<std::size_t>(in.a)); break;
                     case OpUVE::Jump: frame.ip = static_cast<std::size_t>(in.a); break;
                     case OpUVE::JumpIfFalse:
                         if (!Native::AsBoolUVE(pop())) frame.ip = static_cast<std::size_t>(in.a);

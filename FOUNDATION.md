@@ -786,7 +786,8 @@ driven by nothing.
   or keyboard navigation, no widgets beyond text/image/button.
 - `[x]` **Scripting** — UVScript (`Engine/Runtime/UVScript`): parser, type checker,
   bytecode VM, engine binding with reload on save, and a text editor. The node-graph
-  scripting module was removed. `[ ]` No collections, no cross-node calls, no debugger.
+  scripting module was removed. Collections and tuples have landed (typed lists, maps,
+  tuples, `for`-in, unpacking, native-code parity). `[ ]` No cross-node calls, no debugger.
 - `[~]` **Network** — one header of reliable-packet-window value logic with **no
   consumer anywhere**. No socket, no transport, no replication.
 - `[~]` **Plugins** — manifest validation and an in-memory registry that **never
