@@ -17,6 +17,7 @@
 #include "uve/component/ui_image_component_uve.h"
 #include "uve/component/ui_progress_bar_component_uve.h"
 #include "uve/component/ui_scroll_container_component_uve.h"
+#include "uve/component/ui_scrollbar_component_uve.h"
 #include "uve/component/ui_slider_component_uve.h"
 #include "uve/component/ui_text_component_uve.h"
 #include "uve/component/ui_text_input_component_uve.h"
@@ -287,6 +288,20 @@ void RankWidgetUVE(const Scene::EntityUVE entity, const CanvasAncestryUVE& ances
     ranked.push_back(std::move(rankedWidget));
 }
 
+[[nodiscard]] float ScrollbarMaxOffsetYUVE(const Scene::UIScrollContainerComponentUVE& scroll) noexcept {
+    return std::max(0.0F, scroll.contentSize.y - scroll.rect.size.y);
+}
+
+[[nodiscard]] float ScrollbarThumbHeightUVE(const Scene::UIScrollContainerComponentUVE& scroll,
+                                            const Scene::UIScrollbarComponentUVE& scrollbar) noexcept {
+    const float trackHeight = scrollbar.rect.size.y;
+    if (scroll.contentSize.y <= scroll.rect.size.y) {
+        return trackHeight;
+    }
+    const float proportional = trackHeight * (scroll.rect.size.y / scroll.contentSize.y);
+    return std::clamp(proportional, std::min(scrollbar.minThumbHeight, trackHeight), trackHeight);
+}
+
 } // namespace
 
 void UIRuntimeUVE::SetCoordinateTransformUVE(const UICoordinateTransformUVE& transform) noexcept {
@@ -322,8 +337,58 @@ void UIRuntimeUVE::TickUVE(Scene::IEntityManagerUVE& entityManager, const Input:
     // then containers auto-size to content and position their children, then active tweens
     // override the resting arrangement: hit-testing and every emitted quad agree on where a
     // widget is within the same tick.
+    // Tick-frozen pointer state, hoisted above the layout passes: the scrollbar drag below
+    // applies before LayoutUIScrollContainersUVE stacks the children, and input cannot
+    // change mid-tick, so every pass reads the same values it always has.
+    const Math::Vector2UVE rawMousePosition = inputSystem.GetMousePositionUVE();
+    const Math::Vector2UVE mousePosition{
+        (rawMousePosition.x * m_coordinateTransform.inputScaleX - m_coordinateTransform.inputOffsetX -
+         m_coordinateTransform.offsetX) /
+            m_coordinateTransform.scaleX,
+        (rawMousePosition.y * m_coordinateTransform.inputScaleY - m_coordinateTransform.inputOffsetY -
+         m_coordinateTransform.offsetY) /
+            m_coordinateTransform.scaleY};
+    const bool mouseDown = inputSystem.IsMouseButtonDownUVE(Input::MouseButtonUVE::Left);
+    const bool mousePressedThisFrame = inputSystem.WasMouseButtonPressedThisFrameUVE(Input::MouseButtonUVE::Left);
     ResolveUIAnchorsUVE(entityManager, m_viewportSize);
     LayoutUIContainersUVE(entityManager, m_fontAtlas);
+    // Scrollbar drags apply BEFORE the scroll layout stacks the children, so dragged content
+    // never lags the thumb by a frame; hover/press/release latch in the widget pass below
+    // (post-tween, like every other widget), and a grab takes effect from the next tick. Do not
+    // merge the halves: post-layout application would desync thumb and content for a frame on
+    // every tick of the drag.
+    entityManager.ForEachUVE<Scene::UIScrollbarComponentUVE>(
+        [&entityManager, &mousePosition, mouseDown](const Scene::EntityUVE entity,
+                                                   Scene::UIScrollbarComponentUVE& scrollbar) {
+            scrollbar.wasChangedThisFrame = false;
+            if (!scrollbar.isDragging || !mouseDown) {
+                return;
+            }
+            if (!ShouldDrawUiWidgetUVE(entityManager, entity) || !IsUIScrollbarComponentValidUVE(scrollbar) ||
+                !entityManager.HasComponentUVE<Scene::UIScrollContainerComponentUVE>(entity)) {
+                return;
+            }
+            Scene::UIScrollContainerComponentUVE& scroll =
+                entityManager.GetComponentUVE<Scene::UIScrollContainerComponentUVE>(entity);
+            if (!IsUIScrollContainerComponentValidUVE(scroll)) {
+                return;
+            }
+            // The thumb never leaves the track: the pointer maps to the thumb center across the
+            // travel and clamps past the ends, exactly like the slider on its vertical axis.
+            const float thumbHeight = ScrollbarThumbHeightUVE(scroll, scrollbar);
+            const float travel = std::max(0.0F, scrollbar.rect.size.y - thumbHeight);
+            const float maxOffset = ScrollbarMaxOffsetYUVE(scroll);
+            if (travel <= 0.0F || maxOffset <= 0.0F) {
+                return;
+            }
+            const float pointerFraction =
+                (mousePosition.y - scrollbar.rect.position.y - 0.5F * thumbHeight) / travel;
+            const float dragged = std::clamp(pointerFraction, 0.0F, 1.0F) * maxOffset;
+            if (dragged != scroll.scrollOffset.y) {
+                scroll.scrollOffset.y = dragged;
+                scrollbar.wasChangedThisFrame = true;
+            }
+        });
     LayoutUIScrollContainersUVE(entityManager, inputSystem, m_fontAtlas);
     TickUITweensUVE(entityManager, m_deltaTime);
     m_drawBatch.quads.clear();
@@ -365,16 +430,6 @@ void UIRuntimeUVE::TickUVE(Scene::IEntityManagerUVE& entityManager, const Input:
             RankWidgetUVE(entity, ResolveCanvasAncestryUVE(entityManager, entity), 0, std::move(barQuads), ranked);
         });
 
-    const Math::Vector2UVE rawMousePosition = inputSystem.GetMousePositionUVE();
-    const Math::Vector2UVE mousePosition{
-        (rawMousePosition.x * m_coordinateTransform.inputScaleX - m_coordinateTransform.inputOffsetX -
-         m_coordinateTransform.offsetX) /
-            m_coordinateTransform.scaleX,
-        (rawMousePosition.y * m_coordinateTransform.inputScaleY - m_coordinateTransform.inputOffsetY -
-         m_coordinateTransform.offsetY) /
-            m_coordinateTransform.scaleY};
-    const bool mouseDown = inputSystem.IsMouseButtonDownUVE(Input::MouseButtonUVE::Left);
-    const bool mousePressedThisFrame = inputSystem.WasMouseButtonPressedThisFrameUVE(Input::MouseButtonUVE::Left);
     entityManager.ForEachUVE<Scene::UIButtonComponentUVE>(
         [&entityManager, &ranked, &mousePosition, mouseDown, mousePressedThisFrame](
             const Scene::EntityUVE entity, Scene::UIButtonComponentUVE& button) {
@@ -458,6 +513,56 @@ void UIRuntimeUVE::TickUVE(Scene::IEntityManagerUVE& entityManager, const Input:
             sliderQuads.push_back(fill);
             sliderQuads.push_back(thumb);
             RankWidgetUVE(entity, ResolveCanvasAncestryUVE(entityManager, entity), 1, std::move(sliderQuads), ranked);
+        });
+
+    entityManager.ForEachUVE<Scene::UIScrollbarComponentUVE>(
+        [&entityManager, &ranked, &mousePosition, mouseDown, mousePressedThisFrame](
+            const Scene::EntityUVE entity, Scene::UIScrollbarComponentUVE& scrollbar) {
+            if (!ShouldDrawUiWidgetUVE(entityManager, entity) || !IsUIScrollbarComponentValidUVE(scrollbar) ||
+                !entityManager.HasComponentUVE<Scene::UIScrollContainerComponentUVE>(entity)) {
+                scrollbar.isHovered = false;
+                scrollbar.isDragging = false;
+                scrollbar.wasChangedThisFrame = false;
+                return;
+            }
+            const Scene::UIScrollContainerComponentUVE& scroll =
+                entityManager.GetComponentUVE<Scene::UIScrollContainerComponentUVE>(entity);
+            if (!IsUIScrollContainerComponentValidUVE(scroll)) {
+                scrollbar.isHovered = false;
+                scrollbar.isDragging = false;
+                scrollbar.wasChangedThisFrame = false;
+                return;
+            }
+            scrollbar.isHovered =
+                ContainsClippedUVE(entityManager, entity, scrollbar.rect, mousePosition);
+            if (scrollbar.isDragging && !mouseDown) {
+                scrollbar.isDragging = false;
+            }
+            if (mousePressedThisFrame && scrollbar.isHovered) {
+                scrollbar.isDragging = true;
+            }
+            const float thumbHeight = ScrollbarThumbHeightUVE(scroll, scrollbar);
+            const float travel = std::max(0.0F, scrollbar.rect.size.y - thumbHeight);
+            const float maxOffset = ScrollbarMaxOffsetYUVE(scroll);
+            const float drawnFraction =
+                maxOffset > 0.0F ? std::clamp(scroll.scrollOffset.y / maxOffset, 0.0F, 1.0F) : 0.0F;
+            const float thumbY = scrollbar.rect.position.y + drawnFraction * travel;
+            UIQuadUVE track{};
+            track.rect = scrollbar.rect;
+            track.color = scrollbar.trackColor;
+            track.alpha = TweenedAlphaUVE(entityManager, entity, 1.0F);
+            track.kind = UIDrawItemKindUVE::SolidColor;
+            UIQuadUVE thumb{};
+            thumb.rect = Math::RectUVE{Math::Vector2UVE{scrollbar.rect.position.x, thumbY},
+                                       Math::Vector2UVE{scrollbar.rect.size.x, thumbHeight}};
+            thumb.color = scrollbar.thumbColor;
+            thumb.alpha = TweenedAlphaUVE(entityManager, entity, 1.0F);
+            thumb.kind = UIDrawItemKindUVE::SolidColor;
+            std::vector<UIQuadUVE> scrollbarQuads;
+            scrollbarQuads.push_back(track);
+            scrollbarQuads.push_back(thumb);
+            RankWidgetUVE(entity, ResolveCanvasAncestryUVE(entityManager, entity), 2,
+                          std::move(scrollbarQuads), ranked);
         });
 
     entityManager.ForEachUVE<Scene::UICheckboxComponentUVE>(

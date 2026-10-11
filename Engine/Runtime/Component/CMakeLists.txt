@@ -28,6 +28,7 @@ add_library(uve_component STATIC
     Internal/camera_follow_component_uve.cpp
     Internal/ui_layout_container_component_uve.cpp
     Internal/ui_anchor_component_uve.cpp
+    Internal/ui_scrollbar_component_uve.cpp
     Internal/ui_slider_component_uve.cpp
     Internal/ui_progress_bar_component_uve.cpp
     Internal/ui_dropdown_component_uve.cpp

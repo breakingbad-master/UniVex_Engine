@@ -3,6 +3,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <filesystem>
+#include <limits>
 
 #include <gtest/gtest.h>
 
@@ -12,6 +13,7 @@
 #include "uve/component/ui_button_component_uve.h"
 #include "uve/component/ui_layout_container_component_uve.h"
 #include "uve/component/ui_scroll_container_component_uve.h"
+#include "uve/component/ui_scrollbar_component_uve.h"
 #include "uve/component/ui_text_component_uve.h"
 #include "uve/entity/entity_manager_uve.h"
 #include "uve/events/event_system_uve.h"
@@ -19,6 +21,7 @@
 #include "uve/input/key_code_uve.h"
 #include "uve/math/rect_uve.h"
 #include "uve/math/vector2_uve.h"
+#include "uve/math/vector3_uve.h"
 #include "uve/memory/memory_manager_uve.h"
 #include "uve/scene/scene_serializer_uve.h"
 #include "uve/ui/ui_runtime_uve.h"
@@ -50,6 +53,29 @@ protected:
         scroll.rect = rect;
         entityManager.AddComponentUVE<Scene::UIScrollContainerComponentUVE>(entity, scroll);
         return entity;
+    }
+
+    Scene::EntityUVE MakeScrollbarUVE(const Scene::EntityUVE scrollEntity, const Math::RectUVE track,
+                                      const Math::Vector3UVE trackColor, const Math::Vector3UVE thumbColor) {
+        Scene::UIScrollbarComponentUVE scrollbar;
+        scrollbar.rect = track;
+        scrollbar.trackColor = trackColor;
+        scrollbar.thumbColor = thumbColor;
+        entityManager.AddComponentUVE<Scene::UIScrollbarComponentUVE>(scrollEntity, scrollbar);
+        return scrollEntity;
+    }
+
+    const Scene::UIScrollbarComponentUVE& ScrollbarOfUVE(const Scene::EntityUVE entity) {
+        return entityManager.GetComponentUVE<Scene::UIScrollbarComponentUVE>(entity);
+    }
+
+    const UIQuadUVE* FindQuadByColorUVE(const Math::Vector3UVE& color) {
+        for (const UIQuadUVE& quad : runtime.GetDrawBatchUVE().quads) {
+            if (quad.color == color) {
+                return &quad;
+            }
+        }
+        return nullptr;
     }
 
     Scene::EntityUVE MakeButtonUVE(const Math::Vector2UVE size) {
@@ -283,6 +309,176 @@ TEST_F(UIScrollUVETest, SaveThenLoad_ScrollContainer_RoundTrip) {
     EXPECT_FLOAT_EQ(restored.wheelStep, 30.0F);
     EXPECT_EQ(restored.scrollOffset, (Math::Vector2UVE{5.0F, 10.0F}));
     EXPECT_EQ(restored.contentSize, (Math::Vector2UVE{0.0F, 0.0F}));
+
+    std::filesystem::remove(path);
+}
+
+
+TEST_F(UIScrollUVETest, ScrollbarValidatorAcceptsDefaultsRejectsBadConfig) {
+    Scene::UIScrollbarComponentUVE scrollbar;
+    EXPECT_TRUE(IsUIScrollbarComponentValidUVE(scrollbar));
+    scrollbar.rect.size = Math::Vector2UVE{0.0F, 200.0F};
+    EXPECT_FALSE(IsUIScrollbarComponentValidUVE(scrollbar));
+    scrollbar.rect.size = Math::Vector2UVE{12.0F, 200.0F};
+    scrollbar.minThumbHeight = -1.0F;
+    EXPECT_FALSE(IsUIScrollbarComponentValidUVE(scrollbar));
+    scrollbar.minThumbHeight = 16.0F;
+    scrollbar.thumbColor = Math::Vector3UVE{std::numeric_limits<float>::quiet_NaN(), 0.0F, 0.0F};
+    EXPECT_FALSE(IsUIScrollbarComponentValidUVE(scrollbar));
+}
+
+TEST_F(UIScrollUVETest, ScrollbarWithoutScrollContainer_DrawsNothingAndStaysIdle) {
+    const Scene::EntityUVE entity = entityManager.CreateEntityUVE();
+    Scene::UIScrollbarComponentUVE scrollbar;
+    scrollbar.rect = Math::RectUVE{{0.0F, 0.0F}, {12.0F, 200.0F}};
+    entityManager.AddComponentUVE<Scene::UIScrollbarComponentUVE>(entity, scrollbar);
+
+    FrameUVE(Math::Vector2UVE{6.0F, 100.0F}, true);
+    EXPECT_TRUE(runtime.GetDrawBatchUVE().quads.empty());
+    const Scene::UIScrollbarComponentUVE& updated = ScrollbarOfUVE(entity);
+    EXPECT_FALSE(updated.isHovered);
+    EXPECT_FALSE(updated.isDragging);
+    EXPECT_FALSE(updated.wasChangedThisFrame);
+}
+
+TEST_F(UIScrollUVETest, ScrollbarWithoutOverflow_ThumbFillsTrackAndDragIsInert) {
+    const Scene::EntityUVE scroll = MakeScrollUVE(Math::RectUVE{{0.0F, 0.0F}, {200.0F, 200.0F}});
+    const Math::RectUVE track{{188.0F, 0.0F}, {12.0F, 200.0F}};
+    MakeScrollbarUVE(scroll, track, Math::Vector3UVE{1.0F, 0.0F, 0.0F}, Math::Vector3UVE{0.0F, 1.0F, 0.0F});
+    LinkUVE(MakeButtonUVE(Math::Vector2UVE{50.0F, 50.0F}), scroll, 0);
+
+    FrameUVE(Math::Vector2UVE{194.0F, 100.0F}, false);
+    const UIQuadUVE* thumb = FindQuadByColorUVE(Math::Vector3UVE{0.0F, 1.0F, 0.0F});
+    ASSERT_NE(thumb, nullptr);
+    EXPECT_EQ(thumb->rect, track);
+
+    FrameUVE(Math::Vector2UVE{194.0F, 100.0F}, true);
+    FrameUVE(Math::Vector2UVE{194.0F, 180.0F}, true);
+    EXPECT_EQ(ScrollOfUVE(scroll).scrollOffset.y, 0.0F);
+    EXPECT_FALSE(ScrollbarOfUVE(scroll).wasChangedThisFrame);
+}
+
+TEST_F(UIScrollUVETest, ScrollbarThumbHeight_MatchesViewportOverContentFraction) {
+    const Scene::EntityUVE scroll = MakeScrollUVE(Math::RectUVE{{0.0F, 0.0F}, {200.0F, 200.0F}});
+    MakeScrollbarUVE(scroll, Math::RectUVE{{188.0F, 0.0F}, {12.0F, 200.0F}},
+                     Math::Vector3UVE{1.0F, 0.0F, 0.0F}, Math::Vector3UVE{0.0F, 1.0F, 0.0F});
+    for (std::int64_t i = 0; i < 4; ++i) {
+        LinkUVE(MakeButtonUVE(Math::Vector2UVE{100.0F, 100.0F}), scroll, i);
+    }
+
+    FrameUVE(Math::Vector2UVE{0.0F, 0.0F}, false);
+    const float contentH = ScrollOfUVE(scroll).contentSize.y;
+    ASSERT_GT(contentH, 200.0F);
+    const UIQuadUVE* thumb = FindQuadByColorUVE(Math::Vector3UVE{0.0F, 1.0F, 0.0F});
+    ASSERT_NE(thumb, nullptr);
+    EXPECT_FLOAT_EQ(thumb->rect.size.y, 200.0F * (200.0F / contentH));
+    EXPECT_FLOAT_EQ(thumb->rect.position.x, 188.0F);
+    EXPECT_FLOAT_EQ(thumb->rect.position.y, 0.0F);
+    EXPECT_FLOAT_EQ(thumb->rect.size.x, 12.0F);
+}
+
+TEST_F(UIScrollUVETest, ScrollbarDrag_ScrollsContentOnTheSameTickAsTheThumb) {
+    const Scene::EntityUVE scroll = MakeScrollUVE(Math::RectUVE{{0.0F, 0.0F}, {200.0F, 200.0F}});
+    MakeScrollbarUVE(scroll, Math::RectUVE{{188.0F, 0.0F}, {12.0F, 200.0F}},
+                     Math::Vector3UVE{1.0F, 0.0F, 0.0F}, Math::Vector3UVE{0.0F, 1.0F, 0.0F});
+    const Scene::EntityUVE firstChild = MakeButtonUVE(Math::Vector2UVE{100.0F, 100.0F});
+    LinkUVE(firstChild, scroll, 0);
+    for (std::int64_t i = 1; i < 4; ++i) {
+        LinkUVE(MakeButtonUVE(Math::Vector2UVE{100.0F, 100.0F}), scroll, i);
+    }
+    FrameUVE(Math::Vector2UVE{0.0F, 0.0F}, false);
+    const float contentH = ScrollOfUVE(scroll).contentSize.y;
+    const float maxOffset = contentH - 200.0F;
+    ASSERT_GT(maxOffset, 0.0F);
+
+    FrameUVE(Math::Vector2UVE{194.0F, 100.0F}, true);
+    EXPECT_TRUE(ScrollbarOfUVE(scroll).isDragging);
+    EXPECT_EQ(ScrollOfUVE(scroll).scrollOffset.y, 0.0F);
+
+    FrameUVE(Math::Vector2UVE{194.0F, 100.0F}, true);
+    EXPECT_FLOAT_EQ(ScrollOfUVE(scroll).scrollOffset.y, 0.5F * maxOffset);
+    EXPECT_TRUE(ScrollbarOfUVE(scroll).wasChangedThisFrame);
+    // Zero lag: the children stacked from the dragged offset in the SAME tick the drag applied...
+    const Scene::UIButtonComponentUVE& child =
+        entityManager.GetComponentUVE<Scene::UIButtonComponentUVE>(firstChild);
+    EXPECT_FLOAT_EQ(child.rect.position.y, 8.0F - 0.5F * maxOffset);
+    // ...and the thumb sits where the content is.
+    const UIQuadUVE* thumb = FindQuadByColorUVE(Math::Vector3UVE{0.0F, 1.0F, 0.0F});
+    ASSERT_NE(thumb, nullptr);
+    EXPECT_FLOAT_EQ(thumb->rect.position.y, 0.5F * (200.0F - 200.0F * (200.0F / contentH)));
+}
+
+TEST_F(UIScrollUVETest, ScrollbarDragPastEnds_ClampsToTopAndBottom) {
+    const Scene::EntityUVE scroll = MakeScrollUVE(Math::RectUVE{{0.0F, 0.0F}, {200.0F, 200.0F}});
+    MakeScrollbarUVE(scroll, Math::RectUVE{{188.0F, 0.0F}, {12.0F, 200.0F}},
+                     Math::Vector3UVE{1.0F, 0.0F, 0.0F}, Math::Vector3UVE{0.0F, 1.0F, 0.0F});
+    for (std::int64_t i = 0; i < 4; ++i) {
+        LinkUVE(MakeButtonUVE(Math::Vector2UVE{100.0F, 100.0F}), scroll, i);
+    }
+    FrameUVE(Math::Vector2UVE{0.0F, 0.0F}, false);
+    const float maxOffset = ScrollOfUVE(scroll).contentSize.y - 200.0F;
+    ASSERT_GT(maxOffset, 0.0F);
+
+    FrameUVE(Math::Vector2UVE{194.0F, 100.0F}, true);
+    FrameUVE(Math::Vector2UVE{194.0F, -80.0F}, true);
+    EXPECT_EQ(ScrollOfUVE(scroll).scrollOffset.y, 0.0F);
+    FrameUVE(Math::Vector2UVE{194.0F, 400.0F}, true);
+    EXPECT_FLOAT_EQ(ScrollOfUVE(scroll).scrollOffset.y, maxOffset);
+}
+
+TEST_F(UIScrollUVETest, ScrollbarRelease_StopsTrackingThePointer) {
+    const Scene::EntityUVE scroll = MakeScrollUVE(Math::RectUVE{{0.0F, 0.0F}, {200.0F, 200.0F}});
+    MakeScrollbarUVE(scroll, Math::RectUVE{{188.0F, 0.0F}, {12.0F, 200.0F}},
+                     Math::Vector3UVE{1.0F, 0.0F, 0.0F}, Math::Vector3UVE{0.0F, 1.0F, 0.0F});
+    for (std::int64_t i = 0; i < 4; ++i) {
+        LinkUVE(MakeButtonUVE(Math::Vector2UVE{100.0F, 100.0F}), scroll, i);
+    }
+    FrameUVE(Math::Vector2UVE{0.0F, 0.0F}, false);
+    FrameUVE(Math::Vector2UVE{194.0F, 100.0F}, true);
+    FrameUVE(Math::Vector2UVE{194.0F, 100.0F}, true);
+    const float dragged = ScrollOfUVE(scroll).scrollOffset.y;
+    ASSERT_GT(dragged, 0.0F);
+
+    FrameUVE(Math::Vector2UVE{194.0F, 100.0F}, false);
+    EXPECT_FALSE(ScrollbarOfUVE(scroll).isDragging);
+    EXPECT_FALSE(ScrollbarOfUVE(scroll).wasChangedThisFrame);
+    FrameUVE(Math::Vector2UVE{194.0F, 180.0F}, false);
+    EXPECT_EQ(ScrollOfUVE(scroll).scrollOffset.y, dragged);
+    EXPECT_FALSE(ScrollbarOfUVE(scroll).isDragging);
+}
+
+TEST_F(UIScrollUVETest, SaveThenLoad_Scrollbar_RoundTripsConfigButNotDragState) {
+    const Scene::EntityUVE entity = entityManager.CreateEntityUVE();
+    Scene::UIScrollbarComponentUVE authored;
+    authored.rect = Math::RectUVE{{188.0F, 10.0F}, {12.0F, 180.0F}};
+    authored.trackColor = Math::Vector3UVE{0.25F, 0.25F, 0.25F};
+    authored.thumbColor = Math::Vector3UVE{0.75F, 0.5F, 0.25F};
+    authored.minThumbHeight = 20.0F;
+    authored.isHovered = true;
+    authored.isDragging = true;
+    authored.wasChangedThisFrame = true;
+    entityManager.AddComponentUVE<Scene::UIScrollbarComponentUVE>(entity, authored);
+
+    const std::filesystem::path path = "uve_scene_serializer_tests_ui_scrollbar.uvscene";
+    std::filesystem::remove(path);
+    ASSERT_TRUE(serializer.SaveUVE(entityManager, {entity}, path, Scene::SceneAssetTypeUVE::Scene));
+
+    Scene::EntityManagerUVE loadedManager(memoryManager.GetDefaultAllocatorUVE(), eventSystem);
+    const std::vector<Scene::EntityUVE> loaded = serializer.LoadUVE(loadedManager, path);
+    ASSERT_EQ(loaded.size(), 1U);
+    const Scene::UIScrollbarComponentUVE& restored =
+        loadedManager.GetComponentUVE<Scene::UIScrollbarComponentUVE>(loaded[0]);
+    EXPECT_EQ(restored.rect, (Math::RectUVE{{188.0F, 10.0F}, {12.0F, 180.0F}}));
+    EXPECT_FLOAT_EQ(restored.trackColor.x, 0.25F);
+    EXPECT_FLOAT_EQ(restored.trackColor.y, 0.25F);
+    EXPECT_FLOAT_EQ(restored.trackColor.z, 0.25F);
+    EXPECT_FLOAT_EQ(restored.thumbColor.x, 0.75F);
+    EXPECT_FLOAT_EQ(restored.thumbColor.y, 0.5F);
+    EXPECT_FLOAT_EQ(restored.thumbColor.z, 0.25F);
+    EXPECT_FLOAT_EQ(restored.minThumbHeight, 20.0F);
+    EXPECT_FALSE(restored.isHovered);
+    EXPECT_FALSE(restored.isDragging);
+    EXPECT_FALSE(restored.wasChangedThisFrame);
 
     std::filesystem::remove(path);
 }

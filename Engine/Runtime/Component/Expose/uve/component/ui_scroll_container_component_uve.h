@@ -23,8 +23,9 @@ inline constexpr float kMaximumUIScrollSizePixelsUVE = 8192.0F;
 /// hit-testing gated on the same clips, so no renderer changes were needed. Partially visible
 /// widgets still interact - only the pixels (and hover outside the clip) are cut. A scroll
 /// container stacks its children itself, so a layout container on the same entity is overridden;
-/// scroll containers do not nest (an inner one stacks without ever scrolling), and there is no
-/// scrollbar widget yet - wheel only. Thread-safety: value type; trivially safe to copy/move.
+/// scroll containers do not nest (an inner one stacks without ever scrolling). An optional
+/// `UIScrollbarComponentUVE` on the same entity adds a draggable thumb over the wheel input.
+/// Thread-safety: value type; trivially safe to copy/move.
 struct UIScrollContainerComponentUVE final {
     Math::RectUVE rect{Math::Vector2UVE{0.0F, 0.0F}, Math::Vector2UVE{200.0F, 200.0F}};
     float padding = 8.0F;

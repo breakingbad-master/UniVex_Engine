@@ -44,6 +44,7 @@
 #include "uve/component/ui_layout_container_component_uve.h"
 #include "uve/component/ui_progress_bar_component_uve.h"
 #include "uve/component/ui_scroll_container_component_uve.h"
+#include "uve/component/ui_scrollbar_component_uve.h"
 #include "uve/component/ui_slider_component_uve.h"
 #include "uve/component/ui_text_component_uve.h"
 #include "uve/component/ui_text_input_component_uve.h"
@@ -2139,6 +2140,25 @@ void DeclareMediaAndUIUVE(std::vector<TypeMetadataEntryUVE>& entries) {
                                                                                  kPropertyTypeVector2UVE),
                          DeclareRuntimeStateUVE<&UIScrollContainerComponentUVE::contentSize>(
                              "contentSize", "Content Size", kPropertyTypeVector2UVE),
+                     }));
+    AddUVE<UIScrollbarComponentUVE>(
+        entries,
+        MakeEntryUVE("component.ui_scrollbar", "UIScrollbarComponentUVE", "UI Scrollbar",
+                     kSectionOrderTypeSpecificUVE,
+                     {
+                         DeclareUVE<&UIScrollbarComponentUVE::rect>("rect", "Rect", kPropertyTypeRectUVE),
+                         DeclareUVE<&UIScrollbarComponentUVE::trackColor>("trackColor", "Track",
+                                                                          kPropertyTypeColorUVE),
+                         DeclareUVE<&UIScrollbarComponentUVE::thumbColor>("thumbColor", "Thumb",
+                                                                          kPropertyTypeColorUVE),
+                         DeclareUVE<&UIScrollbarComponentUVE::minThumbHeight>("minThumbHeight", "Min Thumb",
+                                                                              kPropertyTypeFloatUVE),
+                         DeclareRuntimeStateUVE<&UIScrollbarComponentUVE::isHovered>(
+                             "isHovered", "Hovered", kPropertyTypeBoolUVE),
+                         DeclareRuntimeStateUVE<&UIScrollbarComponentUVE::isDragging>(
+                             "isDragging", "Dragging", kPropertyTypeBoolUVE),
+                         DeclareRuntimeStateUVE<&UIScrollbarComponentUVE::wasChangedThisFrame>(
+                             "wasChangedThisFrame", "Changed This Frame", kPropertyTypeBoolUVE),
                      }));
 }
 
