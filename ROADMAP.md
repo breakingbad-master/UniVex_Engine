@@ -508,7 +508,8 @@ script per node; see `Engine/Runtime/UVScript/README.md`.
   plus a playing query on audio sources, with volume/pitch readable/writable) and
   collision/overlap events (both parties' scripts hear each enter/exit with the other's
   name); other node kinds have landed too (writable `visible` on every object, `intensity`
-  on lights, `fov` on cameras)
+  on lights, `fov` on cameras), and gameplay pools and tags (`attributes.has/get/max/damage/heal`
+  and `tags.has/add/remove` on entities with the components)
 - [ ] An in-editor debugger (breakpoints, stepping, live values)
 - [x] C++23 output for release builds: bytecode translated to C++, registered by program fingerprint,
   checked against the interpreter

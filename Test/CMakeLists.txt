@@ -320,6 +320,7 @@ add_executable(uve_integration_tests
     Script/uvscript_node_state_uve_tests.cpp
     Script/uvscript_cross_node_uve_tests.cpp
     Audio/uvscript_audio_bindings_uve_tests.cpp
+    Gameplay/uvscript_gameplay_bindings_uve_tests.cpp
     Physics/collider_3d_uve_tests.cpp
     Physics/collider_shape_uve_tests.cpp
     Physics/collision_lifecycle_tracker_uve_tests.cpp

@@ -17,6 +17,8 @@
 #include "uve/component/visibility_component_uve.h"
 #include "uve/component/world_transform_component_uve.h"
 #include "uve/entity/i_entity_manager_uve.h"
+#include "uve/gameplay/gameplay_attributes_uve.h"
+#include "uve/gameplay/gameplay_tags_uve.h"
 #include "uve/input/i_input_system_uve.h"
 #include "uve/logging/logging_macros_uve.h"
 #include "uve/objects/3d/rigid_3d_uve.h"
@@ -121,6 +123,18 @@ std::optional<HostFunctionUVE> UVScriptObjectHostUVE::DescribeFunctionUVE(const 
     if (m_entityManager.HasComponentUVE<Scene::AudioSourceComponentUVE>(m_entity) &&
         (name == "audio.play" || name == "audio.stop" || name == "audio.is_playing")) {
         return HostFunctionUVE{{}, TypeUVE::BoolUVE()};
+    }
+    if (m_entityManager.HasComponentUVE<Scene::GameplayAttributesComponentUVE>(m_entity) &&
+        (name == "attributes.has" || name == "attributes.get" || name == "attributes.max")) {
+        return HostFunctionUVE{{TypeUVE::StrUVE()}, name == "attributes.has" ? TypeUVE::BoolUVE() : TypeUVE::FloatUVE()};
+    }
+    if (m_entityManager.HasComponentUVE<Scene::GameplayAttributesComponentUVE>(m_entity) &&
+        (name == "attributes.damage" || name == "attributes.heal")) {
+        return HostFunctionUVE{{TypeUVE::StrUVE(), TypeUVE::FloatUVE()}, TypeUVE::BoolUVE()};
+    }
+    if (m_entityManager.HasComponentUVE<Scene::GameplayTagComponentUVE>(m_entity) &&
+        (name == "tags.has" || name == "tags.add" || name == "tags.remove")) {
+        return HostFunctionUVE{{TypeUVE::StrUVE()}, TypeUVE::BoolUVE()};
     }
     if (name == "input.pressed" || name == "input.held" || name == "input.released") {
         return HostFunctionUVE{{TypeUVE::StrUVE()}, TypeUVE::BoolUVE()};
@@ -263,6 +277,50 @@ ValueUVE UVScriptObjectHostUVE::CallFunctionUVE(const std::string_view name, con
             return m_audioSources->StopEntityUVE(m_entity, *m_audio);
         }
         return m_audioSources->IsEntityPlayingUVE(m_entity, *m_audio);
+    }
+    // Gameplay pools and tags need no input system, so they route before the null-input
+    // early-out below. A missing pool reads false and 0.0; use `attributes.has` to tell a missing
+    // pool from a depleted one.
+    if (name == "attributes.has" || name == "attributes.get" || name == "attributes.max" ||
+        name == "attributes.damage" || name == "attributes.heal") {
+        const std::string& id = std::get<std::string>(args[0]);
+        Scene::GameplayAttributeUVE* found = nullptr;
+        if (m_entityManager.HasComponentUVE<Scene::GameplayAttributesComponentUVE>(m_entity)) {
+            found = Scene::FindGameplayAttributeUVE(
+                m_entityManager.GetComponentUVE<Scene::GameplayAttributesComponentUVE>(m_entity), id);
+        }
+        if (name == "attributes.has") {
+            return found != nullptr;
+        }
+        if (name == "attributes.get") {
+            return found != nullptr ? static_cast<double>(found->current) : 0.0;
+        }
+        if (name == "attributes.max") {
+            return found != nullptr ? static_cast<double>(found->maximum) : 0.0;
+        }
+        if (found == nullptr) {
+            return ValueUVE{false};
+        }
+        const float amount = static_cast<float>(std::get<double>(args[1]));
+        const Scene::GameplayAttributeDamageResultUVE result =
+            name == "attributes.damage" ? Scene::DamageGameplayAttributeUVE(*found, amount)
+                                        : Scene::HealGameplayAttributeUVE(*found, amount);
+        return result.applied;
+    }
+    if (name == "tags.has" || name == "tags.add" || name == "tags.remove") {
+        if (!m_entityManager.HasComponentUVE<Scene::GameplayTagComponentUVE>(m_entity)) {
+            return ValueUVE{false};
+        }
+        Scene::GameplayTagComponentUVE& tags =
+            m_entityManager.GetComponentUVE<Scene::GameplayTagComponentUVE>(m_entity);
+        const std::string& tag = std::get<std::string>(args[0]);
+        if (name == "tags.has") {
+            return Scene::HasGameplayTagUVE(tags, tag);
+        }
+        if (name == "tags.add") {
+            return Scene::AddGameplayTagUVE(tags, std::string{tag});
+        }
+        return Scene::RemoveGameplayTagUVE(tags, tag);
     }
     // A lookup needs no input system, so it routes before the null-input early-out below.
     if (name == "node") {

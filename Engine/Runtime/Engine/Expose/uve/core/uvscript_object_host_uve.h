@@ -34,6 +34,10 @@ namespace UVE::Core {
 /// - a rigid body: `physics.apply_force/apply_impulse/apply_torque(vec3)` - a persistent force in
 ///   newtons until changed, an instant mass-scaled velocity kick, a persistent torque - each
 ///   answering whether it applied;
+/// - an object with gameplay attributes: `attributes.has/get/max(id)` reads a pool (a missing id
+///   reads false and 0.0), `attributes.damage/heal(id, amount)` moves it, answering whether it
+///   applied - health itself stays in the strike pipeline, out of these pools;
+/// - an object with gameplay tags: `tags.has/add/remove(tag)`, each answering whether it applied;
 /// - always: `input.pressed/held/released(action)` and `input.axis(negative, positive)`, which
 ///   read the project's input map; events `ready` and `tick(dt)`.
 /// - always: `node(name)` finds another object by name, and `ref.method(args)` calls one of its

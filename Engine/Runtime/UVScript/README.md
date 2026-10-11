@@ -131,7 +131,9 @@ primary     := NUMBER UNIT? | STRING | 'true' | 'false' | 'none' | IDENT
      `grounded`, plus `input.pressed/held/released/axis`; a rigid body adds its own
      `velocity` and `physics.apply_force/apply_impulse/apply_torque(vec3)`; an audio source
      adds `volume`/`pitch` and `audio.play()/audio.stop()/audio.is_playing()`; every object
-     gets writable `visible`, lights add `intensity`, cameras add `fov`; `node(name)` finds another
+     gets writable `visible`, lights add `intensity`, cameras add `fov`; objects with gameplay
+     pools answer `attributes.has/get/max/damage/heal(id, ...)`, objects with tags answer
+     `tags.has/add/remove(tag)`; `node(name)` finds another
      object, whose script functions (or the built-in `hide()`/`show()`) run through `ref.method(args)`.
    - a saved edit restarts the script within half a second, and fixing a broken file is enough
      for it to be retried.
