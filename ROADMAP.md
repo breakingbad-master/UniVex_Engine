@@ -462,6 +462,7 @@ This is close to entirely unbuilt. Two folders exist (one placeholder, one with 
 real utility file) — networked multiplayer is a from-scratch, long-term project.
 
 - [x] A reliable packet window utility (ordering/retransmission bookkeeping primitive)
+- [x] A transport seam plus an in-memory loopback pair (endpoint contract + bounded FIFO queues; proves the interface socket transports implement later)
 - [ ] A real transport layer (UDP-based, with a real socket abstraction per platform)
 - [ ] A client-server session/connection lifecycle (connect, handshake, disconnect,
   timeout, reconnection)

@@ -869,10 +869,13 @@ consumer. They are cheap relative to how large they look.
 ## Tier 4 — genuinely new subsystems
 
 Out of scope for this document beyond naming them; each needs its own design pass
-and each has a `ROADMAP.md` section already: networking transport and replication,
-navmesh and pathfinding, an AI layer, a gameplay framework (the reason
-`Hitbox3D` cannot apply damage), a 2D pipeline, VFX authoring, terrain, and
-localization.
+and each has a `ROADMAP.md` section already: networking transport and replication
+(started Oct 2026: endpoint seam + loopback pair; UDP sockets, sessions, and
+replication still open), navmesh and pathfinding (landed per ROADMAP §7.3), an AI
+layer (landed per §7.3 except crowd sim), a gameplay framework (landed per §7.2 —
+`Hitbox3D` strikes apply damage through `ApplyHitboxStrikeToHealthUVE`), a 2D
+pipeline, VFX authoring, terrain, and localization (UI side landed:
+`LocalizationServiceUVE` + auto-translate; wider asset scope open).
 
 ---
 

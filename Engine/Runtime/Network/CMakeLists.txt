@@ -1,10 +1,12 @@
 # Copyright (c) 2026 UniVex Studios. All Rights Reserved.
 
 #
-# ReliablePacketWindowUVE: reliable UDP packet framing (sequencing/ack tracking). Fully
-# self-contained - no uve_* dependency at all.
+# uve_network: reliable UDP packet framing plus the transport seam (endpoint contract +
+# in-memory loopback; socket transports implement the seam later). Fully self-contained -
+# no uve_* dependency at all.
 
 add_library(uve_network STATIC
+    Internal/network_transport_uve.cpp
     Internal/reliable_packet_window_uve.cpp
 )
 target_include_directories(uve_network PUBLIC Expose)
