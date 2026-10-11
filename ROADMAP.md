@@ -468,6 +468,7 @@ real utility file) — networked multiplayer is a from-scratch, long-term projec
   timeout, reconnection)
 - [x] Session core over the seam: Hello/Welcome handshake, version-checked, best-effort Bye disconnect, silence timeout on an explicit clock (reconnection still open)
 - [ ] Entity/state replication (which properties replicate, at what rate, to which clients)
+- [x] Replication core: fixed-rate position snapshots over sessions (net-id registry with sampler/applier callbacks, strict little-endian framing; authority, relevancy, deltas, non-position properties still open)
 - [ ] A remote-procedure-call framework callable from the scripting/gameplay layer
 - [ ] Client-side prediction and server reconciliation for responsive movement
 - [ ] Lag compensation for hit registration
