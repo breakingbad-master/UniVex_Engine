@@ -6,6 +6,7 @@
 # no uve_* dependency at all.
 
 add_library(uve_network STATIC
+    Internal/network_session_uve.cpp
     Internal/network_transport_uve.cpp
     Internal/reliable_packet_window_uve.cpp
 )

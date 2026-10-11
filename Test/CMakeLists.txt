@@ -102,6 +102,7 @@ add_executable(uve_core_tests
     Engine/render_backend_selection_uve_tests.cpp
     Network/reliable_packet_window_uve_tests.cpp
     Network/network_transport_uve_tests.cpp
+    Network/network_session_uve_tests.cpp
     Plugins/plugin_registry_uve_tests.cpp
     Plugins/native_plugin_host_uve_tests.cpp
     ProjectCheck/project_checker_uve_tests.cpp

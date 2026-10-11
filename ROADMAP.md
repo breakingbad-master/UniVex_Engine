@@ -466,6 +466,7 @@ real utility file) — networked multiplayer is a from-scratch, long-term projec
 - [ ] A real transport layer (UDP-based, with a real socket abstraction per platform)
 - [ ] A client-server session/connection lifecycle (connect, handshake, disconnect,
   timeout, reconnection)
+- [x] Session core over the seam: Hello/Welcome handshake, version-checked, best-effort Bye disconnect, silence timeout on an explicit clock (reconnection still open)
 - [ ] Entity/state replication (which properties replicate, at what rate, to which clients)
 - [ ] A remote-procedure-call framework callable from the scripting/gameplay layer
 - [ ] Client-side prediction and server reconciliation for responsive movement
