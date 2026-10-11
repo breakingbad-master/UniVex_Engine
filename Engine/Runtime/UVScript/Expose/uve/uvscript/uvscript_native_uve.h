@@ -98,6 +98,7 @@ enum class CompareOpUVE : std::uint8_t {
 [[nodiscard]] double AsDoubleUVE(const ValueUVE& value);
 [[nodiscard]] Vec3ValueUVE AsVec3UVE(const ValueUVE& value);
 [[nodiscard]] bool AsBoolUVE(const ValueUVE& value);
+[[nodiscard]] ObjectRefUVE AsObjectRefUVE(const ValueUVE& value);
 [[nodiscard]] const std::string& AsStringUVE(const ValueUVE& value);
 [[nodiscard]] ValueUVE ArithmeticUVE(ArithmeticOpUVE op, const ValueUVE& a, const ValueUVE& b);
 [[nodiscard]] ValueUVE NegateUVE(ValueUVE value);

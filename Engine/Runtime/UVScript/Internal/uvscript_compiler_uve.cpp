@@ -713,7 +713,10 @@ private:
             }
             const bool numeric = leftAfter.IsNumericUVE() && rightAfter.IsNumericUVE();
             const bool ordered = op != "==" && op != "!=";
-            if (ordered ? !numeric : !(numeric || leftAfter.kind == rightAfter.kind)) {
+            // A lookup can come back empty, so an object may be asked whether it is `none`.
+            const bool absence = !ordered && ((leftAfter.kind == Kind::None && rightAfter.kind == Kind::Object) ||
+                                              (leftAfter.kind == Kind::Object && rightAfter.kind == Kind::None));
+            if (ordered ? !numeric : !(numeric || leftAfter.kind == rightAfter.kind || absence)) {
                 Error(expr.at, "'" + op + "' cannot compare " + leftAfter.NameUVE() + " with " + rightAfter.NameUVE());
             }
             Emit(op == "==" ? OpUVE::Eq : op == "!=" ? OpUVE::Ne : op == "<" ? OpUVE::Lt : op == "<=" ? OpUVE::Le
@@ -861,6 +864,16 @@ private:
         const ExprUVE& callee = *call.operands[0];
         const std::string path = DottedPathUVE(callee);
         const auto argc = static_cast<std::int32_t>(call.operands.size() - 1U);
+        // `other.hide()` - a call on another node. The target is only known when the script runs,
+        // so the method resolves then; the call is fire-and-forget and answers none either way.
+        if (callee.kind == ExprKindUVE::Member && PeekType(*callee.operands[0]).kind == Kind::Object) {
+            static_cast<void>(CompileExpr(*callee.operands[0]));
+            for (std::size_t i = 1U; i < call.operands.size(); ++i) {
+                static_cast<void>(CompileExpr(*call.operands[i]));
+            }
+            Emit(OpUVE::CallMethod, Constant(ValueUVE{callee.text}), argc, call.at);
+            return TypeUVE::NoneUVE();
+        }
         if (callee.kind == ExprKindUVE::Name) {
             if (const auto fn = m_functions.find(path); fn != m_functions.end()) {
                 CompileArguments(call, fn->second.params, path);

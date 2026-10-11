@@ -46,6 +46,7 @@ enum class OpUVE : std::uint8_t {
     Call,         // a = function index, b = argument count
     CallBuiltin,  // a = builtin, b = argument count
     CallHost,     // a = name constant, b = argument count
+    CallMethod,   // a = method-name constant, b = argument count (pops [ref, args], pushes none)
     Return,       // pops the result
     ReturnNone,
     Wait,         // pops seconds

@@ -20,15 +20,40 @@
 #include "uve/input/i_input_system_uve.h"
 #include "uve/logging/logging_macros_uve.h"
 #include "uve/objects/3d/rigid_3d_uve.h"
+#include "uve/uvscript/uvscript_instance_uve.h"
 
 namespace UVE::Core {
 namespace {
 
 using UVScript::HostFunctionUVE;
 using UVScript::HostPropertyUVE;
+using UVScript::ObjectRefUVE;
 using UVScript::TypeUVE;
 using UVScript::ValueUVE;
 using UVScript::Vec3ValueUVE;
+
+/// A script's handle to another object packs its entity, plus one: 0 stays reserved for "no
+/// object" (entity slot 0, generation 0 is a real entity and must keep its own handle).
+[[nodiscard]] constexpr std::uint64_t PackEntityUVE(const Scene::EntityUVE entity) noexcept {
+    return ((static_cast<std::uint64_t>(entity.generation) << 32U) | entity.index) + 1U;
+}
+
+[[nodiscard]] constexpr Scene::EntityUVE UnpackEntityUVE(const ObjectRefUVE ref) noexcept {
+    const std::uint64_t packed = ref.id - 1U;
+    return Scene::EntityUVE{static_cast<std::uint32_t>(packed),
+                            static_cast<std::uint32_t>(packed >> 32U)};
+}
+
+void SetVisibleUVE(Scene::IEntityManagerUVE& entities, const Scene::EntityUVE entity, const bool shown) {
+    if (entities.HasComponentUVE<Scene::VisibilityComponentUVE>(entity)) {
+        entities.GetComponentUVE<Scene::VisibilityComponentUVE>(entity).visible = shown;
+    } else if (!shown) {
+        // Showing adds nothing: an object without the component is already visible.
+        Scene::VisibilityComponentUVE visibility;
+        visibility.visible = false;
+        entities.AddComponentUVE<Scene::VisibilityComponentUVE>(entity, visibility);
+    }
+}
 
 [[nodiscard]] Vec3ValueUVE ToScriptUVE(const Math::Vector3UVE& v) noexcept {
     return {static_cast<double>(v.x), static_cast<double>(v.y), static_cast<double>(v.z)};
@@ -44,9 +69,10 @@ using UVScript::Vec3ValueUVE;
 UVScriptObjectHostUVE::UVScriptObjectHostUVE(Scene::IEntityManagerUVE& entityManager, const Input::IInputSystemUVE* const input,
                                          const Scene::EntityUVE entity,
                                          Audio::IAudioSourceSystemUVE* const audioSources,
-                                         Audio::IAudioSystemUVE* const audio) noexcept
+                                         Audio::IAudioSystemUVE* const audio,
+                                         InstanceResolverUVE resolver) noexcept
     : m_entityManager(entityManager), m_input(input), m_entity(entity), m_audioSources(audioSources),
-      m_audio(audio) {}
+      m_audio(audio), m_resolver(std::move(resolver)) {}
 
 std::optional<HostPropertyUVE> UVScriptObjectHostUVE::DescribePropertyUVE(const std::string_view name) const {
     if (name == "name") {
@@ -98,6 +124,11 @@ std::optional<HostFunctionUVE> UVScriptObjectHostUVE::DescribeFunctionUVE(const 
     }
     if (name == "input.pressed" || name == "input.held" || name == "input.released") {
         return HostFunctionUVE{{TypeUVE::StrUVE()}, TypeUVE::BoolUVE()};
+    }
+    // Ungated: any script may look another object up. The kind is only known when the script runs,
+    // so every lookup answers the common root; a missing name answers no object (id 0).
+    if (name == "node") {
+        return HostFunctionUVE{{TypeUVE::StrUVE()}, TypeUVE::ObjectUVE("Object3D")};
     }
     if (name == "input.axis") {
         return HostFunctionUVE{{TypeUVE::StrUVE(), TypeUVE::StrUVE()}, TypeUVE::FloatUVE()};
@@ -193,14 +224,7 @@ void UVScriptObjectHostUVE::SetPropertyUVE(const std::string_view name, const Va
             (name == "volume" ? source.volume : source.pitch) = updated;
         }
     } else if (name == "visible") {
-        const bool shown = std::get<bool>(value);
-        if (m_entityManager.HasComponentUVE<Scene::VisibilityComponentUVE>(m_entity)) {
-            m_entityManager.GetComponentUVE<Scene::VisibilityComponentUVE>(m_entity).visible = shown;
-        } else {
-            Scene::VisibilityComponentUVE visibility;
-            visibility.visible = shown;
-            m_entityManager.AddComponentUVE<Scene::VisibilityComponentUVE>(m_entity, visibility);
-        }
+        SetVisibleUVE(m_entityManager, m_entity, std::get<bool>(value));
     } else if (name == "intensity") {
         const float updated = static_cast<float>(std::get<double>(value));
         if (std::isfinite(updated) && updated >= 0.0F) {
@@ -240,6 +264,21 @@ ValueUVE UVScriptObjectHostUVE::CallFunctionUVE(const std::string_view name, con
         }
         return m_audioSources->IsEntityPlayingUVE(m_entity, *m_audio);
     }
+    // A lookup needs no input system, so it routes before the null-input early-out below.
+    if (name == "node") {
+        const std::string& wanted = std::get<std::string>(args[0]);
+        Scene::EntityUVE found = Scene::kInvalidEntityUVE;
+        m_entityManager.ForEachUVE<Scene::NameComponentUVE>(
+            [&](const Scene::EntityUVE entity, const Scene::NameComponentUVE& named) {
+                if (found == Scene::kInvalidEntityUVE && named.name == wanted) {
+                    found = entity;
+                }
+            });
+        if (found == Scene::kInvalidEntityUVE) {
+            return ValueUVE{ObjectRefUVE{}};
+        }
+        return ValueUVE{ObjectRefUVE{PackEntityUVE(found)}};
+    }
     if (m_input == nullptr) {
         return name == "input.axis" ? ValueUVE{0.0} : ValueUVE{false};
     }
@@ -256,6 +295,30 @@ ValueUVE UVScriptObjectHostUVE::CallFunctionUVE(const std::string_view name, con
         return m_input->IsActionReleasedUVE(action);
     }
     return m_input->IsActionHeldUVE(action);
+}
+
+void UVScriptObjectHostUVE::CallMethodUVE(const ObjectRefUVE target, const std::string_view method,
+                                       const std::span<const ValueUVE> args) {
+    // A stale handle (its entity long destroyed) lands on another occupant or nothing at all; the
+    // generation check inside IsAliveUVE tells the two apart, and both fail closed as nothing.
+    if (target.id == 0U) {
+        return;
+    }
+    const Scene::EntityUVE entity = UnpackEntityUVE(target);
+    if (!m_entityManager.IsAliveUVE(entity)) {
+        return;
+    }
+    // The target's own script first: a `fn hide()` there overrides the built-in below.
+    if (m_resolver) {
+        if (UVScript::ScriptInstanceUVE* const instance = m_resolver(entity);
+            instance != nullptr && instance->HasFunctionUVE(method, args.size())) {
+            static_cast<void>(instance->CallUVE(method, args));
+            return;
+        }
+    }
+    if (method == "hide" || method == "show") {
+        SetVisibleUVE(m_entityManager, entity, method == "show");
+    }
 }
 
 void UVScriptObjectHostUVE::PrintUVE(const std::string_view text) {

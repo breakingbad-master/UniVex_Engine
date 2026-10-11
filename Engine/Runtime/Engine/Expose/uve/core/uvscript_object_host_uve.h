@@ -2,6 +2,8 @@
 
 #pragma once
 
+#include <functional>
+
 #include "uve/component/entity_uve.h"
 #include "uve/uvscript/uvscript_host_uve.h"
 
@@ -18,6 +20,10 @@ class IAudioSourceSystemUVE;
 class IAudioSystemUVE;
 } // namespace Audio
 
+namespace UVE::UVScript {
+class ScriptInstanceUVE;
+} // namespace UVE::UVScript
+
 namespace UVE::Core {
 
 /// What a `.uvs` script can reach on the object it is attached to. The object's components decide:
@@ -30,15 +36,22 @@ namespace UVE::Core {
 ///   answering whether it applied;
 /// - always: `input.pressed/held/released(action)` and `input.axis(negative, positive)`, which
 ///   read the project's input map; events `ready` and `tick(dt)`.
+/// - always: `node(name)` finds another object by name, and `ref.method(args)` calls one of its
+///   script functions (or the built-in `hide()`/`show()`), fire-and-forget.
 class UVScriptObjectHostUVE final : public UVScript::UVScriptHostUVE {
 public:
+    /// Finds the running script of an entity, for routing cross-node calls at it. Null when the
+    /// entity runs no script. Empty on check-only hosts, whose calls then only reach built-ins.
+    using InstanceResolverUVE = std::function<UVScript::ScriptInstanceUVE*(Scene::EntityUVE)>;
+
     /// `input` may be null (no input system): input calls then read as not pressed.
     /// `audioSources`/`audio` may be null (no audio): audio calls then fail closed as false. Both
     /// default to null so check-only hosts (editor diagnostics, tests that never touch audio) stay
     /// three-argument constructions.
     UVScriptObjectHostUVE(Scene::IEntityManagerUVE& entityManager, const Input::IInputSystemUVE* input,
                           Scene::EntityUVE entity, Audio::IAudioSourceSystemUVE* audioSources = nullptr,
-                          Audio::IAudioSystemUVE* audio = nullptr) noexcept;
+                          Audio::IAudioSystemUVE* audio = nullptr,
+                          InstanceResolverUVE resolver = InstanceResolverUVE{}) noexcept;
 
     [[nodiscard]] std::optional<UVScript::HostPropertyUVE> DescribePropertyUVE(std::string_view name) const override;
     [[nodiscard]] std::optional<UVScript::HostFunctionUVE> DescribeFunctionUVE(std::string_view name) const override;
@@ -48,6 +61,8 @@ public:
     void SetPropertyUVE(std::string_view name, const UVScript::ValueUVE& value) override;
     [[nodiscard]] UVScript::ValueUVE CallFunctionUVE(std::string_view name,
                                                       std::span<const UVScript::ValueUVE> args) override;
+    void CallMethodUVE(UVScript::ObjectRefUVE target, std::string_view method,
+                       std::span<const UVScript::ValueUVE> args) override;
     void PrintUVE(std::string_view text) override;
 
 private:
@@ -56,6 +71,7 @@ private:
     Scene::EntityUVE m_entity = Scene::kInvalidEntityUVE;
     Audio::IAudioSourceSystemUVE* m_audioSources = nullptr;
     Audio::IAudioSystemUVE* m_audio = nullptr;
+    InstanceResolverUVE m_resolver;
 };
 
 } // namespace UVE::Core

@@ -492,7 +492,10 @@ script per node; see `Engine/Runtime/UVScript/README.md`.
 - [x] Engine binding: a node's `.uvs` runs `ready`/`tick(dt)` in process order, reloads on save
 - [x] Editor: New UVScript on the script slot, a text editor with live diagnostics, `export`
   fields in the Inspector
-- [ ] Collections and tuples, calling methods on other nodes, `wait` inside a `fn`
+- [ ] Collections and tuples, calling methods on other nodes, `wait` inside a `fn` — methods
+  on other nodes have landed (`node(name)` lookup plus fire-and-forget `ref.method(args)`, reaching
+  the target's own script functions first with `hide()`/`show()` built in); collections and tuples
+  and `wait` inside a `fn` remain
 - [ ] More host bindings: collision/overlap events, audio, physics forces, other node kinds —
   physics forces have landed (persistent force/torque plus mass-scaled impulses on rigid
   bodies, with rigid-body velocity readable/writable), as have audio bindings (play/stop

@@ -243,7 +243,7 @@ target_include_directories(uve_core_tests PRIVATE ${CMAKE_SOURCE_DIR}/Engine/Run
 uve_add_uvscript_native(uve_core_tests
     HOST UVScript/native/fake_object.uvhost
     SCRIPTS UVScript/native/player.uvs UVScript/native/math.uvs UVScript/native/waits.uvs
-            UVScript/native/errors.uvs)
+            UVScript/native/errors.uvs UVScript/native/methods.uvs)
 target_compile_definitions(uve_core_tests PRIVATE
     UVE_UVSCRIPT_NATIVE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/UVScript/native")
 
@@ -313,6 +313,7 @@ add_executable(uve_integration_tests
     Physics/character_3d_uve_tests.cpp
     Physics/uvscript_physics_forces_uve_tests.cpp
     Script/uvscript_node_state_uve_tests.cpp
+    Script/uvscript_cross_node_uve_tests.cpp
     Audio/uvscript_audio_bindings_uve_tests.cpp
     Physics/collider_3d_uve_tests.cpp
     Physics/collider_shape_uve_tests.cpp

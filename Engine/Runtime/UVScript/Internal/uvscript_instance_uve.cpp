@@ -18,6 +18,14 @@ namespace {
 constexpr std::size_t kInstructionBudgetUVE = 1'000'000U;
 constexpr std::size_t kMaximumCallDepthUVE = 256U;
 
+/// Cross-node calls re-enter CallUVE through the host; without a cap two scripts calling each
+/// other would eat the C++ stack. Same depth as calls within one script.
+thread_local std::size_t g_callDepthUVE = 0U;
+struct CallDepthGuardUVE final {
+    CallDepthGuardUVE() { ++g_callDepthUVE; }
+    ~CallDepthGuardUVE() { --g_callDepthUVE; }
+};
+
 struct FrameUVE final {
     const ChunkUVE* chunk = nullptr;
     std::size_t ip = 0U;
@@ -192,6 +200,15 @@ struct ScriptInstanceUVE::StateUVE final {
                         s.push_back(host->CallFunctionUVE(std::get<std::string>(program->constants[static_cast<std::size_t>(in.a)]), args));
                         break;
                     }
+                    case OpUVE::CallMethod: {
+                        const std::size_t argc = static_cast<std::size_t>(in.b);
+                        const std::vector<ValueUVE> args(s.end() - static_cast<std::ptrdiff_t>(argc), s.end());
+                        s.resize(s.size() - argc);
+                        const ObjectRefUVE target = Native::AsObjectRefUVE(pop());
+                        host->CallMethodUVE(target, std::get<std::string>(program->constants[static_cast<std::size_t>(in.a)]), args);
+                        s.push_back(ValueUVE{});
+                        break;
+                    }
                     case OpUVE::Return:
                     case OpUVE::ReturnNone: {
                         ValueUVE result = in.op == OpUVE::Return ? pop() : ValueUVE{};
@@ -346,7 +363,23 @@ void ScriptInstanceUVE::AdvanceUVE(const double seconds) {
     }
 }
 
+bool ScriptInstanceUVE::HasFunctionUVE(const std::string_view name, const std::size_t argc) const noexcept {
+    for (const ChunkUVE& chunk : m_state->program->functions) {
+        if (chunk.name == name && static_cast<std::size_t>(chunk.paramCount) == argc) {
+            return true;
+        }
+    }
+    return false;
+}
+
 std::optional<ValueUVE> ScriptInstanceUVE::CallUVE(const std::string_view name, const std::span<const ValueUVE> args) {
+    if (g_callDepthUVE >= kMaximumCallDepthUVE) {
+        // Fail closed like a missing method, without an error: the chain stops, and every call
+        // already entered still completes. Writing lastError here would fail the outer calls too,
+        // which all ran fine - only the call past the cap never started.
+        return std::nullopt;
+    }
+    const CallDepthGuardUVE depth;
     const auto& functions = m_state->program->functions;
     for (std::size_t index = 0U; index < functions.size(); ++index) {
         const ChunkUVE& chunk = functions[index];

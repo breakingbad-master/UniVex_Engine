@@ -109,9 +109,10 @@ primary     := NUMBER UNIT? | STRING | 'true' | 'false' | 'none' | IDENT | '(' e
    - `ScriptInstanceUVE` runs it: handlers, functions, fields, and `wait` that pauses only its own
      handler.
    - A runaway loop is cut off after one million instructions.
+   - `ref.method(args)` calls a method on another node: fire-and-forget, answered with none,
+     resolved when the script runs. An object may be compared with `none`, for lookups that miss.
    - Not in yet:
      - collections, tuples and `[]`;
-     - calling methods on other nodes (`other.hide()`);
      - `wait` inside a `fn`.
 3. **Engine binding.** A node whose script slot names a `.uvs` file runs it:
    - `EngineCoreUVE` compiles it once per path against `UVScriptNodeHostUVE`; errors are logged with
@@ -123,7 +124,8 @@ primary     := NUMBER UNIT? | STRING | 'true' | 'false' | 'none' | IDENT | '(' e
      `grounded`, plus `input.pressed/held/released/axis`; a rigid body adds its own
      `velocity` and `physics.apply_force/apply_impulse/apply_torque(vec3)`; an audio source
      adds `volume`/`pitch` and `audio.play()/audio.stop()/audio.is_playing()`; every object
-     gets writable `visible`, lights add `intensity`, cameras add `fov`.
+     gets writable `visible`, lights add `intensity`, cameras add `fov`; `node(name)` finds another
+     object, whose script functions (or the built-in `hide()`/`show()`) run through `ref.method(args)`.
    - a saved edit restarts the script within half a second, and fixing a broken file is enough
      for it to be retried.
 4. **Editor.** The Inspector's script slot has **New UVScript**: it writes `scripts/<node>.uvs`

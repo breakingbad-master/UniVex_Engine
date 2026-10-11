@@ -409,6 +409,7 @@ struct TypedPlanUVE final {
                 fallsThrough = false;
                 break;
             case OpUVE::ReturnNone: fallsThrough = false; break;
+            case OpUVE::CallMethod: return std::nullopt; // dynamic dispatch stays boxed, like Wait
             case OpUVE::Wait: return std::nullopt;
         }
         if (fallsThrough && !flow(n + 1U, s)) {
@@ -632,6 +633,7 @@ private:
             }
             case OpUVE::Return: body = "return " + top(1U) + ";"; break;
             case OpUVE::ReturnNone: body = m_plan->result == SlotUVE::None ? "return;" : "return {};"; break;
+            case OpUVE::CallMethod: break; // never typed
             case OpUVE::Wait: break; // never typed
         }
         m_out += "    { c.StepUVE(" + std::to_string(in.line) + "U); " + body + " }\n";
@@ -950,6 +952,11 @@ private:
             case OpUVE::CallHost:
                 body = "const std::vector<ValueUVE> args(s.end() - " + b + ", s.end()); s.resize(s.size() - " + b +
                        "U); ValueUVE r = c.host.CallFunctionUVE(" + Name(in.a) + ", args); s.push_back(std::move(r));";
+                break;
+            case OpUVE::CallMethod:
+                body = "const std::vector<ValueUVE> args(s.end() - " + b + ", s.end()); s.resize(s.size() - " + b +
+                       "U); c.host.CallMethodUVE(AsObjectRefUVE(PopUVE(s)), " + Name(in.a) +
+                       ", args); s.push_back(ValueUVE{});";
                 break;
             case OpUVE::Return: body = "f.result = PopUVE(s); f.resume = 0U; return StatusUVE::Finished;"; break;
             case OpUVE::ReturnNone: body = "f.result = ValueUVE{}; f.resume = 0U; return StatusUVE::Finished;"; break;

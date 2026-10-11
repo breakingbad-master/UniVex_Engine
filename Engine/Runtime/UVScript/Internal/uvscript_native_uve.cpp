@@ -64,6 +64,13 @@ Vec3ValueUVE AsVec3UVE(const ValueUVE& value) {
     throw ErrorUVE{"expected a vec3"};
 }
 
+ObjectRefUVE AsObjectRefUVE(const ValueUVE& value) {
+    if (const auto* ref = std::get_if<ObjectRefUVE>(&value)) {
+        return *ref;
+    }
+    throw ErrorUVE{"expected an object"};
+}
+
 bool AsBoolUVE(const ValueUVE& value) {
     if (const auto* b = std::get_if<bool>(&value)) {
         return *b;
@@ -154,6 +161,13 @@ ValueUVE NegateUVE(ValueUVE value) {
 bool EqualUVE(const ValueUVE& a, const ValueUVE& b) {
     if (IsNumberUVE(a) && IsNumberUVE(b)) {
         return AsDoubleUVE(a) == AsDoubleUVE(b);
+    }
+    // A handle to no object (id 0) reads as `none`, so a lookup that missed compares true.
+    if (std::holds_alternative<std::monostate>(a) && std::holds_alternative<ObjectRefUVE>(b)) {
+        return std::get<ObjectRefUVE>(b).id == 0U;
+    }
+    if (std::holds_alternative<std::monostate>(b) && std::holds_alternative<ObjectRefUVE>(a)) {
+        return std::get<ObjectRefUVE>(a).id == 0U;
     }
     return a == b;
 }
