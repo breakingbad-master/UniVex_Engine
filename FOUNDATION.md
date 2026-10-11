@@ -843,14 +843,14 @@ call sites are already allocating from the wrong place.
 
 | # | Item | Module | Unblocks | Done when |
 |---|---|---|---|---|
-| 2.1 | Rasterizer state on `PipelineDescUVE` — cull, winding, fill, depth bias, **depth-compare function** | `RHI/RHI` + all three backends | shadow bias; removes the editor's direct GL depth-function call | the gizmo overlay expresses its depth mode through the pipeline |
-| 2.2 | Sampler object + descriptor | `RHI/RHI` + backends | point filtering, wrapping, anisotropy | a texture can be sampled point-filtered |
-| 2.3 | Texture dimensionality — array layers, cubemaps | `RHI/RHI` + backends | image-based lighting; cascade arrays | a cubemap is created and sampled |
-| 2.4 | Multiple render targets on `RenderPassDescUVE` | `RHI/RHI` + backends | any deferred/G-buffer path | a two-attachment pass records and replays |
-| 2.5 | `StoreOpUVE` to pair with `LoadOpUVE` | `RHI/RHI` + backends | tiler efficiency; explicit resolve/discard | every pass declares both |
-| 2.6 | Per-joint animation channels in `AnimationClipAssetUVE` + a skeleton asset | `Asset` | the entire skeletal animation pipeline, and four data-only nodes | a glTF skinned mesh animates — parts landed (AnimationAssetBoneTrackUVE, skeleton_asset_uve, renderer skinning of posed skeletons); confirm the literal glTF eyeball on a GL run |
+| 2.1 | Rasterizer state on `PipelineDescUVE` — cull, winding, fill, depth bias, **depth-compare function** | `RHI/RHI` + all three backends | shadow bias; removes the editor's direct GL depth-function call | the gizmo overlay expresses its depth mode through the pipeline - PARTIAL (verified Oct 2026 by source read): RHI side landed — rasterizer tail (cull/winding/fill/bias/depth-compare) on PipelineDescUVE + PipelineBinaryDescUVE, all three backends validate/apply (GL state, VK ToVk* incl. depthCompareOp, Null validation); the done-when consumer is still open — GizmoRenderer drives raw GL depth state directly and StudioBackdropRenderer still issues glDepthFunc — editor/GL-side migration follow-up |
+| 2.2 | Sampler object + descriptor | `RHI/RHI` + backends | point filtering, wrapping, anisotropy | a texture can be sampled point-filtered - landed (verified Oct 2026 by source read): SamplerDescUVE (mag/min/mip/wrapU/V/W/maxAnisotropy) + SamplerFilterUVE::Point threaded through all three backend devices; GL maps Point to GL_NEAREST and GL creation tests cover Point filters |
+| 2.3 | Texture dimensionality — array layers, cubemaps | `RHI/RHI` + backends | image-based lighting; cascade arrays | a cubemap is created and sampled - landed (verified Oct 2026 by source read): TextureTypeUVE::Cubemap + Texture2DArray with arrayLayers, creation-time shape validation (cube: square + 6 layers), CubemapFaceUVE order matching HW face order, render-into-layer (colorLayer/depthLayer); GL cube paths + VK maxImageDimensionCube query; cube coverage in the GL/VK device tests |
+| 2.4 | Multiple render targets on `RenderPassDescUVE` | `RHI/RHI` + backends | any deferred/G-buffer path | a two-attachment pass records and replays - landed (verified Oct 2026 by source read): ColorAttachmentUVE slots 1..3 on RenderPassDescUVE (gap-rejecting); VulkanRenderDeviceUVETest.MultiTargetCaptureAndSample_RendersPerTargetColors records a multi-target pass and samples per-target colors, plus Null/GL attachment coverage |
+| 2.5 | `StoreOpUVE` to pair with `LoadOpUVE` | `RHI/RHI` + backends | tiler efficiency; explicit resolve/discard | every pass declares both - landed (verified Oct 2026 by source read): StoreOpUVE::{Store,DontCare} sits next to its LoadOp on location 0, depth, and every extra slot; Null/GL command buffers validate both per slot and VK maps to VkAttachmentStoreOp at render-pass creation |
+| 2.6 | Per-joint animation channels in `AnimationClipAssetUVE` + a skeleton asset | `Asset` | the entire skeletal animation pipeline, and four data-only nodes | a glTF skinned mesh animates — landed (verified Oct 2026 by source read): AnimationAssetBoneTrackUVE per-joint channels, skeleton_asset_uve, glTF skin converter + tests (reversed skin order, u16/u32 joints, inverse-bind defaults), TrySkinMeshUVE output tests (two-joint blend, normal rotation); renderer CPU-skins posed skeletons per 3.1; confirm the literal glTF eyeball on a GL run |
 | 2.7 | Remaining PBR texture slots on `MaterialAssetUVE` | `Asset` | full PBR materials | metallic/roughness/emissive maps render - landed: slots on the asset, renderer binds slots 12/13, lit_shadowed_3d samples them (B metallic, G roughness); confirm pixels on a GL run |
-| 2.8 | Debug line/shape renderer | `RHI/RenderSystems` | visualising bounds, frusta, contacts — pays for itself on the first spatial bug | a bounding box can be drawn from one call |
+| 2.8 | Debug line/shape renderer | `RHI/RenderSystems` | visualising bounds, frusta, contacts — pays for itself on the first spatial bug | a bounding box can be drawn from one call - landed (verified Oct 2026 by source read): DebugRendererUVE::DrawBox3D(AabbUVE, color) emits the 12-line box from one call (+ DrawLine3D/DrawSphere3D/DrawRect2D over a 16K-line batch); the header cites this item's done-when |
 
 ## Tier 3 — systems that are blocked, not missing
 
@@ -885,6 +885,10 @@ because it is trusted.
 
 At the time of writing, `SCENE_NODES_ROADMAP.md` lists eight nodes as
 authored-data-only that now have real per-frame systems — SpringArm3D,
+InteractionArea3D, LevelStreamer3D, WorldPartition3D, VisibilityRegion3D,
+LODGroup3D, Occluder3D, and partially ReflectionProbe3D. That correction belongs
+in that file and is not folded in here.
+Arm3D,
 InteractionArea3D, LevelStreamer3D, WorldPartition3D, VisibilityRegion3D,
 LODGroup3D, Occluder3D, and partially ReflectionProbe3D. That correction belongs
 in that file and is not folded in here.
