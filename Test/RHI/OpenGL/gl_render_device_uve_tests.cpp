@@ -230,6 +230,38 @@ TEST_F(GlRenderDeviceUVETest, TimelineSemaphoresAreExplicitlyUnsupportedRatherTh
         << "refusing the unsupported calls must not touch GL state";
 }
 
+TEST_F(GlRenderDeviceUVETest, BinarySubmitSyncIsRefusedWithAnExplicitUnsupportedCapability) {
+    // An OpenGL context has one command stream and no queue-level semaphore, so the honest answer
+    // is Unsupported: an empty sync is still accepted (it is exactly SubmitUVE, since every GL
+    // call already ran during recording), while any non-empty sync is refused rather than being
+    // silently ignored.
+    EXPECT_EQ(renderDevice->GetCapabilitiesUVE().submitSync, RenderFeatureSupportUVE::Unsupported);
+    BinarySemaphoreHandleUVE semaphore{9U};
+    EXPECT_EQ(renderDevice->CreateBinarySemaphoreUVE(semaphore), RenderOperationResultUVE::Unsupported);
+    EXPECT_EQ(semaphore, BinarySemaphoreHandleUVE{9U}) << "a refused create must leave the output untouched";
+    EXPECT_EQ(renderDevice->DestroyBinarySemaphoreUVE(kInvalidBinarySemaphoreHandleUVE),
+              RenderOperationResultUVE::Unsupported);
+
+    SubmitSyncUVE sync;
+    sync.signalCount = SubmitSyncUVE::kMaxSignalsUVE + 1U;
+    EXPECT_EQ(renderDevice->SubmitWithSyncUVE(renderDevice->CreateCommandBufferUVE(), sync),
+              RenderOperationResultUVE::InvalidArgument);
+
+    SubmitSyncUVE waitOnly;
+    waitOnly.waitCount = 1U;
+    waitOnly.waitStages[0] = SubmitWaitStageUVE::AllCommands;
+    waitOnly.waits[0] = BinarySemaphoreHandleUVE{1U};
+    EXPECT_EQ(renderDevice->SubmitWithSyncUVE(renderDevice->CreateCommandBufferUVE(), waitOnly),
+              RenderOperationResultUVE::Unsupported);
+    auto commands = renderDevice->CreateCommandBufferUVE();
+    ASSERT_NE(commands, nullptr);
+    EXPECT_EQ(renderDevice->SubmitWithSyncUVE(std::move(commands), SubmitSyncUVE{}),
+              RenderOperationResultUVE::Success)
+        << "an empty sync is the SubmitUVE path and is accepted";
+    EXPECT_EQ(glGetError(), static_cast<GLenum>(GL_NO_ERROR))
+        << "refusing the unsupported sync must not touch GL state";
+}
+
 TEST_F(GlRenderDeviceUVETest, GeometryStageChangesRasterizedPositionAndSurvivesShaderDeletion) {
     ASSERT_EQ(renderDevice->GetCapabilitiesUVE().geometryShaders, RenderFeatureSupportUVE::Native);
     const auto vertex = renderDevice->CreateShaderUVE({ShaderStageUVE::Vertex, std::string(kValidVertexShaderSource)});

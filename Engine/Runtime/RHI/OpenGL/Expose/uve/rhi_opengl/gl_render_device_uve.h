@@ -89,6 +89,16 @@ public:
     void SubmitUVE(std::unique_ptr<ICommandBufferUVE> commandBuffer) override;
     void PresentUVE() override;
 
+    /// Submission-level binary semaphores are refused on purpose: an OpenGL context has one
+    /// command stream and no queue-level semaphore object, so `submitSync` stays `Unsupported`
+    /// and any non-empty SubmitWithSyncUVE sync is refused instead of being quietly ignored. An
+    /// empty sync is exactly SubmitUVE (commands already ran during recording, so there is
+    /// nothing left to order) and returns Success.
+    [[nodiscard]] RenderOperationResultUVE CreateBinarySemaphoreUVE(BinarySemaphoreHandleUVE &) override;
+    [[nodiscard]] RenderOperationResultUVE DestroyBinarySemaphoreUVE(BinarySemaphoreHandleUVE) override;
+    [[nodiscard]] RenderOperationResultUVE SubmitWithSyncUVE(std::unique_ptr<ICommandBufferUVE>,
+                                                            const SubmitSyncUVE &) override;
+
     [[nodiscard]] std::string_view GetBackendNameUVE() const noexcept override;
 
     /// Returns true only when construction found a valid current context and loaded every GL

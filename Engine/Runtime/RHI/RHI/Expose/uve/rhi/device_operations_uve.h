@@ -1,5 +1,6 @@
 // Copyright (c) 2026 UniVex Studios. All Rights Reserved.
 #pragma once
+#include <array>
 #include <cstdint>
 #include <variant>
 #include "uve/rhi/buffer_handle_uve.h"
@@ -42,14 +43,21 @@ struct RenderDeviceCapabilitiesUVE final {
     /// driver's own timeline semaphores back the calls; `Unsupported` means every semaphore call
     /// is refused explicitly.
     RenderFeatureSupportUVE timelineSemaphores = RenderFeatureSupportUVE::Unsupported;
+    /// Submission-level (binary) semaphores as SubmitWithSyncUVE parameters. `Model` means a
+    /// backend keeps real signal/wait state and refuses waits nothing has signalled; `Native`
+    /// means the driver's own binary semaphores are attached to the frame submission.
+    /// `Unsupported` means every binary-semaphore call is refused explicitly.
+    RenderFeatureSupportUVE submitSync = RenderFeatureSupportUVE::Unsupported;
     /// Optional geometry stage in a graphics pipeline; Model never means GPU execution.
     RenderFeatureSupportUVE geometryShaders = RenderFeatureSupportUVE::Unsupported;
 };
 /// Timeline semaphore: a monotonic 64-bit counter that orders work without a binary
-/// signal/unsignal cycle. Binary (queue-to-queue) semaphores are deliberately NOT part of this
-/// surface: they only mean something as parameters of a submission, and this RHI's SubmitUVE
-/// owns its frame submission. A backend may therefore report timeline semaphores as
-/// `Unsupported` without affecting fences, which remain the CPU-visible completion primitive.
+/// signal/unsignal cycle. Binary (queue-to-queue) semaphores are a separate, submission-scoped
+/// surface (`CreateBinarySemaphoreUVE` / `SubmitWithSyncUVE`): a binary semaphore has no
+/// CPU-visible value, so it only means something as a submission parameter, and
+/// `SubmitWithSyncUVE` is the only place they are accepted. A backend may therefore report
+/// timeline semaphores or submitSync as `Unsupported` without affecting fences, which remain
+/// the CPU-visible completion primitive.
 struct FenceTagUVE {};
 struct SemaphoreTagUVE {};
 /// Creation parameters for CreateSemaphoreUVE. `initialValue` is the counter's starting value;
@@ -69,6 +77,87 @@ struct SemaphoreDescUVE final {
 [[nodiscard]] constexpr bool IsSemaphoreWaitValueValidUVE(const std::uint64_t /*value*/) noexcept {
     return true;
 }
+
+/// Binary (submission-scoped) semaphore: signalled by exactly one submission and consumed by
+/// exactly one wait, with no CPU-visible counter — the state a timeline counter cannot express.
+struct BinarySemaphoreTagUVE {};
+using BinarySemaphoreHandleUVE = ResourceHandleUVE<BinarySemaphoreTagUVE>;
+inline constexpr BinarySemaphoreHandleUVE kInvalidBinarySemaphoreHandleUVE{};
+
+/// The earliest pipeline stage that may consume the work a wait protects. Conservative stages
+/// are always safe: they can only make the submission wait longer, never too little. Keeping a
+/// closed vocabulary here is deliberate — a raw backend stage mask would leak the Vulkan stage
+/// model through the common API.
+enum class SubmitWaitStageUVE : std::uint32_t {
+    Transfer = 1U,
+    ColorAttachment = 2U,
+    AllCommands = 4U,
+};
+[[nodiscard]] constexpr bool IsSubmitWaitStageValidUVE(const SubmitWaitStageUVE stage) noexcept {
+    const auto value = static_cast<std::uint32_t>(stage);
+    // Exactly one known bit: bitmask combinations are NOT silently accepted, because
+    // "Transfer|AllCommands" has no single honest meaning across backends.
+    return value != 0U && (value & ~7U) == 0U && (value & (value - 1U)) == 0U;
+}
+
+/// Submission-level sync: the binary semaphores one submission waits on and signals. Capacity is
+/// fixed, matching every other descriptor in this header, and a caller that needs more than four
+/// entries submits in more than one call rather than getting a silently truncated list.
+struct SubmitSyncUVE final {
+    static constexpr std::uint32_t kMaxWaitsUVE = 4U;
+    static constexpr std::uint32_t kMaxSignalsUVE = 4U;
+    std::array<BinarySemaphoreHandleUVE, kMaxWaitsUVE> waits{};
+    std::array<SubmitWaitStageUVE, kMaxWaitsUVE> waitStages{};
+    std::array<BinarySemaphoreHandleUVE, kMaxSignalsUVE> signals{};
+    std::uint32_t waitCount = 0U;
+    std::uint32_t signalCount = 0U;
+};
+/// Shape validation only: capacity, a defined stage for every declared wait, and no semaphore
+/// named twice (two waits, two signals, or a wait and a signal in the same call would spend two
+/// credits for one signal and submit the same semaphore twice in one native submit). All three
+/// are structural and state-free, so every backend refuses them identically; handle existence
+/// and semaphore state remain backend state, checked by the backend that owns them.
+[[nodiscard]] constexpr bool HasSubmitSyncRepeatedHandleUVE(const SubmitSyncUVE &sync) noexcept {
+    for (std::uint32_t first = 0U; first < sync.waitCount; ++first) {
+        for (std::uint32_t second = first + 1U; second < sync.waitCount; ++second) {
+            if (sync.waits[first] == sync.waits[second])
+                return true;
+        }
+        for (std::uint32_t second = 0U; second < sync.signalCount; ++second) {
+            if (sync.waits[first] == sync.signals[second])
+                return true;
+        }
+    }
+    for (std::uint32_t first = 0U; first < sync.signalCount; ++first) {
+        for (std::uint32_t second = first + 1U; second < sync.signalCount; ++second) {
+            if (sync.signals[first] == sync.signals[second])
+                return true;
+        }
+    }
+    return false;
+}
+[[nodiscard]] constexpr bool IsSubmitSyncShapeValidUVE(const SubmitSyncUVE &sync) noexcept {
+    if (sync.waitCount > SubmitSyncUVE::kMaxWaitsUVE ||
+        sync.signalCount > SubmitSyncUVE::kMaxSignalsUVE)
+        return false;
+    for (std::uint32_t index = 0U; index < sync.waitCount; ++index) {
+        if (!IsSubmitWaitStageValidUVE(sync.waitStages[index]))
+            return false;
+    }
+    return !HasSubmitSyncRepeatedHandleUVE(sync);
+}
+[[nodiscard]] constexpr bool IsSubmitSyncEmptyUVE(const SubmitSyncUVE &sync) noexcept {
+    return sync.waitCount == 0U && sync.signalCount == 0U;
+}
+/// The role one binary semaphore plays inside a single frame. A semaphore may play at most ONE
+/// role per frame — a second wait or signal is refused because one signal can only be consumed
+/// once, and a wait inside the same frame as its own signal would be a self-wait that the queue
+/// can never satisfy. Both submitting backends share this state type so a frame's accept/refuse
+/// decision cannot drift between them; a flipped role becomes legal again at the next frame.
+/// The complementary rule lives in each backend's own state: a signal is only accepted while the
+/// semaphore has no unconsumed submitted signal, because signalling an already-signalled binary
+/// semaphore is invalid usage, not a second independent signal.
+enum class SubmitSyncRoleUVE : std::uint8_t { None = 0U, Wait, Signal };
 
 struct QueryTagUVE {};
 using FenceHandleUVE = ResourceHandleUVE<FenceTagUVE>;
@@ -185,7 +274,14 @@ struct QueryOperationUVE {
     RenderQueryKindUVE kind;
     bool begin = false;
 };
+/// A submission that carried binary semaphore sync, recorded when the backend accepted it.
+/// Null's model deliberately keeps the *frame* effect (a signal becoming consumable) observable
+/// at PresentUVE instead of claiming here that a queue already executed it.
+struct SubmitSyncOperationUVE {
+    SubmitSyncUVE sync;
+};
 using RecordedDeviceOperationUVE =
     std::variant<BufferCopyDescUVE, TextureBlitDescUVE, GenerateMipsOperationUVE, FenceOperationUVE,
-                 QueryOperationUVE, SignalSemaphoreOperationUVE, WaitSemaphoreOperationUVE>;
+                 QueryOperationUVE, SignalSemaphoreOperationUVE, WaitSemaphoreOperationUVE,
+                 SubmitSyncOperationUVE>;
 } // namespace UVE::Render

@@ -282,12 +282,58 @@ public:
     /// stays single-threaded (the GPU-timeline owner).
     virtual void SubmitUVE(std::unique_ptr<ICommandBufferUVE> commandBuffer) = 0;
 
+    /// Creates a binary (submission-scoped) semaphore: signalled by exactly one submission and
+    /// consumed by exactly one wait, with no CPU-visible counter. Handles created here are only
+    /// accepted by SubmitWithSyncUVE / DestroyBinarySemaphoreUVE, never by the timeline
+    /// semaphore calls — the two handle types are distinct on purpose.
+    /// Backends that cannot express queue-level semaphores (GL) return `Unsupported` and report
+    /// `submitSync` as `Unsupported` in their capabilities.
+    [[nodiscard]] virtual RenderOperationResultUVE CreateBinarySemaphoreUVE(BinarySemaphoreHandleUVE &) {
+        return RenderOperationResultUVE::Unsupported;
+    }
+
+    /// Destroys a binary semaphore. Refused with `InvalidState` while the semaphore is still
+    /// referenced by the current frame's recorded sync or by a submitted frame that has not
+    /// provably completed, because destroying it there would be undefined driver usage.
+    [[nodiscard]] virtual RenderOperationResultUVE DestroyBinarySemaphoreUVE(BinarySemaphoreHandleUVE) {
+        return RenderOperationResultUVE::Unsupported;
+    }
+
+    /// Submits a command buffer with submission-level binary semaphore sync: this frame's
+    /// submission waits on `sync.waits` (at the declared stages) and signals `sync.signals`.
+    /// Consumes `commandBuffer` under the same ownership and threading contract as SubmitUVE,
+    /// and an empty sync is exactly SubmitUVE — backends without queue-level semaphores (GL)
+    /// still accept that case and refuse any non-empty sync with `Unsupported`.
+    ///
+    /// Unlike the void SubmitUVE, this op reports: a null or foreign command buffer is
+    /// `InvalidArgument`, and so is any shape problem (`IsSubmitSyncShapeValidUVE`: over-capacity
+    /// counts, an undefined wait stage, or the same semaphore named twice) — neither with any
+    /// frame effect. Granularity, stated honestly: sync attaches to the whole
+    /// frame submission — the granularity the frame FIFO this RHI already has (commands queue up
+    /// in SubmitUVE and reach the queue with the next PresentUVE). A refused call has no frame
+    /// effect at all, and these two rules are what makes that possible:
+    ///   - a wait needs an unconsumed signal from a frame that was already submitted, so a wait
+    ///     that nothing has signalled — including a signal recorded in the same frame, which
+    ///     would be a self-wait the queue can never satisfy — is `InvalidState`, never a hang;
+    ///   - a signal needs the semaphore to be unsignalled, and each semaphore may play at most
+    ///     one role per frame (`SubmitSyncRoleUVE`), so one signal is consumed by exactly one
+    ///     wait. A caller ping-ponging a single semaphore inside one frame is told to use two
+    ///     semaphores instead, which is what the swapchain-style double buffer is for.
+    [[nodiscard]] virtual RenderOperationResultUVE SubmitWithSyncUVE(
+        std::unique_ptr<ICommandBufferUVE> commandBuffer, const SubmitSyncUVE &sync) {
+        static_cast<void>(commandBuffer);
+        static_cast<void>(sync);
+        return RenderOperationResultUVE::Unsupported;
+    }
+
     /// Presents the backend's default framebuffer (the window's back buffer), analogous to a
     /// real Vulkan/D3D12 swapchain's present call — a distinct, explicit step after command
     /// buffer submission, matching this RHI's own "modern explicit" design. Call once per frame,
-    /// after SubmitUVE(). NullRenderDeviceUVE's implementation is a bookkeeping no-op (see
-    /// GetPresentCallCountUVE()); a windowless backend that never renders to a window has nothing
-    /// meaningful to do here either.
+    /// after SubmitUVE(). This is also the point where a frame submission carrying
+    /// SubmitWithSyncUVE sync actually reaches the queue: a frame that is skipped (no drawable
+    /// surface) drops its recorded sync along with its command buffers. NullRenderDeviceUVE's
+    /// implementation is a bookkeeping no-op (see GetPresentCallCountUVE()); a windowless backend
+    /// that never renders to a window has nothing meaningful to do here either.
     virtual void PresentUVE() = 0;
 
     /// True when the backend can safely accept resource/command calls. A device can become

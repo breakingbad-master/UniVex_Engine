@@ -50,6 +50,14 @@ public:
     [[nodiscard]] RenderOperationResultUVE WaitSemaphoreUVE(SemaphoreHandleUVE, std::uint64_t,
                                                             std::uint64_t) override;
     [[nodiscard]] RenderOperationResultUVE DestroySemaphoreUVE(SemaphoreHandleUVE) override;
+    /// Submission-level (binary) semaphores: real frame-scoped signal/wait state. A recorded
+    /// signal becomes consumable at PresentUVE() — the backend's frame boundary — and a wait is
+    /// refused (InvalidState) unless a submitted signal is still unconsumed, so this model can
+    /// never "wait" on something nothing ever signalled.
+    [[nodiscard]] RenderOperationResultUVE CreateBinarySemaphoreUVE(BinarySemaphoreHandleUVE &) override;
+    [[nodiscard]] RenderOperationResultUVE DestroyBinarySemaphoreUVE(BinarySemaphoreHandleUVE) override;
+    [[nodiscard]] RenderOperationResultUVE SubmitWithSyncUVE(std::unique_ptr<ICommandBufferUVE>,
+                                                            const SubmitSyncUVE &) override;
     [[nodiscard]] RenderOperationResultUVE CreateQueryUVE(RenderQueryKindUVE, QueryHandleUVE &) override;
     [[nodiscard]] RenderOperationResultUVE BeginQueryUVE(QueryHandleUVE) override;
     [[nodiscard]] RenderOperationResultUVE EndQueryUVE(QueryHandleUVE) override;

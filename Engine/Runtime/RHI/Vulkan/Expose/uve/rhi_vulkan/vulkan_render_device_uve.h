@@ -256,6 +256,17 @@ public:
     [[nodiscard]] RenderOperationResultUVE WaitSemaphoreUVE(SemaphoreHandleUVE, std::uint64_t,
                                                             std::uint64_t) override;
     [[nodiscard]] RenderOperationResultUVE DestroySemaphoreUVE(SemaphoreHandleUVE) override;
+    /// Submission-level binary semaphores: real VK_SEMAPHORE_TYPE_BINARY objects, attached to the
+    /// frame's vkQueueSubmit by SubmitWithSyncUVE (waits become pWaitSemaphores entries with the
+    /// caller's stage, signals pSignalSemaphores entries). They are frame-scoped because this
+    /// backend submits a frame at PresentUVE: a signal becomes consumable credits only once that
+    /// frame's submit succeeded, and a wait whose signal was never submitted is refused with
+    /// InvalidState instead of deadlocking the queue. Destroying one that a recorded or
+    /// in-flight frame still names is refused for the same reason.
+    [[nodiscard]] RenderOperationResultUVE CreateBinarySemaphoreUVE(BinarySemaphoreHandleUVE &) override;
+    [[nodiscard]] RenderOperationResultUVE DestroyBinarySemaphoreUVE(BinarySemaphoreHandleUVE) override;
+    [[nodiscard]] RenderOperationResultUVE SubmitWithSyncUVE(std::unique_ptr<ICommandBufferUVE>,
+                                                            const SubmitSyncUVE &) override;
     [[nodiscard]] RenderOperationResultUVE WaitIdleUVE() override;
     [[nodiscard]] RenderOperationResultUVE GetSurfaceInfoUVE(RenderSurfaceInfoUVE &) const override;
     // Occlusion queries retain the interface's explicit Unsupported contract; the capability

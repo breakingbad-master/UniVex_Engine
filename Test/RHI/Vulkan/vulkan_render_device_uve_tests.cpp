@@ -463,6 +463,98 @@ TEST_F(VulkanRenderDeviceUVETest, TimelineSemaphoresProvideRealCountersAndHonest
     EXPECT_EQ(device->WaitIdleUVE(), ResultUVE::Success);
 }
 
+TEST_F(VulkanRenderDeviceUVETest, BinarySubmitSyncDrivesRealFrameSubmissions) {
+    using ResultUVE = RenderOperationResultUVE;
+    ASSERT_EQ(device->GetCapabilitiesUVE().submitSync, RenderFeatureSupportUVE::Native)
+        << "binary semaphores need only core-1.0 vkCreateSemaphore, which every usable device has";
+
+    BinarySemaphoreHandleUVE semaphore;
+    ASSERT_EQ(device->CreateBinarySemaphoreUVE(semaphore), ResultUVE::Success);
+    EXPECT_NE(semaphore, kInvalidBinarySemaphoreHandleUVE);
+
+    // Shape problems and foreign handles are reported before anything reaches the queue.
+    SubmitSyncUVE overfilled;
+    overfilled.signalCount = SubmitSyncUVE::kMaxSignalsUVE + 1U;
+    EXPECT_EQ(device->SubmitWithSyncUVE(device->CreateCommandBufferUVE(), overfilled),
+              ResultUVE::InvalidArgument);
+    SubmitSyncUVE bothRoles;
+    bothRoles.waitCount = 1U;
+    bothRoles.waitStages[0] = SubmitWaitStageUVE::AllCommands;
+    bothRoles.waits[0] = semaphore;
+    bothRoles.signalCount = 1U;
+    bothRoles.signals[0] = semaphore;
+    EXPECT_EQ(device->SubmitWithSyncUVE(device->CreateCommandBufferUVE(), bothRoles),
+              ResultUVE::InvalidArgument)
+        << "waiting on the semaphore this submit signals is a self-wait";
+    SubmitSyncUVE unknownWait;
+    unknownWait.waitCount = 1U;
+    unknownWait.waitStages[0] = SubmitWaitStageUVE::Transfer;
+    unknownWait.waits[0] = BinarySemaphoreHandleUVE{999999U};
+    EXPECT_EQ(device->SubmitWithSyncUVE(device->CreateCommandBufferUVE(), unknownWait),
+              ResultUVE::InvalidHandle);
+    SubmitSyncUVE unknownSignal;
+    unknownSignal.signalCount = 1U;
+    unknownSignal.signals[0] = BinarySemaphoreHandleUVE{999999U};
+    EXPECT_EQ(device->SubmitWithSyncUVE(device->CreateCommandBufferUVE(), unknownSignal),
+              ResultUVE::InvalidHandle);
+    EXPECT_EQ(device->SubmitWithSyncUVE(nullptr, SubmitSyncUVE{}), ResultUVE::InvalidArgument);
+
+    SubmitSyncUVE waitOnly;
+    waitOnly.waitCount = 1U;
+    waitOnly.waitStages[0] = SubmitWaitStageUVE::AllCommands;
+    waitOnly.waits[0] = semaphore;
+    EXPECT_EQ(device->SubmitWithSyncUVE(device->CreateCommandBufferUVE(), waitOnly),
+              ResultUVE::InvalidState)
+        << "nothing has signalled it, so the wait would block the queue forever";
+
+    // Frame 1 signals it for real (the frame's own swapchain semaphores ride the same submit).
+    SubmitSyncUVE signalOnly;
+    signalOnly.signalCount = 1U;
+    signalOnly.signals[0] = semaphore;
+    ASSERT_EQ(device->SubmitWithSyncUVE(device->CreateCommandBufferUVE(), signalOnly),
+              ResultUVE::Success);
+    EXPECT_EQ(device->DestroyBinarySemaphoreUVE(semaphore), ResultUVE::InvalidState)
+        << "the recorded frame still names it";
+    device->PresentUVE();
+    ASSERT_TRUE(device->IsUsableUVE());
+    EXPECT_EQ(device->DestroyBinarySemaphoreUVE(semaphore), ResultUVE::InvalidState)
+        << "a submitted frame may still be executing its signal";
+    ASSERT_EQ(device->WaitIdleUVE(), ResultUVE::Success);
+
+    // Frame 2 waits on that signal: the queue must actually satisfy it, not hang.
+    ASSERT_EQ(device->SubmitWithSyncUVE(device->CreateCommandBufferUVE(), waitOnly), ResultUVE::Success);
+    device->PresentUVE();
+    ASSERT_TRUE(device->IsUsableUVE());
+    ASSERT_EQ(device->WaitIdleUVE(), ResultUVE::Success)
+        << "a wait on a submitted signal must be satisfiable";
+
+    // The signal was consumed by that wait, so it can be signalled again — but not waited on
+    // again, and re-signalling while a signal is still unconsumed stays refused.
+    SubmitSyncUVE resignal;
+    resignal.signalCount = 1U;
+    resignal.signals[0] = semaphore;
+    ASSERT_EQ(device->SubmitWithSyncUVE(device->CreateCommandBufferUVE(), resignal), ResultUVE::Success);
+    EXPECT_EQ(device->SubmitWithSyncUVE(device->CreateCommandBufferUVE(), resignal),
+              ResultUVE::InvalidArgument)
+        << "one role per semaphore per frame";
+    EXPECT_EQ(device->SubmitWithSyncUVE(device->CreateCommandBufferUVE(), waitOnly),
+              ResultUVE::InvalidArgument)
+        << "a self-wait inside the frame that signals is refused";
+    device->PresentUVE();
+    ASSERT_TRUE(device->IsUsableUVE());
+    EXPECT_EQ(device->SubmitWithSyncUVE(device->CreateCommandBufferUVE(), resignal), ResultUVE::InvalidState)
+        << "an unconsumed signal cannot be signalled again";
+    ASSERT_EQ(device->WaitIdleUVE(), ResultUVE::Success);
+    EXPECT_EQ(device->DestroyBinarySemaphoreUVE(semaphore), ResultUVE::Success);
+    EXPECT_EQ(device->DestroyBinarySemaphoreUVE(semaphore), ResultUVE::InvalidHandle);
+
+    // An empty sync is the plain SubmitUVE path, and the frame still presents.
+    ASSERT_EQ(device->SubmitWithSyncUVE(device->CreateCommandBufferUVE(), SubmitSyncUVE{}), ResultUVE::Success);
+    device->PresentUVE();
+    EXPECT_TRUE(device->IsUsableUVE());
+    EXPECT_EQ(device->WaitIdleUVE(), ResultUVE::Success);
+}
+
 TEST_F(VulkanRenderDeviceUVETest, StencilPipelineAndDepthStencilTextureCreateOnDynamicDevice) {
     ShaderDescUVE vertexDesc{};
     vertexDesc.stage = ShaderStageUVE::Vertex;

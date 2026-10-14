@@ -1286,6 +1286,38 @@ void GlRenderDeviceUVE::SubmitUVE(std::unique_ptr<ICommandBufferUVE> commandBuff
     // command buffer is simply released here.
 }
 
+RenderOperationResultUVE GlRenderDeviceUVE::CreateBinarySemaphoreUVE(BinarySemaphoreHandleUVE &) {
+    // GL has no queue-level semaphore: glFenceSync/glWaitSync order commands within one context,
+    // and there is no second queue an OpenGL context could hand work to. Reporting Unsupported is
+    // the honest answer — a handle that could never be waited on by anything would be worse.
+    UVE_ERROR("GlRenderDeviceUVE: CreateBinarySemaphoreUVE is unsupported (OpenGL has no "
+              "queue-level semaphores)");
+    return RenderOperationResultUVE::Unsupported;
+}
+
+RenderOperationResultUVE GlRenderDeviceUVE::DestroyBinarySemaphoreUVE(BinarySemaphoreHandleUVE) {
+    UVE_ERROR("GlRenderDeviceUVE: DestroyBinarySemaphoreUVE is unsupported (no binary semaphore "
+              "can be created on this backend)");
+    return RenderOperationResultUVE::Unsupported;
+}
+
+RenderOperationResultUVE GlRenderDeviceUVE::SubmitWithSyncUVE(std::unique_ptr<ICommandBufferUVE> commandBuffer,
+                                                              const SubmitSyncUVE &sync) {
+    if (!IsUsableUVE())
+        return RenderOperationResultUVE::DeviceUnavailable;
+    if (!IsSubmitSyncShapeValidUVE(sync))
+        return RenderOperationResultUVE::InvalidArgument;
+    // Every GL call already executed during recording, so an empty sync is exactly SubmitUVE:
+    // the buffer is released and there is nothing left to order.
+    if (!IsSubmitSyncEmptyUVE(sync)) {
+        UVE_ERROR("GlRenderDeviceUVE: SubmitWithSyncUVE refused a non-empty sync (OpenGL has no "
+                  "queue-level semaphores; commands already executed at record time)");
+        return RenderOperationResultUVE::Unsupported;
+    }
+    SubmitUVE(std::move(commandBuffer));
+    return RenderOperationResultUVE::Success;
+}
+
 void GlRenderDeviceUVE::PresentUVE() {
     if (IsUsableUVE()) {
         CollectRetiredTexturesUVE();

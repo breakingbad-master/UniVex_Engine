@@ -811,7 +811,10 @@ untouched. Missing capabilities explicitly return `Unsupported`, never pretend s
   position, "untouched texel" assertions against a Vulkan image whose contents were never
   defined, and a multi-mip texture created without the initial upload that
   `ValidateTextureUploadUVE` requires. Those fixtures now seed every level and region they
-  assert on, and are awaiting a green rerun.
+  assert on: the native rerun on `38524205762` (the merge of PR #10, `10455561`) passed every
+  GL geometry pixel case and every Vulkan transfer case, and the only two failures left in
+  that run were the timeline-semaphore probe and a stale timestamp fixture, both fixed after
+  it (see below).
   Depth/stencil blits and format conversion stay outside this color-transfer contract.
 - **Queries:** real GL GPU timestamps and any-sample occlusion with state/lifetime validation
   and nonblocking result polling. Null records query operations but NEVER invents visibility or
@@ -832,11 +835,13 @@ untouched. Missing capabilities explicitly return `Unsupported`, never pretend s
   mutex and condition variable, `TimedOut` on expiry, refused non-increasing signals, and
   `InvalidHandle` when the semaphore is destroyed under a waiter), which makes
   `TimelineSemaphoreUVETest`'s six cases genuine concurrency tests. Vulkan creates its own
-  timeline semaphores when the 1.2 feature and entry points are present and reports
-  `Unsupported` otherwise; GL reports `Unsupported` for every call instead of modelling a
-  queue-sync primitive it cannot honor. Binary (queue-to-queue) semaphores remain outside the
-  API on purpose: they only mean something as submission parameters, and `SubmitUVE` owns the
-  backend's frame submission — an explicit boundary, not a silent gap.
+  timeline semaphores when the 1.2 feature and entry points are present (both stages of the
+  check are described under submit sync below) and reports `Unsupported` otherwise; GL reports
+  `Unsupported` for every call instead of modelling a queue-sync primitive it cannot honor.
+  Binary (queue-to-queue) semaphores are a separate, submission-scoped surface rather than part
+  of this counter API — `CreateBinarySemaphoreUVE` and `SubmitWithSyncUVE` below — because they
+  only mean something as submission parameters; keeping them out of the timeline calls is what
+  stops a counter with no CPU-visible value from looking like one.
 - **Surface view:** `RenderSurfaceUVE` exposes the backend-owned default surface/swapchain's
   current drawable extent and presentation boundary, without duplicating window or swapchain
   ownership. GL/Vulkan provide actual surface metadata; Null explicitly has no native surface.
@@ -849,13 +854,48 @@ and timestamp ordering; two Vulkan tests verify copies/fences and the deferred-C
 Native sources/tests pass strict syntax checks against real headers. Graphics-capable CI run
 `38429697106` on `012f69f` passed the native suite, including the new operations and the unchanged
 shadow pixel comparisons after correcting their sampler setup. This closes the earlier execution-
-verification gap, not the explicitly unsupported Vulkan operations. Semaphores/timelines
-are implemented as timeline objects (`CreateSemaphoreUVE` and friends, above); the
-`[ ]` that remains is *submission-level* queue sync (binary semaphores as `SubmitUVE`
-parameters), which is not closed by a CPU-visible counter. Vulkan texture-transfer parity is
-implemented and awaiting native CI execution; Vulkan timestamps are implemented and awaiting
-the same native run, while Vulkan occlusion queries and GPU/Hi-Z occlusion consumers remain
-explicitly unsupported/absent.
+verification gap, not the explicitly unsupported Vulkan operations. Timeline semaphores are
+implemented (`CreateSemaphoreUVE` and friends, above), and *submission-level* queue sync landed
+afterwards as its own surface rather than being smuggled into the counter API:
+`CreateBinarySemaphoreUVE` / `DestroyBinarySemaphoreUVE` / `SubmitWithSyncUVE` carry a
+`SubmitSyncUVE` of up to four waits (each with a `SubmitWaitStageUVE`) and four signals.
+Vulkan attaches them to the frame's real `vkQueueSubmit` — waits join `pWaitSemaphores` with
+the caller's stage, signals join `pSignalSemaphores` — and reports `submitSync` as `Native`;
+Null keeps the same frame-scoped rules with real signal/wait state and reports `Model`; GL has
+one command stream and no queue semaphore, so it reports `Unsupported` and refuses any
+non-empty sync while still accepting an empty one (which is exactly `SubmitUVE`, since every GL
+call already ran during recording). Two rules make the surface safe instead of merely
+available: a wait needs an unconsumed signal from an already-submitted frame (so a wait nothing
+has signalled, including a signal recorded in the same frame, is `InvalidState` instead of a
+hang the queue can never recover from), and a signal needs the semaphore to be unsignalled with
+one role per semaphore per frame (`SubmitSyncRoleUVE`), so one signal is consumed by exactly one
+wait. Both backends share the structural half of the contract
+(`IsSubmitSyncShapeValidUVE`, `HasSubmitSyncRepeatedHandleUVE`) and the role type, so the
+accept/refuse decision cannot drift between them; a dropped frame returns the credits its waits
+spent, and destroying a semaphore a recorded or in-flight frame still names is refused. Seven
+`SubmitSyncUVETest` cases cover the shape rules, the frame-scoped credit ledger, refusals that
+must leave the frame untouched, history arguments and concurrent submissions; the native
+Vulkan double-frame signal→wait case and the GL refusals live in the device suites. Local
+full strict Debug CTest after this batch: **4,170 cases, zero failures, seven existing Vulkan
+capability skips**; the two native Vulkan/GL suites compile under strict `-Werror` syntax
+checks here and execute on CI, which is where their real assertions run. Vulkan
+texture-transfer parity is implemented and awaiting native CI execution; Vulkan timestamps are
+implemented and awaiting the same native run, while Vulkan occlusion queries and GPU/Hi-Z
+occlusion consumers remain explicitly unsupported/absent.
+
+Timeline-semaphore bring-up correction (2026-10-14): the first cut probed
+`vkGetSemaphoreCounterValue`/`vkWaitSemaphores`/`vkSignalSemaphore` *before* `vkCreateDevice`,
+but those are device-level entries, so the pre-create table could never carry them and every
+host — including lavapipe — was reported `Unsupported` while never requesting the feature.
+The probe now reads only the 1.2 feature bit before creation and a `timelineSemaphoresEnabled`
+flag is computed after `vkCreateDevice`/`LoadDeviceUVE` from the real entry-point table, the
+same two-stage handshake the dynamic-rendering path already used; a loader without the entries
+now warns instead of silently degrading. Native CI caught this: run `38524205762` on the merge
+of PR #10 (`10455561`) was red on exactly two cases, this one plus the older
+`FoundationFencesDoNotPretendPendingCpuSubmissionsHaveExecuted` fixture that still hard-coded
+`CreateQueryUVE(Timestamp) == Unsupported` from before timestamps landed. That fixture now
+exercises the refusal path with the still-pinned occlusion kind and cross-checks the timestamp
+kind against its own capability report, so neither failure remains.
 
 `[/]` **Stencil state** — `StencilStateUVE`/`StencilFaceStateUVE` are appended to both
 pipeline descriptors with disabled legacy defaults. Front/back compare, operations,

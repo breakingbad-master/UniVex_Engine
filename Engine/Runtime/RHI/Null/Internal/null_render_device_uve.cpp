@@ -60,6 +60,25 @@ struct NullRenderDeviceUVE::ImplUVE {
     std::condition_variable semaphoreCondition;
     std::unordered_map<std::uint32_t, SemaphoreRecordUVE> semaphores;
     std::uint32_t nextSemaphore = 1U;
+    // Submission-level (binary) semaphores. Signal/wait state is frame-scoped because that is
+    // where this backend's frame boundary is: a recorded signal becomes consumable only when
+    // PresentUVE() finishes the frame that carries it, exactly as the Vulkan backend's frame
+    // submission is what signals it. `credits` counts signals a presented frame has already
+    // submitted and no accepted wait has consumed yet (one signal pairs with one wait), which is
+    // what lets a wait on a never-signalled semaphore be refused instead of "succeeding" against
+    // nothing. `inFlight` counts uses by a submitted frame that frame completion has not released
+    // yet, so Null refuses destroying a semaphore the same way the Vulkan backend does while the
+    // queue could still be executing the submission that names it.
+    struct BinarySemaphoreRecordUVE {
+        std::uint64_t credits = 0U;
+        std::uint32_t inFlight = 0U;
+        SubmitSyncRoleUVE frameRole = SubmitSyncRoleUVE::None;
+    };
+    std::unordered_map<std::uint32_t, BinarySemaphoreRecordUVE> binarySemaphores;
+    std::uint32_t nextBinarySemaphore = 1U;
+    /// Handles the last presented frame named; released when that frame is known complete
+    /// (WaitIdleUVE, or the next PresentUVE — the same two points the Vulkan backend uses).
+    std::vector<std::uint32_t> submittedFrameBinarySemaphores;
     std::unordered_map<std::uint32_t, QueryRecordUVE> queries;
     std::uint32_t nextQuery = 1U, activeOcclusion = 0U;
     std::vector<RecordedDeviceOperationUVE> operations;
@@ -390,6 +409,28 @@ void NullRenderDeviceUVE::SubmitUVE(std::unique_ptr<ICommandBufferUVE> commandBu
 void NullRenderDeviceUVE::PresentUVE() {
     CollectRetiredTexturesUVE();
     ++m_impl->presentCallCount;
+    // Frame boundary for submission-level sync, and the same two steps the Vulkan backend runs
+    // around its frame fence: first the frame being replaced is complete (its semaphores are no
+    // longer in flight), then every signal recorded during the presenting frame becomes
+    // consumable and its per-frame role clears so the next frame starts clean.
+    for (const std::uint32_t handleValue : m_impl->submittedFrameBinarySemaphores) {
+        const auto record = m_impl->binarySemaphores.find(handleValue);
+        if (record != m_impl->binarySemaphores.end() && record->second.inFlight != 0U)
+            --record->second.inFlight;
+    }
+    m_impl->submittedFrameBinarySemaphores.clear();
+    for (auto &[handle, record] : m_impl->binarySemaphores) {
+        static_cast<void>(handle);
+        if (record.frameRole == SubmitSyncRoleUVE::Signal) {
+            ++record.credits;
+            ++record.inFlight;
+            m_impl->submittedFrameBinarySemaphores.push_back(handle);
+        } else if (record.frameRole == SubmitSyncRoleUVE::Wait) {
+            ++record.inFlight;
+            m_impl->submittedFrameBinarySemaphores.push_back(handle);
+        }
+        record.frameRole = SubmitSyncRoleUVE::None;
+    }
 }
 
 bool NullRenderDeviceUVE::IsUsableUVE() const noexcept {
@@ -407,7 +448,8 @@ const std::vector<RecordedCommandUVE>& NullRenderDeviceUVE::GetLastSubmittedComm
 std::size_t NullRenderDeviceUVE::GetLiveResourceCountUVE() const noexcept {
     return m_impl->buffers.size() + m_impl->textures.size() + m_impl->samplers.size() +
            m_impl->shaders.size() + m_impl->pipelines.size() + m_impl->computePipelines.size() +
-           m_impl->fences.size() + m_impl->queries.size();
+           m_impl->fences.size() + m_impl->queries.size() + m_impl->semaphores.size() +
+           m_impl->binarySemaphores.size();
 }
 
 std::vector<TextureDescUVE> NullRenderDeviceUVE::GetLiveTextureDescsUVE() const {
@@ -443,10 +485,17 @@ std::uint64_t NullRenderDeviceUVE::GetPresentCallCountUVE() const noexcept {
 namespace UVE::Render {
 RenderDeviceCapabilitiesUVE NullRenderDeviceUVE::GetCapabilitiesUVE() const noexcept {
     const auto model = RenderFeatureSupportUVE::Model;
-    RenderDeviceCapabilitiesUVE caps{model, model, model, model, model, model, model,
-                                     RenderFeatureSupportUVE::Unsupported, model};
-    caps.geometryShaders = model;
+    // Named assignments, not a positional aggregate: the capability set grows, and a positional
+    // list silently shifts every field the moment one is inserted before another.
+    RenderDeviceCapabilitiesUVE caps;
+    caps.fences = caps.memoryBarriers = caps.bufferCopy = caps.textureBlit = caps.mipGeneration =
+        caps.timestampQueries = caps.occlusionQueries = caps.retainedTextures = model;
+    // No native surface exists in the Null model, so the surface capability — and the operations
+    // that would need one — stay Unsupported even though the queries above are recorded.
+    caps.surface = RenderFeatureSupportUVE::Unsupported;
     caps.timelineSemaphores = model;
+    caps.submitSync = model;
+    caps.geometryShaders = model;
     return caps;
 }
 RenderOperationResultUVE NullRenderDeviceUVE::GetTextureDescUVE(TextureHandleUVE handle,
@@ -510,6 +559,15 @@ RenderOperationResultUVE NullRenderDeviceUVE::DestroyFenceUVE(FenceHandleUVE han
 }
 RenderOperationResultUVE NullRenderDeviceUVE::WaitIdleUVE() {
     CollectRetiredTexturesUVE();
+    // Frame completion: whatever the last presentation submitted is done, so the binary
+    // semaphores it named are no longer in flight (the Vulkan backend releases the same state
+    // after vkQueueWaitIdle) and may be destroyed.
+    for (const std::uint32_t handleValue : m_impl->submittedFrameBinarySemaphores) {
+        const auto record = m_impl->binarySemaphores.find(handleValue);
+        if (record != m_impl->binarySemaphores.end() && record->second.inFlight != 0U)
+            --record->second.inFlight;
+    }
+    m_impl->submittedFrameBinarySemaphores.clear();
     return RenderOperationResultUVE::Recorded;
 }
 RenderOperationResultUVE NullRenderDeviceUVE::CreateSemaphoreUVE(const SemaphoreDescUVE &desc,
@@ -588,6 +646,101 @@ RenderOperationResultUVE NullRenderDeviceUVE::DestroySemaphoreUVE(const Semaphor
     }
     m_impl->semaphoreCondition.notify_all();
     return RenderOperationResultUVE::Success;
+}
+
+RenderOperationResultUVE NullRenderDeviceUVE::CreateBinarySemaphoreUVE(BinarySemaphoreHandleUVE &output) {
+    if (m_impl->nextBinarySemaphore == 0U)
+        return RenderOperationResultUVE::SystemError;
+    const BinarySemaphoreHandleUVE handle{m_impl->nextBinarySemaphore++};
+    m_impl->binarySemaphores.emplace(handle.value, ImplUVE::BinarySemaphoreRecordUVE{});
+    output = handle;
+    return RenderOperationResultUVE::Recorded;
+}
+
+RenderOperationResultUVE NullRenderDeviceUVE::DestroyBinarySemaphoreUVE(const BinarySemaphoreHandleUVE semaphore) {
+    const auto found = m_impl->binarySemaphores.find(semaphore.value);
+    if (found == m_impl->binarySemaphores.end()) {
+        UVE_ERROR("NullRenderDeviceUVE: DestroyBinarySemaphoreUVE called with an unknown or "
+                  "already-destroyed handle ({})",
+                  semaphore.value);
+        return RenderOperationResultUVE::InvalidHandle;
+    }
+    if (found->second.frameRole != SubmitSyncRoleUVE::None || found->second.inFlight != 0U) {
+        // Destroying a semaphore still referenced by this frame's recorded sync — or by a frame
+        // the queue may still be executing — would leave a submission naming a destroyed object;
+        // the Vulkan backend refuses for exactly the same reason rather than handing the driver
+        // a dangling handle.
+        UVE_ERROR("NullRenderDeviceUVE: DestroyBinarySemaphoreUVE refused while the frame still "
+                  "references semaphore {}",
+                  semaphore.value);
+        return RenderOperationResultUVE::InvalidState;
+    }
+    m_impl->binarySemaphores.erase(found);
+    return RenderOperationResultUVE::Success;
+}
+
+RenderOperationResultUVE NullRenderDeviceUVE::SubmitWithSyncUVE(std::unique_ptr<ICommandBufferUVE> commandBuffer,
+                                                                const SubmitSyncUVE &sync) {
+    if (!IsSubmitSyncShapeValidUVE(sync))
+        return RenderOperationResultUVE::InvalidArgument;
+    // Null keeps no invented queue: like SubmitUVE it refuses a foreign buffer outright instead
+    // of recording work it cannot attribute to this device.
+    if (commandBuffer == nullptr || dynamic_cast<NullCommandBufferUVE*>(commandBuffer.get()) == nullptr) {
+        if (commandBuffer != nullptr) {
+            UVE_ERROR("NullRenderDeviceUVE::SubmitWithSyncUVE: command buffer was not created by "
+                      "this device");
+        }
+        return RenderOperationResultUVE::InvalidArgument;
+    }
+
+    // Validate the whole sync before touching any state: a refused submission must leave the
+    // frame exactly as it was.
+    for (std::uint32_t index = 0U; index < sync.waitCount; ++index) {
+        const auto found = m_impl->binarySemaphores.find(sync.waits[index].value);
+        if (found == m_impl->binarySemaphores.end())
+            return RenderOperationResultUVE::InvalidHandle;
+        if (found->second.frameRole != SubmitSyncRoleUVE::None)
+            return RenderOperationResultUVE::InvalidArgument; // one role per semaphore per frame
+        if (found->second.credits == 0U) {
+            UVE_ERROR("NullRenderDeviceUVE::SubmitWithSyncUVE refused a wait on semaphore {}: no "
+                      "submitted signal is left to consume",
+                      sync.waits[index].value);
+            return RenderOperationResultUVE::InvalidState;
+        }
+    }
+    for (std::uint32_t index = 0U; index < sync.signalCount; ++index) {
+        const auto found = m_impl->binarySemaphores.find(sync.signals[index].value);
+        if (found == m_impl->binarySemaphores.end())
+            return RenderOperationResultUVE::InvalidHandle;
+        if (found->second.frameRole != SubmitSyncRoleUVE::None)
+            return RenderOperationResultUVE::InvalidArgument; // one role per semaphore per frame
+        if (found->second.credits != 0U) {
+            // A binary semaphore can only be signalled while it is unsignalled: an unconsumed
+            // signal from an earlier frame is still sitting on the queue, and signalling it
+            // again is invalid usage on every backend that models this.
+            UVE_ERROR("NullRenderDeviceUVE::SubmitWithSyncUVE refused a signal on semaphore {}: a "
+                      "submitted signal is still unconsumed",
+                      sync.signals[index].value);
+            return RenderOperationResultUVE::InvalidState;
+        }
+    }
+    for (std::uint32_t index = 0U; index < sync.waitCount; ++index) {
+        auto &record = m_impl->binarySemaphores.at(sync.waits[index].value);
+        record.frameRole = SubmitSyncRoleUVE::Wait;
+        --record.credits; // consumed by this frame's wait, whether or not the frame is later skipped
+    }
+    for (std::uint32_t index = 0U; index < sync.signalCount; ++index)
+        m_impl->binarySemaphores.at(sync.signals[index].value).frameRole = SubmitSyncRoleUVE::Signal;
+
+    // Same spy write as SubmitUVE: the recorded list is what a real queue would have executed,
+    // in submission order; the sync rides the frame, so it flips state at PresentUVE().
+    auto* const nullCommandBuffer = static_cast<NullCommandBufferUVE*>(commandBuffer.get());
+    {
+        const std::lock_guard<std::mutex> submissionLock(m_impl->submissionMutex);
+        m_impl->lastSubmittedCommands = nullCommandBuffer->GetRecordedCommandsUVE();
+    }
+    m_impl->RecordUVE(SubmitSyncOperationUVE{sync});
+    return RenderOperationResultUVE::Recorded;
 }
 
 RenderOperationResultUVE NullRenderDeviceUVE::CreateQueryUVE(RenderQueryKindUVE kind,
